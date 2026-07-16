@@ -1,81 +1,487 @@
 import { useRouter } from 'expo-router';
-import { StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Card, MetricTile, Pill, RouteBand, Screen } from '@/components';
-import { colors, spacing, type } from '@/theme';
+import {
+  Button,
+  Card,
+  GradeBadge,
+  MetricTile,
+  Pill,
+  RouteBand,
+  TopoBackground,
+  WidgetCard,
+} from '@/components';
+import { useBoard } from '@/data/useBoard';
+import type { BoardData } from '@/mock/board';
+import { Role, useOnboardingStore } from '@/store/onboarding';
+import { colors, fonts, palette, radii, spacing, toneColors, Tone, type } from '@/theme';
 
-/**
- * Home command center (Loop 2). Empty state until the capture, load, mileage,
- * and RPM loops land — every band already navigates like the real board will.
- */
+const usd = (n: number) => `$${Math.round(n).toLocaleString()}`;
+const rpm = (n: number) => `$${n.toFixed(2)}`;
+
+const ROLE_LABEL: Record<Role, string> = {
+  company_driver: 'Company Driver',
+  owner_operator: 'Owner-Operator',
+  small_fleet: 'Small Fleet',
+  hotshot_local: 'Hotshot / Local',
+};
+
 export default function DashboardScreen() {
+  const insets = useSafeAreaInsets();
   const router = useRouter();
+  const role = useOnboardingStore((s) => s.role);
+  const { data, isPending, isError, refetch } = useBoard();
 
   return (
-    <Screen
-      kicker="Command Center"
-      title="Your road board is ready."
-      headerRight={<Pill label="This Week" tone="blue" />}
-    >
+    <View style={styles.root}>
+      <TopoBackground opacity={0.1} />
+      <ScrollView
+        contentContainerStyle={[
+          styles.content,
+          { paddingTop: insets.top + spacing.md, paddingBottom: spacing.xxl * 3 },
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
+        <Header role={role} onProfile={() => router.push('/reports')} />
+
+        {isPending ? (
+          <LoadingState />
+        ) : isError || !data ? (
+          <ErrorState onRetry={() => refetch()} />
+        ) : (
+          <Board data={data} onNavigate={(path) => router.push(path)} />
+        )}
+      </ScrollView>
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Header (logo, week, profile selector, notifications)
+// ---------------------------------------------------------------------------
+
+function Header({ role, onProfile }: { role: Role | null; onProfile: () => void }) {
+  const initials = role ? ROLE_LABEL[role].slice(0, 2).toUpperCase() : 'RR';
+  return (
+    <View style={styles.header}>
+      <View style={styles.logoRow}>
+        <View style={styles.logoMark}>
+          <Text style={styles.logoLetter}>R</Text>
+        </View>
+        <Text style={styles.brand}>RigReceipts</Text>
+      </View>
+      <View style={styles.headerActions}>
+        <Pressable accessibilityLabel="Search" style={styles.iconBtn}>
+          <Text style={styles.iconGlyph}>⌕</Text>
+        </Pressable>
+        <Pressable accessibilityLabel="Notifications" style={styles.iconBtn}>
+          <Text style={styles.iconGlyph}>◔</Text>
+        </Pressable>
+        <Pressable accessibilityLabel="Profile" onPress={onProfile} style={styles.avatar}>
+          <Text style={styles.avatarText}>{initials}</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// States
+// ---------------------------------------------------------------------------
+
+function LoadingState() {
+  return (
+    <View style={styles.centerState}>
+      <ActivityIndicator color={palette.routeGreen} />
+      <Text style={styles.stateCopy}>Loading your road board…</Text>
+      <View style={styles.skeletonHero} />
+      <View style={styles.skeletonRow}>
+        <View style={styles.skeletonTile} />
+        <View style={styles.skeletonTile} />
+      </View>
+    </View>
+  );
+}
+
+function ErrorState({ onRetry }: { onRetry: () => void }) {
+  return (
+    <Card style={styles.errorCard}>
+      <Text style={styles.errorTitle}>Could not load your board.</Text>
+      <Text style={styles.errorCopy}>Check your connection and try again.</Text>
+      <View style={{ marginTop: spacing.lg }}>
+        <Button label="Retry" onPress={onRetry} />
+      </View>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Board
+// ---------------------------------------------------------------------------
+
+type TabPath = '/scan' | '/loads' | '/miles' | '/reports';
+
+function Board({ data, onNavigate }: { data: BoardData; onNavigate: (p: TabPath) => void }) {
+  const isEmpty =
+    data.spend.total7dUsd === 0 && data.moneyOwed.totalUsd === 0 && data.loads.activeCount === 0;
+
+  return (
+    <>
+      <View style={styles.titleBlock}>
+        <Text style={styles.kicker}>{data.weekOf}</Text>
+        <Text style={styles.headline}>{data.headline}</Text>
+      </View>
+
+      {isEmpty ? (
+        <EmptyBoard onNavigate={onNavigate} />
+      ) : (
+        <PopulatedBoard data={data} onNavigate={onNavigate} />
+      )}
+    </>
+  );
+}
+
+function EmptyBoard({ onNavigate }: { onNavigate: (p: TabPath) => void }) {
+  return (
+    <>
       <Card dark label="This Week" labelRight="No records yet">
         <Text style={styles.heroMetric}>$—/mi</Text>
-        <Text style={styles.heroCopy}>
-          Start capturing receipts, loads, and miles to see spend, rate per mile, and money owed
+        <Text style={styles.heroNote}>
+          Capture a receipt, load, or trip and your rate per mile, spend, and money owed appear
           here.
         </Text>
-        <View style={styles.metricRow}>
-          <MetricTile dark label="Target" value="—" />
-          <MetricTile dark label="CPM" value="—" />
-          <MetricTile dark label="Owed" value="—" />
-        </View>
       </Card>
-
-      <View style={styles.sectionGap} />
-      <Text style={styles.sectionLabel}>First moves</Text>
-
+      <QuickActions onNavigate={onNavigate} />
       <RouteBand
         marker="1"
         markerTone="green"
-        title="Scan your first receipt"
-        subtitle="Fuel, lumper, repairs, meals — capture it before it fades."
+        title="Scan a receipt"
+        subtitle="Fuel, lumper, repairs, meals."
         value="Go"
-        onPress={() => router.push('/scan')}
+        onPress={() => onNavigate('/scan')}
       />
       <RouteBand
         marker="2"
         markerTone="blue"
-        title="Create your first load"
-        subtitle="One folder per run: BOL, POD, rate con, lumper, detention."
+        title="Create a load"
+        subtitle="BOL, POD, detention, lumper."
         value="Go"
-        onPress={() => router.push('/loads')}
+        onPress={() => onNavigate('/loads')}
       />
       <RouteBand
         marker="3"
         markerTone="amber"
-        title="Start tracking miles"
-        subtitle="Loaded and deadhead miles feed cost per mile."
+        title="Track miles"
+        subtitle="Loaded and deadhead."
         value="Go"
-        onPress={() => router.push('/miles')}
+        onPress={() => onNavigate('/miles')}
       />
-      <RouteBand
-        marker="4"
-        markerTone="rust"
-        title="Set your RPM target"
-        subtitle="Know the rate you need before you take the load."
-        value="Go"
-        onPress={() => router.push('/reports')}
-      />
-    </Screen>
+    </>
   );
 }
 
+function PopulatedBoard({
+  data,
+  onNavigate,
+}: {
+  data: BoardData;
+  onNavigate: (p: TabPath) => void;
+}) {
+  return (
+    <>
+      {/* Status strip */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.statusStrip}
+      >
+        <StatusChip label="RPM" value={data.rpm.grade} tone="green" />
+        <StatusChip label="Owed" value={usd(data.moneyOwed.totalUsd)} tone="amber" />
+        <StatusChip label="Records" value={`${data.records.pct}%`} tone="blue" />
+        <StatusChip label="Loads" value={`${data.loads.activeCount} active`} tone="neutral" />
+      </ScrollView>
+
+      {/* This Week hero */}
+      <Card dark label="This Week's RPM Score" labelRight={data.rpm.grade}>
+        <Text style={styles.heroMetric}>{rpm(data.rpm.actualRpm)}/mi</Text>
+        <Text style={styles.heroNote}>{data.rpm.note}</Text>
+        <View style={styles.metricRow}>
+          <MetricTile dark label="Target" value={rpm(data.rpm.targetRpm)} />
+          <MetricTile dark label="CPM" value={rpm(data.rpm.cpm)} />
+          <MetricTile dark label="Owed" value={usd(data.rpm.owedUsd)} />
+        </View>
+        <View style={styles.sampleTag}>
+          <Pill label="Sample data" tone="neutral" />
+        </View>
+      </Card>
+
+      <QuickActions onNavigate={onNavigate} />
+
+      {/* Road Spend */}
+      <WidgetCard
+        label="Road Spend"
+        headerRight={<Text style={styles.widgetValue}>7 days</Text>}
+        onPress={() => onNavigate('/reports')}
+      >
+        <Text style={styles.bigNum}>{usd(data.spend.total7dUsd)}</Text>
+        <Text style={styles.widgetNote}>{data.spend.note}</Text>
+      </WidgetCard>
+
+      {/* Money Owed */}
+      <WidgetCard
+        label="Money Owed"
+        headerRight={<Text style={styles.widgetValue}>{usd(data.moneyOwed.totalUsd)}</Text>}
+        onPress={() => onNavigate('/loads')}
+      >
+        {data.moneyOwed.items.map((item) => (
+          <View key={item.label} style={styles.owedRow}>
+            <Text style={styles.owedLabel}>{item.label}</Text>
+            <Text style={[styles.owedAmount, { color: colors.text }]}>{usd(item.amountUsd)}</Text>
+          </View>
+        ))}
+      </WidgetCard>
+
+      {/* Loads in Motion */}
+      <WidgetCard
+        label="Loads in Motion"
+        headerRight={<Pill label={`${data.loads.activeCount} active`} tone="blue" />}
+        onPress={() => onNavigate('/loads')}
+      >
+        {data.loads.items.map((load) => (
+          <View key={load.loadNumber} style={styles.loadRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.loadNumber}>Load {load.loadNumber}</Text>
+              <Text style={styles.loadRoute}>{load.route}</Text>
+            </View>
+            <Pill label={load.statusLabel} tone={load.statusTone} />
+          </View>
+        ))}
+      </WidgetCard>
+
+      {/* RPM Coach */}
+      <WidgetCard
+        label="RPM Coach"
+        headerRight={<Text style={styles.widgetValue}>Target {rpm(data.rpmCoach.targetRpm)}</Text>}
+        onPress={() => onNavigate('/reports')}
+      >
+        <View style={styles.metricRow}>
+          <MetricTile
+            label="Break-even"
+            value={rpm(data.rpmCoach.breakEvenRpm)}
+            caption="All miles"
+          />
+          <MetricTile
+            label="Deadhead"
+            value={`-${data.rpmCoach.deadheadImpactCents}¢`}
+            caption="Margin hit"
+          />
+        </View>
+      </WidgetCard>
+
+      {/* Calendar Snapshot */}
+      <WidgetCard
+        label="Calendar Snapshot"
+        headerRight={<Text style={styles.widgetValue}>{usd(data.calendar.monthTotalUsd)}</Text>}
+        onPress={() => onNavigate('/reports')}
+      >
+        <Text style={styles.widgetNote}>{data.calendar.monthLabel}</Text>
+        <View style={styles.calRow}>
+          {data.calendar.recentDays.map((d) => (
+            <View key={d.day} style={[styles.calCell, calTone(d.tone)]}>
+              <Text style={styles.calDay}>{d.day}</Text>
+              <Text style={styles.calSpend}>{d.spendUsd > 0 ? `$${d.spendUsd}` : '—'}</Text>
+            </View>
+          ))}
+        </View>
+      </WidgetCard>
+
+      {/* Monthly Closeout */}
+      <WidgetCard
+        label="Monthly Closeout"
+        headerRight={<GradeBadge grade={data.records.grade} size={34} />}
+        onPress={() => onNavigate('/reports')}
+      >
+        <View style={styles.progressTrack}>
+          <View style={[styles.progressFill, { width: `${data.closeout.pct}%` }]} />
+        </View>
+        <Text style={styles.widgetNote}>
+          {data.closeout.pct}% complete · {data.closeout.itemsLeft} items left
+        </Text>
+      </WidgetCard>
+
+      {/* Truck Health */}
+      <WidgetCard
+        label="Truck Health"
+        headerRight={
+          <Text style={styles.widgetValue}>{usd(data.truckHealth.repairsThisMonthUsd)}</Text>
+        }
+        onPress={() => onNavigate('/reports')}
+      >
+        <View style={styles.metricRow}>
+          <MetricTile
+            label="Next PM"
+            value={`${data.truckHealth.nextPmInMiles.toLocaleString()} mi`}
+          />
+          <MetricTile
+            label="Repairs"
+            value={usd(data.truckHealth.repairsThisMonthUsd)}
+            caption="This month"
+          />
+        </View>
+        <Text style={[styles.widgetNote, { marginTop: spacing.sm }]}>
+          Last: {data.truckHealth.lastService}
+        </Text>
+      </WidgetCard>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Small pieces
+// ---------------------------------------------------------------------------
+
+function QuickActions({ onNavigate }: { onNavigate: (p: TabPath) => void }) {
+  const actions: { label: string; glyph: string; path: TabPath }[] = [
+    { label: 'Scan', glyph: '＋', path: '/scan' },
+    { label: 'Load', glyph: '▤', path: '/loads' },
+    { label: 'Miles', glyph: '⌁', path: '/miles' },
+    { label: 'Report', glyph: '▧', path: '/reports' },
+  ];
+  return (
+    <View style={styles.quickRow}>
+      {actions.map((a) => (
+        <Pressable
+          key={a.label}
+          accessibilityRole="button"
+          accessibilityLabel={a.label}
+          onPress={() => onNavigate(a.path)}
+          style={({ pressed }) => [styles.quickBtn, pressed && styles.pressed]}
+        >
+          <Text style={styles.quickGlyph}>{a.glyph}</Text>
+          <Text style={styles.quickLabel}>{a.label}</Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
+function StatusChip({ label, value, tone }: { label: string; value: string; tone: Tone }) {
+  return (
+    <View style={styles.statusChip}>
+      <Text style={styles.statusLabel}>{label}</Text>
+      <Text style={[styles.statusValue, { color: toneColors[tone].fg }]}>{value}</Text>
+    </View>
+  );
+}
+
+function calTone(tone: 'good' | 'warn' | 'hot' | 'none') {
+  switch (tone) {
+    case 'good':
+      return { borderColor: 'rgba(46, 107, 87, 0.32)', backgroundColor: 'rgba(46, 107, 87, 0.08)' };
+    case 'warn':
+      return {
+        borderColor: 'rgba(200, 145, 45, 0.34)',
+        backgroundColor: 'rgba(200, 145, 45, 0.10)',
+      };
+    case 'hot':
+      return { borderColor: 'rgba(169, 74, 59, 0.34)', backgroundColor: 'rgba(169, 74, 59, 0.10)' };
+    default:
+      return {};
+  }
+}
+
 const styles = StyleSheet.create({
+  root: {
+    backgroundColor: colors.background,
+    flex: 1,
+  },
+  content: {
+    paddingHorizontal: spacing.xl,
+  },
+  // header
+  header: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: spacing.lg,
+  },
+  logoRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  logoMark: {
+    alignItems: 'center',
+    backgroundColor: palette.routeGreen,
+    borderRadius: radii.sm,
+    height: 34,
+    justifyContent: 'center',
+    width: 34,
+  },
+  logoLetter: {
+    color: palette.mapIvory,
+    fontFamily: fonts.black,
+    fontSize: 20,
+    letterSpacing: -1,
+  },
+  brand: {
+    color: colors.text,
+    fontFamily: fonts.extrabold,
+    fontSize: 16,
+    letterSpacing: -0.4,
+  },
+  headerActions: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  iconBtn: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(30, 35, 39, 0.05)',
+    borderRadius: radii.sm,
+    height: 38,
+    justifyContent: 'center',
+    width: 38,
+  },
+  iconGlyph: {
+    color: colors.text,
+    fontSize: 18,
+  },
+  avatar: {
+    alignItems: 'center',
+    backgroundColor: colors.surfaceDark,
+    borderRadius: radii.sm,
+    height: 38,
+    justifyContent: 'center',
+    width: 38,
+  },
+  avatarText: {
+    color: colors.textOnDark,
+    fontFamily: fonts.black,
+    fontSize: 13,
+    letterSpacing: -0.5,
+  },
+  // title
+  titleBlock: {
+    marginBottom: spacing.md,
+  },
+  kicker: {
+    ...type.label,
+    color: colors.textMuted,
+    marginBottom: 6,
+  },
+  headline: {
+    ...type.h1,
+    color: colors.text,
+  },
+  // hero
   heroMetric: {
     ...type.metricLg,
     color: colors.textOnDark,
-    marginBottom: spacing.sm,
+    marginVertical: spacing.sm,
   },
-  heroCopy: {
+  heroNote: {
     ...type.body,
     color: 'rgba(244, 241, 232, 0.72)',
   },
@@ -84,12 +490,189 @@ const styles = StyleSheet.create({
     gap: spacing.sm + 2,
     marginTop: spacing.lg - 2,
   },
-  sectionGap: {
-    height: spacing.lg,
+  sampleTag: {
+    marginTop: spacing.md,
   },
-  sectionLabel: {
-    ...type.label,
+  // status strip
+  statusStrip: {
+    gap: spacing.sm,
+    paddingVertical: spacing.md,
+  },
+  statusChip: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radii.sm + 2,
+    borderWidth: 1,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  statusLabel: {
+    ...type.labelTiny,
     color: colors.textMuted,
-    marginBottom: spacing.xs,
+  },
+  statusValue: {
+    ...type.metricSm,
+    color: colors.text,
+    marginTop: 2,
+  },
+  // quick actions
+  quickRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  quickBtn: {
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radii.sm + 2,
+    borderWidth: 1,
+    flex: 1,
+    gap: 6,
+    paddingVertical: spacing.md,
+  },
+  quickGlyph: {
+    color: palette.routeGreen,
+    fontFamily: fonts.bold,
+    fontSize: 20,
+  },
+  quickLabel: {
+    ...type.labelTiny,
+    color: colors.text,
+  },
+  pressed: {
+    opacity: 0.8,
+  },
+  // widgets
+  widgetValue: {
+    color: colors.text,
+    fontFamily: fonts.extrabold,
+    fontSize: 13,
+    fontVariant: ['tabular-nums'],
+    letterSpacing: -0.3,
+  },
+  widgetNote: {
+    ...type.bodySmall,
+    color: colors.textMuted,
+  },
+  bigNum: {
+    color: colors.text,
+    fontFamily: fonts.black,
+    fontSize: 30,
+    fontVariant: ['tabular-nums'],
+    letterSpacing: -1.5,
+    marginBottom: 4,
+  },
+  owedRow: {
+    borderTopColor: colors.border,
+    borderTopWidth: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: spacing.sm + 2,
+  },
+  owedLabel: {
+    ...type.body,
+    color: colors.text,
+    flex: 1,
+  },
+  owedAmount: {
+    ...type.emphasis,
+    fontVariant: ['tabular-nums'],
+  },
+  loadRow: {
+    alignItems: 'center',
+    borderTopColor: colors.border,
+    borderTopWidth: 1,
+    flexDirection: 'row',
+    gap: spacing.sm,
+    paddingVertical: spacing.sm + 2,
+  },
+  loadNumber: {
+    ...type.emphasis,
+    color: colors.text,
+  },
+  loadRoute: {
+    ...type.bodySmall,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  // calendar
+  calRow: {
+    flexDirection: 'row',
+    gap: 6,
+    marginTop: spacing.md,
+  },
+  calCell: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(30, 35, 39, 0.045)',
+    borderColor: 'rgba(30, 35, 39, 0.06)',
+    borderRadius: radii.sm,
+    borderWidth: 1,
+    flex: 1,
+    paddingVertical: spacing.sm,
+  },
+  calDay: {
+    color: colors.text,
+    fontFamily: fonts.extrabold,
+    fontSize: 12,
+  },
+  calSpend: {
+    color: colors.textMuted,
+    fontFamily: fonts.medium,
+    fontSize: 9,
+    marginTop: 2,
+  },
+  // progress
+  progressTrack: {
+    backgroundColor: 'rgba(30, 35, 39, 0.08)',
+    borderRadius: 999,
+    height: 8,
+    marginBottom: spacing.sm,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    backgroundColor: palette.routeGreen,
+    borderRadius: 999,
+    height: '100%',
+  },
+  // states
+  centerState: {
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingVertical: spacing.xl,
+  },
+  stateCopy: {
+    ...type.body,
+    color: colors.textMuted,
+  },
+  skeletonHero: {
+    backgroundColor: 'rgba(30, 35, 39, 0.06)',
+    borderRadius: radii.md,
+    height: 150,
+    marginTop: spacing.md,
+    width: '100%',
+  },
+  skeletonRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    width: '100%',
+  },
+  skeletonTile: {
+    backgroundColor: 'rgba(30, 35, 39, 0.06)',
+    borderRadius: radii.sm,
+    flex: 1,
+    height: 72,
+  },
+  errorCard: {
+    marginTop: spacing.md,
+  },
+  errorTitle: {
+    ...type.h2,
+    color: colors.text,
+  },
+  errorCopy: {
+    ...type.body,
+    color: colors.textMuted,
+    marginTop: spacing.sm,
   },
 });

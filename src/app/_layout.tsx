@@ -7,12 +7,38 @@ import {
   Inter_900Black,
   useFonts,
 } from '@expo-google-fonts/inter';
-import { Stack } from 'expo-router';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+
+import { useOnboardingStore } from '@/store/onboarding';
 
 SplashScreen.preventAutoHideAsync();
+
+const queryClient = new QueryClient();
+
+/** Routes between the onboarding flow and the tab app based on persisted state. */
+function useOnboardingGate(ready: boolean) {
+  const hydrated = useOnboardingStore((s) => s.hydrated);
+  const onboardingComplete = useOnboardingStore((s) => s.onboardingComplete);
+  const segments = useSegments();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!ready || !hydrated) return;
+    const inOnboarding = segments[0] === '(onboarding)';
+    if (!onboardingComplete && !inOnboarding) {
+      router.replace('/(onboarding)/splash');
+    } else if (onboardingComplete && inOnboarding) {
+      router.replace('/(tabs)');
+    }
+  }, [ready, hydrated, onboardingComplete, segments, router]);
+
+  return hydrated;
+}
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
@@ -24,20 +50,28 @@ export default function RootLayout() {
     Inter_900Black,
   });
 
+  const hydrated = useOnboardingGate(fontsLoaded);
+  const ready = fontsLoaded && hydrated;
+
   useEffect(() => {
-    if (fontsLoaded) {
+    if (ready) {
       SplashScreen.hideAsync();
     }
-  }, [fontsLoaded]);
+  }, [ready]);
 
-  if (!fontsLoaded) {
+  if (!ready) {
     return null;
   }
 
   return (
-    <>
-      <StatusBar style="dark" />
-      <Stack screenOptions={{ headerShown: false }} />
-    </>
+    <QueryClientProvider client={queryClient}>
+      <SafeAreaProvider>
+        <StatusBar style="dark" />
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="(onboarding)" />
+          <Stack.Screen name="(tabs)" />
+        </Stack>
+      </SafeAreaProvider>
+    </QueryClientProvider>
   );
 }
