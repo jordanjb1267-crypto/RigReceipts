@@ -35,6 +35,19 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
         }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "RigReceipts uses the camera to scan receipts and load documents.",
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "RigReceipts accesses your photos so you can attach an existing receipt or document."
+        }
       ]
     ],
     "experiments": {

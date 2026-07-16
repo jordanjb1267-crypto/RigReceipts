@@ -46,11 +46,17 @@ npm start              # Expo dev server (i = iOS simulator, a = Android)
 
 ```
 src/
-  app/            expo-router routes — (tabs): Dashboard, Scan, Loads, Miles, Reports
-  components/     Industrial Atlas primitives: RouteBand, Card, MetricTile,
-                  Pill, Marker, GradeBadge, TopoBackground, Screen
+  app/            expo-router routes — (onboarding) O1–O7, (tabs) Dashboard/Scan/Loads/Miles/Reports
+  components/     Industrial Atlas primitives: RouteBand, Card, MetricTile, Pill,
+                  Marker, GradeBadge, TopoBackground, Screen, Button, ChoiceRow,
+                  WidgetCard, OnboardingShell
   domain/         canonical constants + pure business logic (unit-tested):
                   categories, scanTypes, claimStatus, entitlements, rpm, detention
+  ocr/            capture OCR: recognizeDocument engine (ML Kit + stub fallback),
+                  parseReceipt heuristic parser, fixtures (unit-tested)
+  data/           TanStack Query hooks (useBoard)
+  store/          persisted Zustand stores: onboarding, captures (offline queue)
+  mock/           sample board data (until Supabase loops land)
   lib/            supabase client factory
   theme/          Industrial Atlas tokens: colors, typography, spacing/radii
 supabase/
@@ -58,6 +64,7 @@ supabase/
   seed.sql        23 canonical expense categories
 docs/
   DECISIONS.md    locked spec decisions + feasibility notes
+  OCR_SPIKE.md    scan/OCR approach, tradeoffs, on-device test steps
 ```
 
 ## Design system
