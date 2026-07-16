@@ -67,7 +67,7 @@ describe('entitlements (decision 5 + Loop 13)', () => {
     expect(canUseFeature('driver_pro', 'unlimitedScans')).toBe(true);
   });
 
-  it('has four tiers', () => {
-    expect(TIERS).toEqual(['free', 'driver_pro', 'owner_operator', 'fleet_lite']);
+  it('has the five tiers incl. lifetime', () => {
+    expect(TIERS).toEqual(['free', 'driver_pro', 'owner_operator', 'fleet_lite', 'lifetime']);
   });
 });

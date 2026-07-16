@@ -14,8 +14,44 @@ export {
   FLEET_LITE_EXTRA_TRUCK_ANNUAL_USD,
   tierAtLeast,
   canUseFeature,
+  DATA_ENTITLEMENTS,
+  TIER_DATA_ENTITLEMENTS,
+  hasDataEntitlement,
 } from './entitlements';
-export type { Tier } from './entitlements';
+export type { Tier, DataEntitlement } from './entitlements';
+export { EQUIPMENT_TYPES, equipmentLabel } from './equipment';
+export type { EquipmentType } from './equipment';
+export {
+  RATE_STATUSES,
+  VERIFICATION_LEVELS,
+  CARD_VISIBILITY,
+  DEFAULT_CARD_VISIBILITY,
+  isEligibleForPublicBoard,
+  analyzeRateCheck,
+  approximateDateBucket,
+  sanitizeRateShareCard,
+  detectSensitiveText,
+  canComputeLaneAggregate,
+  computeLaneAggregate,
+  laneConfidence,
+  MIN_AGGREGATE_POSTS,
+  MIN_AGGREGATE_CONTRIBUTORS,
+} from './freight';
+export type {
+  RateStatus,
+  VerificationLevel,
+  CardVisibility,
+  RateCheckInput,
+  RateCheckResult,
+  RateCardSource,
+  RateCardVisibility,
+  SafeRateCard,
+  SensitiveFinding,
+  SensitiveFindingType,
+  EligiblePost,
+  LaneAggregate,
+  LaneConfidence,
+} from './freight';
 export {
   trueCostPerMile,
   breakEvenAllMileRpm,
