@@ -1,6 +1,7 @@
 import { useRouter } from 'expo-router';
 import { StyleSheet, Text, View } from 'react-native';
 
+import { track } from '@/analytics';
 import { Button, ChoiceRow, OnboardingShell } from '@/components';
 import { Role, useOnboardingStore } from '@/store/onboarding';
 import { colors, spacing, Tone, type } from '@/theme';
@@ -9,34 +10,51 @@ const OPTIONS: { role: Role; title: string; subtitle: string; tone: Tone }[] = [
   {
     role: 'owner_operator',
     title: 'Owner-Operator',
-    subtitle: 'Cost per mile, RPM targets, monthly reports.',
+    subtitle: 'You own your authority and your truck.',
+    tone: 'green',
+  },
+  {
+    role: 'leased_owner_operator',
+    title: 'Leased-On Owner-Operator',
+    subtitle: 'Your truck, leased to a carrier.',
     tone: 'green',
   },
   {
     role: 'company_driver',
     title: 'Company Driver',
-    subtitle: 'Receipts, lumper reimbursement, BOLs, detention owed.',
+    subtitle: 'You drive; the carrier owns the truck.',
     tone: 'blue',
   },
   {
     role: 'small_fleet',
-    title: 'Small Fleet',
-    subtitle: 'Per-truck expenses, documents, and performance.',
+    title: 'Small Fleet Owner',
+    subtitle: 'A handful of trucks and drivers.',
     tone: 'amber',
   },
   {
-    role: 'hotshot_local',
-    title: 'Hotshot / Local',
-    subtitle: 'Simple expense, mileage, and closeout tracking.',
+    role: 'dispatcher_ops',
+    title: 'Dispatcher or Operations',
+    subtitle: 'You book and manage loads.',
     tone: 'rust',
+  },
+  {
+    role: 'just_starting',
+    title: 'Just Getting Started',
+    subtitle: 'New to the business.',
+    tone: 'neutral',
   },
 ];
 
-/** O3 · Role setup. */
+/** O3 · Role selection (Section 27). One-tap; personalizes the experience. */
 export default function RoleRoute() {
   const router = useRouter();
   const role = useOnboardingStore((s) => s.role);
   const setRole = useOnboardingStore((s) => s.setRole);
+
+  const pick = (r: Role) => {
+    setRole(r);
+    track('role_selected', { role: r });
+  };
 
   return (
     <OnboardingShell
@@ -50,8 +68,8 @@ export default function RoleRoute() {
         />
       }
     >
-      <Text style={styles.title}>What are you running?</Text>
-      <Text style={styles.subtitle}>We tune the road board to how you work.</Text>
+      <Text style={styles.title}>How do you run?</Text>
+      <Text style={styles.subtitle}>We tune terminology, priorities, and your numbers to fit.</Text>
       <View style={styles.list}>
         {OPTIONS.map((opt, i) => (
           <ChoiceRow
@@ -61,7 +79,7 @@ export default function RoleRoute() {
             title={opt.title}
             subtitle={opt.subtitle}
             selected={role === opt.role}
-            onPress={() => setRole(opt.role)}
+            onPress={() => pick(opt.role)}
           />
         ))}
       </View>

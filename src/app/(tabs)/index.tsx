@@ -12,6 +12,7 @@ import {
   TopoBackground,
   WidgetCard,
 } from '@/components';
+import { isFeatureEnabled } from '@/config/flags';
 import { useBoard } from '@/data/useBoard';
 import type { BoardData } from '@/mock/board';
 import { Role, useOnboardingStore } from '@/store/onboarding';
@@ -21,10 +22,12 @@ const usd = (n: number) => `$${Math.round(n).toLocaleString()}`;
 const rpm = (n: number) => `$${n.toFixed(2)}`;
 
 const ROLE_LABEL: Record<Role, string> = {
-  company_driver: 'Company Driver',
   owner_operator: 'Owner-Operator',
+  leased_owner_operator: 'Leased-On O/O',
+  company_driver: 'Company Driver',
   small_fleet: 'Small Fleet',
-  hotshot_local: 'Hotshot / Local',
+  dispatcher_ops: 'Dispatcher / Ops',
+  just_starting: 'Getting Started',
 };
 
 export default function DashboardScreen() {
@@ -218,6 +221,43 @@ function PopulatedBoard({
 
       <QuickActions onNavigate={onNavigate} />
 
+      {/* Freight Intelligence (Section 36) — entry point, flag-gated. */}
+      {isFeatureEnabled('freight_intelligence_enabled') && (
+        <WidgetCard
+          label="Freight Intelligence"
+          headerRight={<Pill label="Rates" tone="green" />}
+          onPress={() => onNavigate('/reports')}
+        >
+          <Text style={styles.widgetNote}>
+            Check rates, brokers, and recent community lane activity.
+          </Text>
+          <View style={styles.fiRow}>
+            {['Check Rate', 'Rate Board', 'Broker', 'Pulse'].map((entry) => (
+              <View key={entry} style={styles.fiChip}>
+                <Text style={styles.fiChipText}>{entry}</Text>
+              </View>
+            ))}
+          </View>
+        </WidgetCard>
+      )}
+
+      {/* Loads in Motion */}
+      <WidgetCard
+        label="Loads in Motion"
+        headerRight={<Pill label={`${data.loads.activeCount} active`} tone="blue" />}
+        onPress={() => onNavigate('/loads')}
+      >
+        {data.loads.items.map((load) => (
+          <View key={load.loadNumber} style={styles.loadRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.loadNumber}>Load {load.loadNumber}</Text>
+              <Text style={styles.loadRoute}>{load.route}</Text>
+            </View>
+            <Pill label={load.statusLabel} tone={load.statusTone} />
+          </View>
+        ))}
+      </WidgetCard>
+
       {/* Road Spend */}
       <WidgetCard
         label="Road Spend"
@@ -238,23 +278,6 @@ function PopulatedBoard({
           <View key={item.label} style={styles.owedRow}>
             <Text style={styles.owedLabel}>{item.label}</Text>
             <Text style={[styles.owedAmount, { color: colors.text }]}>{usd(item.amountUsd)}</Text>
-          </View>
-        ))}
-      </WidgetCard>
-
-      {/* Loads in Motion */}
-      <WidgetCard
-        label="Loads in Motion"
-        headerRight={<Pill label={`${data.loads.activeCount} active`} tone="blue" />}
-        onPress={() => onNavigate('/loads')}
-      >
-        {data.loads.items.map((load) => (
-          <View key={load.loadNumber} style={styles.loadRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.loadNumber}>Load {load.loadNumber}</Text>
-              <Text style={styles.loadRoute}>{load.route}</Text>
-            </View>
-            <Pill label={load.statusLabel} tone={load.statusTone} />
           </View>
         ))}
       </WidgetCard>
@@ -342,11 +365,12 @@ function PopulatedBoard({
 // ---------------------------------------------------------------------------
 
 function QuickActions({ onNavigate }: { onNavigate: (p: TabPath) => void }) {
+  // Section 36 quick actions: Check Rate, Scan Rate Con, Scan Receipt, Add Load.
   const actions: { label: string; glyph: string; path: TabPath }[] = [
-    { label: 'Scan', glyph: '＋', path: '/scan' },
-    { label: 'Load', glyph: '▤', path: '/loads' },
-    { label: 'Miles', glyph: '⌁', path: '/miles' },
-    { label: 'Report', glyph: '▧', path: '/reports' },
+    { label: 'Check Rate', glyph: '≈', path: '/reports' },
+    { label: 'Rate Con', glyph: '⎙', path: '/scan' },
+    { label: 'Receipt', glyph: '＋', path: '/scan' },
+    { label: 'Add Load', glyph: '▤', path: '/loads' },
   ];
   return (
     <View style={styles.quickRow}>
@@ -554,6 +578,22 @@ const styles = StyleSheet.create({
   widgetNote: {
     ...type.bodySmall,
     color: colors.textMuted,
+  },
+  fiRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  fiChip: {
+    backgroundColor: 'rgba(46, 107, 87, 0.10)',
+    borderRadius: radii.pill,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  fiChipText: {
+    ...type.labelTiny,
+    color: colors.cta,
   },
   bigNum: {
     color: colors.text,

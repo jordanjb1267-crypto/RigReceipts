@@ -1,35 +1,24 @@
 import { useRouter } from 'expo-router';
 import { StyleSheet, Text } from 'react-native';
 
+import { track } from '@/analytics';
 import { Button, OnboardingShell, Pill, RouteBand } from '@/components';
-import { FirstJob, Role, useOnboardingStore } from '@/store/onboarding';
+import { useOnboardingStore } from '@/store/onboarding';
 import { colors, spacing, type } from '@/theme';
 
-const ROLE_LABEL: Record<Role, string> = {
-  company_driver: 'Company Driver',
-  owner_operator: 'Owner-Operator',
-  small_fleet: 'Small Fleet',
-  hotshot_local: 'Hotshot / Local',
-};
-
-const JOB_DONE: Record<FirstJob, { title: string; subtitle: string }> = {
-  scan_receipts: { title: 'First receipt captured', subtitle: 'Filed to your expense ledger.' },
-  save_load_docs: { title: 'First load doc saved', subtitle: 'Filed to a load folder.' },
-  track_money_owed: { title: 'Money owed logged', subtitle: 'Tracking until it is collected.' },
-  check_rate: { title: 'Starter RPM target set', subtitle: 'RPM Coach is ready on your board.' },
-};
-
-/** O6 · Road board reveal. */
+/** O6 · Road Board reveal (Section 35). */
 export default function RevealRoute() {
   const router = useRouter();
-  const role = useOnboardingStore((s) => s.role);
-  const firstJob = useOnboardingStore((s) => s.firstJob);
-  const firstActionDone = useOnboardingStore((s) => s.firstActionDone);
   const finishOnboarding = useOnboardingStore((s) => s.finishOnboarding);
 
-  const done = firstJob ? JOB_DONE[firstJob] : null;
+  const goToBoard = () => {
+    track('road_board_revealed', {});
+    // Offer the optional account step before the board (never forced).
+    router.push('/(onboarding)/account');
+  };
 
-  const skipToDashboard = () => {
+  const skip = () => {
+    track('road_board_revealed', {});
     finishOnboarding();
     router.replace('/(tabs)');
   };
@@ -40,53 +29,37 @@ export default function RevealRoute() {
       steps={5}
       footer={
         <>
-          <Button label="Go to Dashboard" onPress={() => router.push('/(onboarding)/account')} />
-          <Button label="Finish Setup Later" variant="secondary" onPress={skipToDashboard} />
+          <Button label="Go to My Road Board" onPress={goToBoard} />
+          <Button label="Finish Setup Later" variant="secondary" onPress={skip} />
         </>
       }
     >
-      {role && <Pill label={ROLE_LABEL[role]} tone="green" />}
-      <Text style={styles.title}>Your road board is ready.</Text>
+      <Pill label="Ready" tone="green" />
+      <Text style={styles.title}>This is your Road Board.</Text>
       <Text style={styles.body}>
-        Here is what it will track for you. Everything below is one tap from the dashboard.
+        Your loads, miles, expenses, rates, and money — all in one place.
       </Text>
 
-      {firstActionDone && done && (
-        <RouteBand
-          marker="✓"
-          markerTone="green"
-          title={done.title}
-          subtitle={done.subtitle}
-          value="Done"
-        />
-      )}
       <RouteBand
         marker="1"
-        markerTone="blue"
-        title="Capture"
-        subtitle="Receipts, BOLs, PODs, lumper, repairs."
-        value="Daily"
+        markerTone="green"
+        title="This Week"
+        subtitle="Revenue, expenses, and your current operating position."
+        value="Now"
       />
       <RouteBand
         marker="2"
-        markerTone="amber"
-        title="Attach"
-        subtitle="Link docs and expenses to loads and trucks."
-        value="Load"
+        markerTone="blue"
+        title="Freight Intelligence"
+        subtitle="Check rates, brokers, and recent community lane activity."
+        value="Rates"
       />
       <RouteBand
         marker="3"
-        markerTone="rust"
-        title="Calculate"
-        subtitle="Cost per mile, RPM, detention, money owed."
-        value="Week"
-      />
-      <RouteBand
-        marker="4"
-        markerTone="green"
-        title="Close out"
-        subtitle="Daily bulletins, weekly grade, monthly report."
-        value="Month"
+        markerTone="amber"
+        title="Next Best Action"
+        subtitle="See what needs attention next."
+        value="Do"
       />
     </OnboardingShell>
   );

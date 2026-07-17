@@ -1,7 +1,9 @@
 import { useRouter } from 'expo-router';
+import { useEffect } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { track } from '@/analytics';
 import { TopoBackground } from '@/components';
 import { colors, fonts, palette, spacing, type } from '@/theme';
 
@@ -9,6 +11,10 @@ import { colors, fonts, palette, spacing, type } from '@/theme';
 export default function SplashRoute() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+
+  useEffect(() => {
+    track('onboarding_started', {});
+  }, []);
 
   return (
     <Pressable style={styles.root} onPress={() => router.push('/(onboarding)/value')}>
@@ -18,8 +24,10 @@ export default function SplashRoute() {
           <Text style={styles.markLetter}>R</Text>
         </View>
         <Text style={styles.wordmark}>RigReceipts</Text>
-        <Text style={styles.subtitle}>Truck Expenses</Text>
-        <Text style={styles.tagline}>Road records. Clean and controlled.</Text>
+        <Text style={styles.subtitle}>Know what the load really pays.</Text>
+        <Text style={styles.tagline}>
+          Rates, receipts, miles, and real profit — built for the driver.
+        </Text>
       </View>
       <Text style={[styles.hint, { bottom: insets.bottom + spacing.xl }]}>Tap to start</Text>
     </Pressable>
@@ -59,9 +67,13 @@ const styles = StyleSheet.create({
     letterSpacing: -1.5,
   },
   subtitle: {
-    ...type.label,
-    color: 'rgba(244, 241, 232, 0.66)',
-    marginTop: spacing.sm,
+    color: colors.textOnDark,
+    fontFamily: fonts.extrabold,
+    fontSize: 20,
+    letterSpacing: -0.6,
+    marginTop: spacing.md,
+    paddingHorizontal: spacing.lg,
+    textAlign: 'center',
   },
   tagline: {
     ...type.body,

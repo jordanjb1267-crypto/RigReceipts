@@ -4,9 +4,13 @@ import { StyleSheet, Text, View } from 'react-native';
 import { Button, OnboardingShell, Pill } from '@/components';
 import { colors, palette, spacing, type } from '@/theme';
 
-const STAGES = ['Receipts', 'Loads', 'Miles', 'Profit'];
+const WATERFALL = [
+  { value: '$2.95', label: 'Loaded RPM', tone: palette.highwayBlue },
+  { value: '$2.38', label: 'All-Mile RPM', tone: palette.fuelAmber },
+  { value: '$0.46', label: 'Above Your Target', tone: palette.routeGreen },
+];
 
-/** O2 · Value hook. */
+/** O2 · Primary value (Section 26). */
 export default function ValueRoute() {
   const router = useRouter();
 
@@ -16,29 +20,29 @@ export default function ValueRoute() {
       steps={5}
       footer={
         <>
-          <Button label="Start Tracking" onPress={() => router.push('/(onboarding)/role')} />
+          <Button label="Check a Load" onPress={() => router.push('/(onboarding)/role')} />
           <Button
-            label="Scan First Receipt"
+            label="See What Else RigReceipts Does"
             variant="secondary"
             onPress={() => router.push('/(onboarding)/role')}
           />
         </>
       }
     >
-      <Pill label="Industrial Atlas" tone="green" />
-      <Text style={styles.headline}>Know what every mile is costing you.</Text>
+      <Pill label="Freight Intelligence" tone="green" />
+      <Text style={styles.headline}>A good loaded rate can still be a bad load.</Text>
       <Text style={styles.body}>
-        Track receipts, fuel, repairs, BOLs, detention, lumper fees, and rate-per-mile in one place.
+        RigReceipts calculates what is left after deadhead, fuel, and your operating costs.
       </Text>
 
-      <View style={styles.route}>
-        {STAGES.map((stage, i) => (
-          <View key={stage} style={styles.stage}>
-            <View style={styles.node}>
-              <Text style={styles.nodeLabel}>{i + 1}</Text>
+      <View style={styles.waterfall}>
+        {WATERFALL.map((step, i) => (
+          <View key={step.label}>
+            <View style={[styles.stepCard, { borderLeftColor: step.tone }]}>
+              <Text style={styles.stepValue}>{step.value}</Text>
+              <Text style={styles.stepLabel}>{step.label}</Text>
             </View>
-            <Text style={styles.stageLabel}>{stage}</Text>
-            {i < STAGES.length - 1 && <View style={styles.connector} />}
+            {i < WATERFALL.length - 1 && <Text style={styles.arrow}>↓</Text>}
           </View>
         ))}
       </View>
@@ -57,41 +61,34 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     marginTop: spacing.md,
   },
-  route: {
-    flexDirection: 'row',
-    marginTop: spacing.xxl,
+  waterfall: {
+    marginTop: spacing.xl,
   },
-  stage: {
-    alignItems: 'center',
-    flex: 1,
-    position: 'relative',
-  },
-  node: {
-    alignItems: 'center',
-    backgroundColor: palette.routeGreen,
+  stepCard: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderLeftWidth: 4,
     borderRadius: 14,
-    height: 34,
-    justifyContent: 'center',
-    width: 34,
-    zIndex: 2,
+    borderWidth: 1,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
   },
-  nodeLabel: {
-    color: palette.mapIvory,
-    fontFamily: type.emphasis.fontFamily,
-    fontSize: 13,
-  },
-  stageLabel: {
-    ...type.labelTiny,
+  stepValue: {
     color: colors.text,
-    marginTop: spacing.sm,
+    fontFamily: type.metric.fontFamily,
+    fontSize: 26,
+    fontVariant: ['tabular-nums'],
+    letterSpacing: -1,
   },
-  connector: {
-    backgroundColor: colors.hairline,
-    height: 2,
-    left: '50%',
-    position: 'absolute',
-    right: '-50%',
-    top: 16,
-    zIndex: 1,
+  stepLabel: {
+    ...type.labelTiny,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  arrow: {
+    alignSelf: 'center',
+    color: colors.textMuted,
+    fontSize: 18,
+    paddingVertical: 4,
   },
 });

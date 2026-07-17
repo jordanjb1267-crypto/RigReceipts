@@ -9,6 +9,8 @@ interface ChoiceRowProps {
   markerTone?: Tone;
   title: string;
   subtitle?: string;
+  /** Optional highlight chip, e.g. "Best Place to Start". */
+  badge?: string;
   selected?: boolean;
   onPress: () => void;
 }
@@ -19,6 +21,7 @@ export function ChoiceRow({
   markerTone = 'neutral',
   title,
   subtitle,
+  badge,
   selected = false,
   onPress,
 }: ChoiceRowProps) {
@@ -31,7 +34,14 @@ export function ChoiceRow({
     >
       <Marker label={marker} tone={markerTone} />
       <View style={styles.copy}>
-        <Text style={styles.title}>{title}</Text>
+        <View style={styles.titleRow}>
+          <Text style={styles.title}>{title}</Text>
+          {badge !== undefined && (
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>{badge}</Text>
+            </View>
+          )}
+        </View>
         {subtitle !== undefined && <Text style={styles.subtitle}>{subtitle}</Text>}
       </View>
       <Text style={styles.chevron}>{selected ? '✓' : '→'}</Text>
@@ -59,10 +69,26 @@ const styles = StyleSheet.create({
   copy: {
     flex: 1,
   },
+  titleRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginBottom: 3,
+  },
+  badge: {
+    backgroundColor: 'rgba(46, 107, 87, 0.13)',
+    borderRadius: radii.pill,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  badgeText: {
+    ...type.labelTiny,
+    color: colors.cta,
+  },
   title: {
     ...type.emphasis,
     color: colors.text,
-    marginBottom: 3,
   },
   subtitle: {
     ...type.bodySmall,

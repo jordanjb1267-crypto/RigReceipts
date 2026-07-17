@@ -6,8 +6,10 @@ import {
   DEFAULT_CARD_VISIBILITY,
   detectSensitiveText,
   EligiblePost,
+  estimateAllMileTargets,
   isEligibleForPublicBoard,
   laneConfidence,
+  QUICK_ESTIMATE_PROFILE,
   RateCardSource,
   sanitizeRateShareCard,
 } from '../freight';
@@ -56,6 +58,24 @@ describe('analyzeRateCheck (all-mile basis)', () => {
     expect(() =>
       analyzeRateCheck({ ...base, offeredPay: 2150, loadedMiles: 0, deadheadMiles: 10 }),
     ).toThrow(RangeError);
+  });
+});
+
+describe('estimateAllMileTargets', () => {
+  it('derives break-even and target from a cost profile', () => {
+    // fixed 1100, var 1.05, miles 2600 → break-even (1100 + 2730)/2600 = 1.473
+    // target adds pay 1400 + profit 400 → (3830 + 1800)/2600 = 2.165
+    const t = estimateAllMileTargets(QUICK_ESTIMATE_PROFILE);
+    expect(t).not.toBeNull();
+    expect(t!.breakEvenAllMileRpm).toBeCloseTo(1.47, 2);
+    expect(t!.targetAllMileRpm).toBeCloseTo(2.17, 2);
+    expect(t!.targetAllMileRpm).toBeGreaterThan(t!.breakEvenAllMileRpm);
+  });
+
+  it('returns null when no miles are projected', () => {
+    expect(
+      estimateAllMileTargets({ ...QUICK_ESTIMATE_PROFILE, projectedTotalMiles: 0 }),
+    ).toBeNull();
   });
 });
 

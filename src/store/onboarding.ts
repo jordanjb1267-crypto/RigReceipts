@@ -2,16 +2,25 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
-/** Role options from the Master Build Prompt (Screen O3). */
-export const ROLES = ['company_driver', 'owner_operator', 'small_fleet', 'hotshot_local'] as const;
+/** Role options (Master Additive Integration Prompt, Section 27). */
+export const ROLES = [
+  'owner_operator',
+  'leased_owner_operator',
+  'company_driver',
+  'small_fleet',
+  'dispatcher_ops',
+  'just_starting',
+] as const;
 export type Role = (typeof ROLES)[number];
 
-/** First-job options from Screen O4; each branches to a first useful action. */
+/** First-job options (Section 28); each branches to a first useful action. */
 export const FIRST_JOBS = [
-  'scan_receipts',
-  'save_load_docs',
-  'track_money_owed',
   'check_rate',
+  'scan_rate_con',
+  'scan_receipt',
+  'track_miles',
+  'organize_load',
+  'see_community_rates',
 ] as const;
 export type FirstJob = (typeof FIRST_JOBS)[number];
 

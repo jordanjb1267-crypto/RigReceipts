@@ -114,6 +114,51 @@ export function analyzeRateCheck(input: RateCheckInput): RateCheckResult {
   };
 }
 
+/** Compact cost profile for turning a weekly cost picture into all-mile targets. */
+export interface CostProfile {
+  fixedWeeklyCosts: number;
+  variableCostPerMile: number;
+  projectedTotalMiles: number;
+  desiredDriverPay: number;
+  desiredProfitReserve: number;
+}
+
+export interface AllMileTargets {
+  breakEvenAllMileRpm: number;
+  targetAllMileRpm: number;
+}
+
+/**
+ * Derives all-mile break-even and target from a weekly cost profile — the basis
+ * the Rate Check compares an offered load against (Section 29). Returns null when
+ * no miles are projected. "Quick Estimate" onboarding uses preset defaults; "Use
+ * My Actual Costs" feeds real numbers here.
+ */
+export function estimateAllMileTargets(profile: CostProfile): AllMileTargets | null {
+  const { projectedTotalMiles: miles } = profile;
+  if (miles <= 0) return null;
+  const breakEven = (profile.fixedWeeklyCosts + profile.variableCostPerMile * miles) / miles;
+  const target =
+    (profile.fixedWeeklyCosts +
+      profile.variableCostPerMile * miles +
+      profile.desiredDriverPay +
+      profile.desiredProfitReserve) /
+    miles;
+  return {
+    breakEvenAllMileRpm: round2(breakEven),
+    targetAllMileRpm: round2(target),
+  };
+}
+
+/** Preset "Quick Estimate" cost profile for onboarding (Section 29). */
+export const QUICK_ESTIMATE_PROFILE: CostProfile = {
+  fixedWeeklyCosts: 1100,
+  variableCostPerMile: 1.05,
+  projectedTotalMiles: 2600,
+  desiredDriverPay: 1400,
+  desiredProfitReserve: 400,
+};
+
 // ---------------------------------------------------------------------------
 // Approximate date bucketing (never expose an exact load date)
 // ---------------------------------------------------------------------------
