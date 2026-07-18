@@ -14,9 +14,11 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { initSentry } from '@/lib/sentry';
 import { useOnboardingStore } from '@/store/onboarding';
 
 SplashScreen.preventAutoHideAsync();
+initSentry();
 
 const queryClient = new QueryClient();
 
@@ -77,6 +79,7 @@ export default function RootLayout() {
           <Stack.Screen name="rate-board" />
           <Stack.Screen name="lane-detail" />
           <Stack.Screen name="compare" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="paywall" options={{ presentation: 'modal' }} />
         </Stack>
       </SafeAreaProvider>
     </QueryClientProvider>

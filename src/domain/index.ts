@@ -75,6 +75,8 @@ export type {
   ExistingPostRef,
   RateModerationStatus,
 } from './rateBoardModeration';
+export { currentMonthKey, checkAllowance } from './usage';
+export type { MeteredAction, AllowanceResult } from './usage';
 export {
   trueCostPerMile,
   breakEvenAllMileRpm,

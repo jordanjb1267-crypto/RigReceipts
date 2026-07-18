@@ -139,7 +139,35 @@ Gated by `community_rate_posting_enabled`, on top of the read side:
   service-role only); these are the shared rules the client and Edge Functions
   both use. Posting stays flag-off until that backend + auth are live.
 
-## Next (in order)
+## Phase E — monetization (shipped, sandbox purchases)
 
-RevenueCat wiring + contextual paywalls (Phase E) → hardening, PostHog/Sentry,
-store metadata, community terms page, device QA (Phase F).
+- **Usage metering** (`src/domain/usage.ts`, tested): monthly allowances for
+  rate checks (3), broker checks (5), and Compare to My Costs on the free tier;
+  unlimited per the entitlement gates. Persisted counters + month rollover in
+  `src/store/subscription.ts`.
+- **Purchases boundary** (`src/payments/purchases.ts`): the app talks to a
+  `PurchasesAdapter`; a sandbox adapter fulfils purchases locally (labeled in
+  the UI) until RevenueCat's API keys + a native build exist. One subscription
+  system (Section 39).
+- **Contextual paywall** (`app/paywall.tsx`, Sections 45–46): trigger-specific
+  headlines (free limit / compare / lane history), the Section-45 value
+  hierarchy, Owner-Operator primary + Driver Pro + $149 Founder Lifetime, and
+  "Maybe Later". Never shown before first value; wired from Compare-to-My-Costs
+  metering. Analytics: paywall_viewed, subscription_plan_selected/started.
+
+## Observability + backend status
+
+- **Sentry: LIVE.** Project `rigreceipts-app` created in the `rigreceipts` org
+  via the Sentry connector; DSN in `.env.example`; `@sentry/react-native` +
+  Expo plugin wired, env-guarded (no PII, no document contents).
+- **Supabase: blocked on plan limit.** Org `RigDesk` has the paused project
+  `mtbmatpsjljmosdeosnn` (us-east-2); restore failed because the account is at
+  its 2-active-free-project limit. Once a slot is freed (pause/delete/upgrade
+  another project), restore + `apply_migration` for the 5 migrations + seed +
+  the `get_advisors` RLS audit can run via the connector in minutes.
+
+## Next (Phase F)
+
+RevenueCat SDK (needs API keys) → real Supabase restore + migrations + RLS
+audit → PostHog adapter for the analytics facade → community terms page, store
+metadata, device QA.

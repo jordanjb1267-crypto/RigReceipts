@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -7,6 +7,7 @@ import { track } from '@/analytics';
 import { Button, Card, Pill, RouteBand } from '@/components';
 import { estimateAllMileTargets, QUICK_ESTIMATE_PROFILE } from '@/domain';
 import { effectiveCostProfile, useCostProfileStore } from '@/store/costProfile';
+import { useSubscriptionStore } from '@/store/subscription';
 import { colors, spacing, type } from '@/theme';
 
 /** Compare a community rate to the viewer's own costs (Section 16). */
@@ -20,12 +21,26 @@ export default function CompareScreen() {
   const setProfile = useCostProfileStore((s) => s.setProfile);
   const [useQuickEstimate, setUseQuickEstimate] = useState(false);
 
+  const allowance = useSubscriptionStore((s) => s.allowance);
+  const recordUse = useSubscriptionStore((s) => s.recordUse);
+  const meteredRef = useRef(false);
+
   const hasCosts = savedProfile !== null || useQuickEstimate;
   const targets = hasCosts ? estimateAllMileTargets(effectiveCostProfile(savedProfile)) : null;
 
+  // Free-tier metering (Section 40/46): each personalized comparison uses one
+  // allowance; when exhausted, route to the contextual paywall instead.
   useEffect(() => {
-    if (hasCosts) track('community_rate_compared', {});
-  }, [hasCosts]);
+    if (!hasCosts || meteredRef.current) return;
+    const a = allowance('compare_to_costs');
+    if (!a.allowed) {
+      router.replace({ pathname: '/paywall', params: { trigger: 'compare' } });
+      return;
+    }
+    meteredRef.current = true;
+    recordUse('compare_to_costs');
+    track('community_rate_compared', {});
+  }, [hasCosts, allowance, recordUse, router]);
 
   return (
     <View style={styles.root}>

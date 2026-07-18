@@ -48,6 +48,13 @@
         {
           "photosPermission": "RigReceipts accesses your photos so you can attach an existing receipt or document."
         }
+      ],
+      [
+        "@sentry/react-native/expo",
+        {
+          "organization": "rigreceipts",
+          "project": "rigreceipts-app"
+        }
       ]
     ],
     "experiments": {
