@@ -44,6 +44,40 @@ export interface BoardContext {
   watchedLanes: readonly string[];
 }
 
+/**
+ * Section-22 report categories, in the order the report sheet shows them.
+ * Slugs match the `rate_report_category` Postgres enum exactly.
+ */
+export const RATE_REPORT_CATEGORIES = [
+  { slug: 'incorrect_rate', label: 'Incorrect Rate' },
+  { slug: 'duplicate_post', label: 'Duplicate Post' },
+  { slug: 'active_load_listing', label: 'Active Load Listing' },
+  { slug: 'contact_information', label: 'Contact Information' },
+  { slug: 'private_shipment_information', label: 'Private Shipment Information' },
+  { slug: 'misleading_verification', label: 'Misleading Verification' },
+  { slug: 'broker_harassment', label: 'Broker Harassment or Accusation' },
+  { slug: 'spam', label: 'Spam' },
+  { slug: 'other', label: 'Other' },
+] as const;
+export type RateReportCategory = (typeof RATE_REPORT_CATEGORIES)[number]['slug'];
+
+/**
+ * Pseudonymous contributor alias for a published post (Section 22). Stable per
+ * user *within* a lane — so the ≥3-contributor aggregate threshold and
+ * de-domination stay correct — but different across lanes, so a contributor
+ * cannot be followed from one lane to another. One-way: derived by FNV-1a from
+ * a 122-bit-entropy uuid, so it cannot be reversed to the user.
+ */
+export function contributorAliasFor(userId: string, lane: string): string {
+  const input = `${userId}|${lane}`;
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `driver-${(hash >>> 0).toString(36)}`;
+}
+
 /** Stable key for a lane (origin/destination metro + equipment). */
 export function laneKey(p: {
   originMetro: string;

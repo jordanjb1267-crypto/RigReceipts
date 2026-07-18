@@ -18,11 +18,13 @@ import {
   sanitizeRateShareCard,
   validateRateBoardPost,
 } from '@/domain';
+import { publishRateCardToBoard } from '@/data/rateBoardApi';
+import { useAuthStore } from '@/store/auth';
 import { useCommunityStore } from '@/store/community';
 import { useRateCardStore } from '@/store/rateCard';
 import { colors, palette, radii, spacing, type } from '@/theme';
 
-type Step = 'intro' | 'preview' | 'share' | 'ack' | 'blocked' | 'posted';
+type Step = 'intro' | 'preview' | 'share' | 'ack' | 'blocked' | 'posted' | 'post_error';
 
 const TOGGLES: { key: keyof RateCardVisibility; label: string }[] = [
   { key: 'showGrossRate', label: 'Show Gross Rate' },
@@ -52,6 +54,8 @@ export default function RateCardModal() {
   const setVisibility = useRateCardStore((s) => s.setVisibility);
   const [step, setStep] = useState<Step>('intro');
   const [blocks, setBlocks] = useState<PublishBlock[]>([]);
+  const [posting, setPosting] = useState(false);
+  const userId = useAuthStore((s) => s.userId);
 
   const acknowledgedTermsVersion = useCommunityStore((s) => s.acknowledgedTermsVersion);
   const acknowledge = useCommunityStore((s) => s.acknowledge);
@@ -70,8 +74,8 @@ export default function RateCardModal() {
   const close = () => router.back();
 
   // Runs the Section-21 automated checks, then publishes or shows the blockers.
-  const runChecksAndPost = () => {
-    if (!source || !safeCard) return;
+  const runChecksAndPost = async () => {
+    if (!source || !safeCard || posting) return;
     const key = laneKey(source);
     const result = validateRateBoardPost({
       verificationLevel: source.verificationLevel,
@@ -87,13 +91,32 @@ export default function RateCardModal() {
       setStep('blocked');
       return;
     }
-    addPost({
-      laneKey: key,
-      loadDateBucket: safeCard.loadDateBucket,
-      grossRate: safeCard.grossRate,
-    });
-    track('rate_board_post_completed', {});
-    setStep('posted');
+    if (!userId) {
+      // Posting is disabled in the share step when signed out; belt-and-braces.
+      setStep('post_error');
+      return;
+    }
+    setPosting(true);
+    try {
+      // Re-sanitize with isPublic for the server payload — the public snapshot
+      // is the only thing that leaves the device.
+      await publishRateCardToBoard({
+        userId,
+        card: sanitizeRateShareCard(source, visibility, true),
+        termsVersion: COMMUNITY_TERMS_VERSION,
+      });
+      addPost({
+        laneKey: key,
+        loadDateBucket: safeCard.loadDateBucket,
+        grossRate: safeCard.grossRate,
+      });
+      track('rate_board_post_completed', {});
+      setStep('posted');
+    } catch {
+      setStep('post_error');
+    } finally {
+      setPosting(false);
+    }
   };
 
   // Entry point from the share options: consent first (Section 20), then checks.
@@ -190,7 +213,14 @@ export default function RateCardModal() {
         )}
 
         {step === 'share' && (
-          <ShareStep card={safeCard} source={source} onDone={close} onPost={startPost} />
+          <ShareStep
+            card={safeCard}
+            source={source}
+            signedIn={userId !== null}
+            posting={posting}
+            onDone={close}
+            onPost={startPost}
+          />
         )}
 
         {step === 'ack' && (
@@ -208,6 +238,22 @@ export default function RateCardModal() {
         )}
 
         {step === 'posted' && <PostedStep onDone={close} />}
+
+        {step === 'post_error' && (
+          <>
+            <Pill label="Not posted" tone="rust" />
+            <Text style={styles.title}>Couldn’t reach the community board.</Text>
+            <Text style={styles.copy}>
+              {userId
+                ? 'Your card was not posted. Check your connection and try again — nothing was shared.'
+                : 'Posting to the community needs an account so posts can be moderated. Your card stays private on this device.'}
+            </Text>
+            <View style={styles.footerInline}>
+              {userId && <Button label="Try Again" loading={posting} onPress={runChecksAndPost} />}
+              <Button label="Keep Private" variant="secondary" onPress={close} />
+            </View>
+          </>
+        )}
       </ScrollView>
     </View>
   );
@@ -216,17 +262,21 @@ export default function RateCardModal() {
 function ShareStep({
   card,
   source,
+  signedIn,
+  posting,
   onDone,
   onPost,
 }: {
   card: SafeRateCard;
   source: RateCardSource;
+  signedIn: boolean;
+  posting: boolean;
   onDone: () => void;
   onPost: () => void;
 }) {
   const postingEnabled = isFeatureEnabled('community_rate_posting_enabled');
   const eligibleToPost = isEligibleForPublicBoard(source.verificationLevel);
-  const canPost = postingEnabled && eligibleToPost;
+  const canPost = postingEnabled && eligibleToPost && signedIn && !posting;
 
   const shareExternally = async () => {
     track('rate_card_external_share_started', {});
@@ -272,7 +322,11 @@ function ShareStep({
             ? 'Self-entered rates can’t be posted publicly yet — verify with a document or completed load.'
             : !postingEnabled
               ? 'Community posting opens in a controlled beta.'
-              : 'Share this historical rate anonymously with the RigReceipts community.'
+              : !signedIn
+                ? 'Create a free account to post — community posts need moderation.'
+                : posting
+                  ? 'Posting…'
+                  : 'Share this historical rate anonymously with the RigReceipts community.'
         }
         tone="green"
         disabled={!canPost}

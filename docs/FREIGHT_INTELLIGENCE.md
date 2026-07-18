@@ -186,8 +186,40 @@ Gated by `community_rate_posting_enabled`, on top of the read side:
   `{{ .Token }}` to the Magic Link email template (Auth → Email Templates) —
   auth email templates aren't editable via the connector.
 
-## Next (Phase F)
+## Phase F — live Community Rate Board (shipped)
 
-RevenueCat SDK (needs API keys) → replace mock board/captures with live
-Supabase reads/writes → PostHog adapter for the analytics facade → Apple/Google
-sign-in for store builds → community terms page, store metadata, device QA.
+The board now runs against the live backend (`src/data/rateBoardApi.ts`):
+
+- **Reads:** signed-in users get the real `rate_board_posts` feed (published
+  posts, newest first; RLS filters removed posts and blocked contributors
+  server-side). Signed-out / device-only users see the sample board, now
+  labeled **"Sample data"** on the feed. Lane detail computes its snapshot from
+  the same source as the feed.
+- **Contributor privacy (Section 22):** the feed never selects `user_id` — a
+  locked test asserts it. Posts carry a pseudonymous alias
+  (`contributorAliasFor`) that is **stable per user per lane** (so the
+  ≥3-contributor threshold and de-domination stay correct) but different across
+  lanes, so a contributor can't be followed lane to lane, and one-way (FNV-1a
+  over a 122-bit uuid).
+- **Posting:** after the Section-21 checks pass, the card is re-sanitized with
+  `isPublic` and published as `rate_share_cards` (private, owner-scoped) +
+  `rate_board_posts` (denormalized privacy-safe snapshot). The DB check
+  constraint independently rejects self-entered publishes. Posting requires an
+  account ("community posts need moderation"); a server failure shows an honest
+  "Couldn't reach the community board" state — never a fake success.
+- **Safety writes:** Report files a `rate_post_reports` row (slugs match the
+  `rate_report_category` enum; repeat reports no-op) and Block writes
+  `rate_board_blocks` (immediate local hide + durable RLS exclusion). Hide
+  stays local-only by design.
+- Pre-launch hardening noted for the controlled beta: `user_id` is still a
+  selectable column on published rows at the API layer (row-level RLS only);
+  move the feed behind a column-hiding view or RPC before public launch
+  (Section 51 gate).
+
+## Next
+
+RevenueCat SDK (needs API keys) → live captures/expenses sync (storage upload +
+`document_scans`/`expenses` rows) → server lane-aggregate job writing
+`lane_rate_aggregates` → PostHog adapter for the analytics facade →
+Apple/Google sign-in for store builds → community terms page, store metadata,
+device QA.

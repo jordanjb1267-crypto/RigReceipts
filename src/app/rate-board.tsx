@@ -13,7 +13,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { track } from '@/analytics';
-import { Button } from '@/components';
+import { Button, Pill } from '@/components';
 import {
   BoardTab,
   CommunityRatePost,
@@ -22,8 +22,11 @@ import {
   equipmentLabel,
   filterCommunityPosts,
   laneKey,
+  RATE_REPORT_CATEGORIES,
 } from '@/domain';
+import { blockContributorByPost, reportPost } from '@/data/rateBoardApi';
 import { useRateBoard } from '@/data/useRateBoard';
+import { useAuthStore } from '@/store/auth';
 import { useRateBoardStore } from '@/store/rateBoard';
 import { colors, fonts, palette, radii, spacing, type } from '@/theme';
 
@@ -34,22 +37,10 @@ const TABS: { key: BoardTab; label: string }[] = [
   { key: 'completed', label: 'Completed Loads' },
 ];
 
-const REPORT_CATEGORIES = [
-  'Incorrect Rate',
-  'Duplicate Post',
-  'Active Load Listing',
-  'Contact Information',
-  'Private Shipment Information',
-  'Misleading Verification',
-  'Broker Harassment or Accusation',
-  'Spam',
-  'Other',
-];
-
 export default function RateBoardScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { data, isPending, isError, refetch } = useRateBoard();
+  const { data, isPending, isError, refetch, source } = useRateBoard();
   const [tab, setTab] = useState<BoardTab>('for_you');
   const [equipment, setEquipment] = useState<EquipmentType | undefined>();
   const [completedOnly, setCompletedOnly] = useState(false);
@@ -90,7 +81,10 @@ export default function RateBoardScreen() {
             <Text style={styles.closeText}>✕</Text>
           </Pressable>
         </View>
-        <Text style={styles.title}>Rate Board</Text>
+        <View style={styles.titleRow}>
+          <Text style={styles.title}>Rate Board</Text>
+          {source === 'sample' && <Pill label="Sample data" tone="neutral" />}
+        </View>
         <Text style={styles.subtitle}>Recent driver-shared rates by lane and equipment.</Text>
         <View style={styles.clarify}>
           <Text style={styles.clarifyText}>
@@ -211,6 +205,7 @@ function CommunityCard({
   const blockContributor = useRateBoardStore((s) => s.blockContributor);
   const toggleWatchedLane = useRateBoardStore((s) => s.toggleWatchedLane);
   const isWatched = useRateBoardStore((s) => s.watchedLanes.includes(laneKey(post)));
+  const userId = useAuthStore((s) => s.userId);
 
   const share = async () => {
     try {
@@ -297,7 +292,10 @@ function CommunityCard({
         <Text style={styles.moderateDot}>·</Text>
         <Pressable
           onPress={() => {
+            // Hides immediately via the local store; the server block row makes
+            // the exclusion durable (RLS filters their future posts).
             blockContributor(post.contributorId);
+            if (userId) blockContributorByPost(userId, post.id).catch(() => {});
             track('contributor_blocked', {});
           }}
         >
@@ -362,6 +360,7 @@ function FilterSheet({
 
 function ReportSheet({ post, onClose }: { post: CommunityRatePost | null; onClose: () => void }) {
   const [done, setDone] = useState(false);
+  const userId = useAuthStore((s) => s.userId);
   return (
     <Modal visible={post !== null} animationType="slide" transparent onRequestClose={onClose}>
       <Pressable style={styles.sheetBackdrop} onPress={onClose} />
@@ -382,16 +381,19 @@ function ReportSheet({ post, onClose }: { post: CommunityRatePost | null; onClos
         ) : (
           <>
             <Text style={styles.sheetTitle}>Report this rate card</Text>
-            {REPORT_CATEGORIES.map((c) => (
+            {RATE_REPORT_CATEGORIES.map((c) => (
               <Pressable
-                key={c}
+                key={c.slug}
                 style={styles.reportRow}
                 onPress={() => {
-                  track('rate_board_post_reported', { category: c });
+                  track('rate_board_post_reported', { category: c.slug });
+                  // Best-effort server report; the thank-you is shown either way
+                  // and the moderation queue picks it up when it lands.
+                  if (userId && post) reportPost(userId, post.id, c.slug).catch(() => {});
                   setDone(true);
                 }}
               >
-                <Text style={styles.reportText}>{c}</Text>
+                <Text style={styles.reportText}>{c.label}</Text>
                 <Text style={styles.reportChevron}>›</Text>
               </Pressable>
             ))}
@@ -413,6 +415,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   kicker: { ...type.label, color: colors.textMuted },
+  titleRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
   closeBtn: {
     alignItems: 'center',
     backgroundColor: 'rgba(30, 35, 39, 0.06)',
@@ -422,7 +430,7 @@ const styles = StyleSheet.create({
     width: 34,
   },
   closeText: { color: colors.text, fontSize: 15 },
-  title: { ...type.h1, color: colors.text, marginTop: spacing.sm },
+  title: { ...type.h1, color: colors.text },
   subtitle: { ...type.body, color: colors.textMuted, marginTop: spacing.xs },
   clarify: {
     backgroundColor: 'rgba(61, 100, 128, 0.10)',

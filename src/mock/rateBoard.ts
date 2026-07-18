@@ -1,9 +1,10 @@
 import { CommunityRatePost } from '@/domain';
 
 /**
- * Sample Community Rate Board data — stands in for the Supabase feed until it is
- * wired. All fields are already the privacy-safe published snapshot; contributor
- * ids are opaque and never rendered. The UI labels this "Sample."
+ * Sample Community Rate Board data — shown to signed-out / device-only users
+ * (the live feed's RLS read policy requires a session). All fields are already
+ * the privacy-safe published snapshot; contributor ids are opaque and never
+ * rendered. The UI labels this "Sample data."
  *
  * The Chicago→Atlanta dry-van lane intentionally has ≥7 posts from ≥3
  * contributors so lane aggregates clear the Section-18 threshold; other lanes

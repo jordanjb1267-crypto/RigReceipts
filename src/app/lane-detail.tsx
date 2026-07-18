@@ -11,7 +11,7 @@ import {
   equipmentLabel,
   laneKey,
 } from '@/domain';
-import { MOCK_RATE_BOARD } from '@/mock/rateBoard';
+import { useRateBoard } from '@/data/useRateBoard';
 import { useRateBoardStore } from '@/store/rateBoard';
 import { colors, fonts, palette, radii, spacing, type } from '@/theme';
 
@@ -41,9 +41,11 @@ export default function LaneDetailScreen() {
   });
   const toggleWatchedLane = useRateBoardStore((s) => s.toggleWatchedLane);
   const isWatched = useRateBoardStore((s) => s.watchedLanes.includes(key));
+  // Same source as the board feed: live posts when signed in, sample otherwise.
+  const { data: boardPosts } = useRateBoard();
 
   const { lanePosts, aggregate } = useMemo(() => {
-    const lanePosts = MOCK_RATE_BOARD.filter(
+    const lanePosts = (boardPosts ?? []).filter(
       (p) =>
         laneKey({
           originMetro: p.originMetro,
@@ -61,7 +63,7 @@ export default function LaneDetailScreen() {
       verificationLevel: p.verificationLevel,
     }));
     return { lanePosts, aggregate: computeLaneAggregate(eligible) };
-  }, [key]);
+  }, [key, boardPosts]);
 
   return (
     <View style={styles.root}>

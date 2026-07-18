@@ -56,8 +56,19 @@ export type {
   LaneAggregate,
   LaneConfidence,
 } from './freight';
-export { laneKey, filterCommunityPosts } from './rateBoard';
-export type { CommunityRatePost, BoardTab, BoardFilters, BoardContext } from './rateBoard';
+export {
+  laneKey,
+  filterCommunityPosts,
+  contributorAliasFor,
+  RATE_REPORT_CATEGORIES,
+} from './rateBoard';
+export type {
+  CommunityRatePost,
+  BoardTab,
+  BoardFilters,
+  BoardContext,
+  RateReportCategory,
+} from './rateBoard';
 export {
   COMMUNITY_TERMS_VERSION,
   AUTO_FLAG_REPORT_THRESHOLD,
