@@ -75,11 +75,31 @@ sensitive detection, aggregate thresholds, entitlements, rate-con parser,
 flags, analytics) · both-platform Metro bundle. No device/backend needed for
 this slice.
 
-## Not in this slice (next, in order)
+## Phase B — revised onboarding (shipped)
 
-Revised onboarding (Phase B: value hook, 6 roles, Check-My-Rate branch, Road
-Board reveal) → Rate Sharing Card UI (Phase C) → Community Rate Board feed +
-filters + Compare-to-My-Costs + reporting/blocking + moderation queue (Phase D)
-→ RevenueCat wiring + contextual paywalls (Phase E) → hardening, PostHog/Sentry,
-store metadata, community terms (Phase F). Public posting stays flagged off
-until the moderation infrastructure (Section 51) is live.
+"Check a load → see real profit → save → reveal Road Board" (Sections 24–36):
+splash/value ("Know what the load really pays" + RPM waterfall), 6 roles, the
+new first-job picker (freight jobs flag-gated), the **Check My Rate branch →
+all-mile first-profit result** (`analyzeRateCheck` + `estimateAllMileTargets`),
+rate-con scan + community-rates preview branches, the Road Board reveal, and the
+Section-36 dashboard reorder with a flag-gated Freight Intelligence widget.
+Analytics events wired through `track()`.
+
+## Phase C — Rate Sharing Card UI (shipped)
+
+The card flow (Sections 4–9), gated by `rate_sharing_cards_enabled`:
+`RateCardView` renders a `SafeRateCard` (Section 5, verification badge, "not an
+available load" footer). The modal (`app/rate-card.tsx`) runs intro → preview +
+**privacy toggles** (live over `sanitizeRateShareCard`) + the Section-7 removal
+notice → **share options** (Keep Private / Share Outside via the native sheet /
+Post to Community). Default is never public; posting is disabled unless
+`community_rate_posting_enabled` **and** the rate is verification-eligible. A
+`rateCard` draft store feeds the modal; opened from the onboarding result.
+
+## Next (in order)
+
+Community Rate Board feed + filters + Compare-to-My-Costs + reporting/blocking +
+moderation queue (Phase D) → RevenueCat wiring + contextual paywalls (Phase E) →
+hardening, PostHog/Sentry, store metadata, community terms (Phase F). Public
+posting stays flagged off until the moderation infrastructure (Section 51) is
+live.

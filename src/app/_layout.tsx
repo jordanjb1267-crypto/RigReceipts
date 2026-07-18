@@ -29,8 +29,11 @@ function useOnboardingGate(ready: boolean) {
 
   useEffect(() => {
     if (!ready || !hydrated) return;
+    // Gate only the tab app vs the onboarding flow. Shared overlays (e.g. the
+    // rate-card modal) belong to neither group and must not trigger a redirect.
+    const inTabs = segments[0] === '(tabs)';
     const inOnboarding = segments[0] === '(onboarding)';
-    if (!onboardingComplete && !inOnboarding) {
+    if (!onboardingComplete && inTabs) {
       router.replace('/(onboarding)/splash');
     } else if (onboardingComplete && inOnboarding) {
       router.replace('/(tabs)');
@@ -70,6 +73,7 @@ export default function RootLayout() {
         <Stack screenOptions={{ headerShown: false }}>
           <Stack.Screen name="(onboarding)" />
           <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="rate-card" options={{ presentation: 'modal' }} />
         </Stack>
       </SafeAreaProvider>
     </QueryClientProvider>

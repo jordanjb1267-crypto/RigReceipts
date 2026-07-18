@@ -6,6 +6,7 @@ export { Marker } from './Marker';
 export { MetricTile } from './MetricTile';
 export { OnboardingShell } from './OnboardingShell';
 export { Pill } from './Pill';
+export { RateCardView } from './RateCardView';
 export { RouteBand } from './RouteBand';
 export { Screen } from './Screen';
 export { TopoBackground } from './TopoBackground';

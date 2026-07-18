@@ -13,6 +13,7 @@ import {
 } from '@/domain';
 import { parseRateCon, RATE_CON_FIXTURES } from '@/ocr';
 import { useOnboardingStore } from '@/store/onboarding';
+import { useRateCardStore } from '@/store/rateCard';
 import { colors, radii, spacing, type } from '@/theme';
 
 const VERDICT_COPY: Record<
@@ -150,6 +151,7 @@ function ProfitResult({
 }) {
   const router = useRouter();
   const completeFirstAction = useOnboardingStore((s) => s.completeFirstAction);
+  const setCardSource = useRateCardStore((s) => s.setSource);
   const verdict = VERDICT_COPY[result.verdict];
   const showRateCard = isFeatureEnabled('rate_sharing_cards_enabled');
 
@@ -159,6 +161,26 @@ function ProfitResult({
     completeFirstAction();
     track('first_load_saved', { verdict: result.verdict });
     router.push('/(onboarding)/reveal');
+  };
+
+  const createRateCard = () => {
+    // Onboarding's Rate Check doesn't collect a lane, so use a sample lane for
+    // the demo card; a saved Load supplies the real lane later.
+    setCardSource({
+      originMetro: 'Chicago',
+      originState: 'IL',
+      destinationMetro: 'Atlanta',
+      destinationState: 'GA',
+      equipmentType: 'dry_van',
+      rateStatus: 'completed',
+      verificationLevel: 'completed_load',
+      grossRate: offer,
+      loadedRpm: result.loadedRpm,
+      allMileRpm: result.allMileRpm,
+      loadDate: new Date().toISOString().slice(0, 10),
+    });
+    track('rate_card_created', { source: 'rate_check' });
+    router.push('/rate-card');
   };
 
   return (
@@ -194,14 +216,7 @@ function ProfitResult({
       <View style={styles.footerInline}>
         <Button label="Save This Load" onPress={save} />
         {showRateCard && (
-          <Button
-            label="Create Rate Card"
-            variant="secondary"
-            onPress={() => {
-              track('rate_card_created', { source: 'rate_check' });
-              save();
-            }}
-          />
+          <Button label="Create Rate Card" variant="secondary" onPress={createRateCard} />
         )}
         <Button label="Adjust Costs" variant="secondary" onPress={onAdjust} />
       </View>
