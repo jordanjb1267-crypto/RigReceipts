@@ -1,17 +1,10 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useMemo } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button, Pill } from '@/components';
-import {
-  computeLaneAggregate,
-  EligiblePost,
-  EquipmentType,
-  equipmentLabel,
-  laneKey,
-} from '@/domain';
-import { useRateBoard } from '@/data/useRateBoard';
+import { EquipmentType, equipmentLabel, laneKey } from '@/domain';
+import { useLaneAggregate } from '@/data/useLaneAggregate';
 import { useRateBoardStore } from '@/store/rateBoard';
 import { colors, fonts, palette, radii, spacing, type } from '@/theme';
 
@@ -41,29 +34,16 @@ export default function LaneDetailScreen() {
   });
   const toggleWatchedLane = useRateBoardStore((s) => s.toggleWatchedLane);
   const isWatched = useRateBoardStore((s) => s.watchedLanes.includes(key));
-  // Same source as the board feed: live posts when signed in, sample otherwise.
-  const { data: boardPosts } = useRateBoard();
 
-  const { lanePosts, aggregate } = useMemo(() => {
-    const lanePosts = (boardPosts ?? []).filter(
-      (p) =>
-        laneKey({
-          originMetro: p.originMetro,
-          originState: p.originState,
-          destinationMetro: p.destinationMetro,
-          destinationState: p.destinationState,
-          equipmentType: p.equipmentType,
-        }) === key,
-    );
-    const eligible: EligiblePost[] = lanePosts.map((p) => ({
-      contributorId: p.contributorId,
-      loadedRpm: p.loadedRpm ?? 0,
-      allMileRpm: p.allMileRpm ?? 0,
-      deadheadMiles: p.deadheadMiles ?? 0,
-      verificationLevel: p.verificationLevel,
-    }));
-    return { lanePosts, aggregate: computeLaneAggregate(eligible) };
-  }, [key, boardPosts]);
+  // Server aggregate when signed in; client-computed sample otherwise.
+  const { aggregate, windowDays, lanePostCount, loading } = useLaneAggregate({
+    originMetro,
+    originState,
+    destinationMetro,
+    destinationState,
+    equipmentType,
+  });
+  const windowLabel = windowDays ? `${windowDays}-Day` : 'Community';
 
   return (
     <View style={styles.root}>
@@ -78,7 +58,12 @@ export default function LaneDetailScreen() {
       <ScrollView
         contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + spacing.xxl }]}
       >
-        {aggregate ? (
+        {loading ? (
+          <View style={styles.loading}>
+            <ActivityIndicator color={palette.routeGreen} />
+            <Text style={styles.loadingCopy}>Loading community rates…</Text>
+          </View>
+        ) : aggregate ? (
           <>
             <View style={styles.snapshotHeader}>
               <Text style={styles.sectionTitle}>Community Snapshot</Text>
@@ -86,11 +71,11 @@ export default function LaneDetailScreen() {
             </View>
             <View style={styles.grid}>
               <Stat
-                label="7-Day Median All-Mile"
+                label={`${windowLabel} Median All-Mile`}
                 value={`$${aggregate.medianAllMileRpm.toFixed(2)}`}
               />
               <Stat
-                label="7-Day Median Loaded"
+                label={`${windowLabel} Median Loaded`}
                 value={`$${aggregate.medianLoadedRpm.toFixed(2)}`}
               />
               <Stat
@@ -112,7 +97,9 @@ export default function LaneDetailScreen() {
             <Text style={styles.stateBody}>
               There are not enough verified rates yet to calculate a reliable lane range.
             </Text>
-            <Text style={styles.stateCount}>{lanePosts.length} verified post(s) so far.</Text>
+            {lanePostCount > 0 && (
+              <Text style={styles.stateCount}>{lanePostCount} verified post(s) so far.</Text>
+            )}
           </View>
         )}
 
@@ -182,6 +169,8 @@ const styles = StyleSheet.create({
     letterSpacing: -0.8,
   },
   disclaimer: { ...type.bodySmall, color: colors.textMuted, marginTop: spacing.md },
+  loading: { alignItems: 'center', gap: spacing.md, paddingVertical: spacing.xxl },
+  loadingCopy: { ...type.body, color: colors.textMuted },
   stateCard: {
     backgroundColor: 'rgba(200, 145, 45, 0.08)',
     borderColor: 'rgba(200, 145, 45, 0.22)',

@@ -313,8 +313,16 @@ snapshot off the client's view of the feed:
   Applied to the live project; the function runs clean (0 rows today — no real
   published posts yet) and the job is registered and active.
 
-Follow-up: point lane-detail at `lane_rate_aggregates` (public, PII-free read)
-instead of computing from the feed, once the window label is reconciled.
+**Lane-detail now reads it** (`src/data/useLaneAggregate.ts`): signed-in users
+get the authoritative server `lane_rate_aggregates` row (public, PII-free read,
+30-day window) with a **window-accurate label** ("30-Day Median …" instead of
+the old hard-coded "7-Day"); signed-out / device-only users still compute from
+the labeled sample feed so the demo lane stays populated. The screen shows a
+loading state while the server row resolves and the "Limited Community Data"
+fallback when a lane hasn't cleared the threshold (or the hourly job hasn't run
+yet). Pure `mapLaneAggregateRow` is unit-tested. The window was reconciled to
+30 days (not 7) because a 7-day window rarely clears the ≥7-post/≥3-contributor
+threshold; a shorter window is a one-line schedule addition if wanted.
 
 ## Next
 
