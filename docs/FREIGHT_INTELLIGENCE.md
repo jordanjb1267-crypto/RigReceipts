@@ -289,9 +289,35 @@ Runtime verification (real image upload, row creation) needs a native build with
 a signed-in session — it can't run in this headless environment; the pure
 mapping/path/content-type helpers are unit-tested.
 
+## Lane aggregates — server job (shipped, LIVE)
+
+`lane_rate_aggregates` is now recomputed server-side
+(`supabase/migrations/20260718000007_lane_aggregate_job.sql`), moving the lane
+snapshot off the client's view of the feed:
+
+- **`recompute_lane_rate_aggregates(window_days)`** replicates
+  `computeLaneAggregate` exactly — eligible = published, not removed,
+  verification `<> self_entered`, both RPMs present, within the window;
+  `>= 7` posts AND `>= 3` contributors; **per-contributor de-domination**
+  (each contributor reduced to the `floor(n/2)` post after sorting by
+  verification weight desc then all-mile RPM asc); medians via
+  `percentile_cont(0.5)` (= the JS median); the same confidence bands. Verified
+  against the client algorithm on synthetic data — identical representatives,
+  medians, range, and threshold behavior (including the mixed-verification pick
+  and below-threshold exclusion).
+- **Security:** `SECURITY DEFINER` (bypasses RLS to read every contributor's
+  posts and rewrite the cache) with a pinned empty `search_path` and `EXECUTE`
+  revoked from `public`/`anon`/`authenticated`, so only the cron job / service
+  role can run it. The security advisor is clean.
+- **Scheduled** via `pg_cron`, hourly at `:17`, over the trailing 30 days.
+  Applied to the live project; the function runs clean (0 rows today — no real
+  published posts yet) and the job is registered and active.
+
+Follow-up: point lane-detail at `lane_rate_aggregates` (public, PII-free read)
+instead of computing from the feed, once the window label is reconciled.
+
 ## Next
 
 RevenueCat dashboard products/entitlements/offering + App Store Connect / Play
-Console setup for production keys → server lane-aggregate job writing
-`lane_rate_aggregates` → Apple/Google sign-in for store builds → community terms
-page, store metadata, device QA.
+Console setup for production keys → Apple/Google sign-in for store builds →
+community terms page, store metadata, device QA.
