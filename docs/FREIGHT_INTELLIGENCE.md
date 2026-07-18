@@ -119,10 +119,27 @@ Gated by `community_rate_board_enabled`, on mock data:
   persisted board store (hidden / blocked / watched lanes) and a `costProfile`
   store. Wired from the dashboard FI widget and the Reports tab.
 
+## Phase D-2 — posting + moderation (shipped)
+
+Gated by `community_rate_posting_enabled`, on top of the read side:
+
+- **Publication checks** (`src/domain/rateBoardModeration.ts`, Section 21):
+  `validateRateBoardPost` runs verification-eligibility, abnormal-rate,
+  duplicate, and sensitive/future-date checks and returns every blocker.
+  `moderationStatusFromReports` is the report→flag state machine (auto-flag at
+  3 reports; removed/under-review stay human-decided). Unit-tested (10 tests).
+- **First-public-post flow** in the rate-card modal: "Post to Community" →
+  consent screen (Section 20, "Share historical rates — not active freight" +
+  required "I understand and agree" checkbox, terms version persisted) →
+  automated checks → **"This card needs review"** blocker screen (Section 21)
+  listing the reasons, or a posted confirmation. A `community` store keeps the
+  acknowledged terms version and the user's own posts (for duplicate detection).
+- Analytics: `rate_board_post_started/completed/blocked`.
+- The authoritative queue/admin stays server-side (`rate_board_moderation_cases`,
+  service-role only); these are the shared rules the client and Edge Functions
+  both use. Posting stays flag-off until that backend + auth are live.
+
 ## Next (in order)
 
-Community Rate Board **posting + moderation** (first-public-post flow Section 20,
-automated pre-publish checks Section 21, moderation queue Section 51) →
 RevenueCat wiring + contextual paywalls (Phase E) → hardening, PostHog/Sentry,
-store metadata, community terms (Phase F). **Public posting stays flagged off**
-until the moderation infrastructure is live.
+store metadata, community terms page, device QA (Phase F).

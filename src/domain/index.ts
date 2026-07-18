@@ -59,6 +59,23 @@ export type {
 export { laneKey, filterCommunityPosts } from './rateBoard';
 export type { CommunityRatePost, BoardTab, BoardFilters, BoardContext } from './rateBoard';
 export {
+  COMMUNITY_TERMS_VERSION,
+  AUTO_FLAG_REPORT_THRESHOLD,
+  ABNORMAL_ALL_MILE_RPM_MIN,
+  ABNORMAL_ALL_MILE_RPM_MAX,
+  validateRateBoardPost,
+  moderationStatusFromReports,
+  isPubliclyVisible,
+} from './rateBoardModeration';
+export type {
+  PublishBlock,
+  PublishBlockType,
+  PublishCheckInput,
+  PublishCheckResult,
+  ExistingPostRef,
+  RateModerationStatus,
+} from './rateBoardModeration';
+export {
   trueCostPerMile,
   breakEvenAllMileRpm,
   weeklyRevenueNeeded,

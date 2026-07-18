@@ -7,17 +7,22 @@ import { track } from '@/analytics';
 import { Button, Pill, RateCardView } from '@/components';
 import { isFeatureEnabled } from '@/config/flags';
 import {
+  COMMUNITY_TERMS_VERSION,
   equipmentLabel,
   isEligibleForPublicBoard,
+  laneKey,
+  PublishBlock,
   RateCardSource,
   RateCardVisibility,
   SafeRateCard,
   sanitizeRateShareCard,
+  validateRateBoardPost,
 } from '@/domain';
+import { useCommunityStore } from '@/store/community';
 import { useRateCardStore } from '@/store/rateCard';
 import { colors, palette, radii, spacing, type } from '@/theme';
 
-type Step = 'intro' | 'preview' | 'share';
+type Step = 'intro' | 'preview' | 'share' | 'ack' | 'blocked' | 'posted';
 
 const TOGGLES: { key: keyof RateCardVisibility; label: string }[] = [
   { key: 'showGrossRate', label: 'Show Gross Rate' },
@@ -46,6 +51,12 @@ export default function RateCardModal() {
   const visibility = useRateCardStore((s) => s.visibility);
   const setVisibility = useRateCardStore((s) => s.setVisibility);
   const [step, setStep] = useState<Step>('intro');
+  const [blocks, setBlocks] = useState<PublishBlock[]>([]);
+
+  const acknowledgedTermsVersion = useCommunityStore((s) => s.acknowledgedTermsVersion);
+  const acknowledge = useCommunityStore((s) => s.acknowledge);
+  const myPosts = useCommunityStore((s) => s.myPosts);
+  const addPost = useCommunityStore((s) => s.addPost);
 
   const safeCard = useMemo(
     () => (source ? sanitizeRateShareCard(source, visibility, false) : null),
@@ -57,6 +68,43 @@ export default function RateCardModal() {
   }, [step]);
 
   const close = () => router.back();
+
+  // Runs the Section-21 automated checks, then publishes or shows the blockers.
+  const runChecksAndPost = () => {
+    if (!source || !safeCard) return;
+    const key = laneKey(source);
+    const result = validateRateBoardPost({
+      verificationLevel: source.verificationLevel,
+      allMileRpm: safeCard.allMileRpm,
+      laneKey: key,
+      loadDateBucket: safeCard.loadDateBucket,
+      grossRate: safeCard.grossRate,
+      existingPosts: myPosts,
+    });
+    if (!result.ok) {
+      setBlocks(result.blocks);
+      track('rate_board_post_blocked', { reasons: result.blocks.map((b) => b.type).join(',') });
+      setStep('blocked');
+      return;
+    }
+    addPost({
+      laneKey: key,
+      loadDateBucket: safeCard.loadDateBucket,
+      grossRate: safeCard.grossRate,
+    });
+    track('rate_board_post_completed', {});
+    setStep('posted');
+  };
+
+  // Entry point from the share options: consent first (Section 20), then checks.
+  const startPost = () => {
+    track('rate_board_post_started', {});
+    if (acknowledgedTermsVersion !== COMMUNITY_TERMS_VERSION) {
+      setStep('ack');
+      return;
+    }
+    runChecksAndPost();
+  };
 
   if (!source || !safeCard) {
     return (
@@ -141,7 +189,25 @@ export default function RateCardModal() {
           </>
         )}
 
-        {step === 'share' && <ShareStep card={safeCard} source={source} onDone={close} />}
+        {step === 'share' && (
+          <ShareStep card={safeCard} source={source} onDone={close} onPost={startPost} />
+        )}
+
+        {step === 'ack' && (
+          <AckStep
+            onAgree={() => {
+              acknowledge(COMMUNITY_TERMS_VERSION);
+              runChecksAndPost();
+            }}
+            onCancel={() => setStep('share')}
+          />
+        )}
+
+        {step === 'blocked' && (
+          <BlockedStep blocks={blocks} onReview={() => setStep('preview')} onKeepPrivate={close} />
+        )}
+
+        {step === 'posted' && <PostedStep onDone={close} />}
       </ScrollView>
     </View>
   );
@@ -151,10 +217,12 @@ function ShareStep({
   card,
   source,
   onDone,
+  onPost,
 }: {
   card: SafeRateCard;
   source: RateCardSource;
   onDone: () => void;
+  onPost: () => void;
 }) {
   const postingEnabled = isFeatureEnabled('community_rate_posting_enabled');
   const eligibleToPost = isEligibleForPublicBoard(source.verificationLevel);
@@ -208,14 +276,101 @@ function ShareStep({
         }
         tone="green"
         disabled={!canPost}
-        onPress={() => {
-          track('rate_board_post_started', {});
-          // The first-public-post flow + moderation land in Phase D.
-          onDone();
-        }}
+        onPress={onPost}
       />
 
       <Text style={styles.required}>No card is posted publicly without your explicit action.</Text>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// First public post — consent (Section 20)
+// ---------------------------------------------------------------------------
+
+function AckStep({ onAgree, onCancel }: { onAgree: () => void; onCancel: () => void }) {
+  const [agreed, setAgreed] = useState(false);
+  return (
+    <>
+      <Pill label="Community Terms" tone="amber" />
+      <Text style={styles.title}>Share historical rates — not active freight</Text>
+      <Text style={styles.copy}>
+        The Rate Board helps drivers understand what lanes have recently paid. It cannot be used to
+        post, book, bid on, or arrange loads.
+      </Text>
+
+      <Pressable
+        accessibilityRole="checkbox"
+        accessibilityState={{ checked: agreed }}
+        onPress={() => setAgreed((v) => !v)}
+        style={styles.checkRow}
+      >
+        <View style={[styles.checkbox, agreed && styles.checkboxOn]}>
+          {agreed && <Text style={styles.checkboxMark}>✓</Text>}
+        </View>
+        <Text style={styles.checkCopy}>
+          I will not post active loads, contact information, confidential documents, threats,
+          unsupported accusations, or misleading rate information. I understand and agree.
+        </Text>
+      </Pressable>
+
+      <View style={styles.footerInline}>
+        <Button label="Review My Card" disabled={!agreed} onPress={onAgree} />
+        <Button label="Cancel" variant="secondary" onPress={onCancel} />
+      </View>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Automated publication checks blocked the post (Section 21)
+// ---------------------------------------------------------------------------
+
+function BlockedStep({
+  blocks,
+  onReview,
+  onKeepPrivate,
+}: {
+  blocks: PublishBlock[];
+  onReview: () => void;
+  onKeepPrivate: () => void;
+}) {
+  return (
+    <>
+      <Pill label="Needs review" tone="rust" />
+      <Text style={styles.title}>This card needs review</Text>
+      <Text style={styles.copy}>
+        We found information that may not be appropriate for the public Rate Board. Review the
+        highlighted details before posting.
+      </Text>
+      <View style={styles.blockList}>
+        {blocks.map((b) => (
+          <View key={b.type} style={styles.blockRow}>
+            <Text style={styles.blockDot}>•</Text>
+            <Text style={styles.blockText}>{b.message}</Text>
+          </View>
+        ))}
+      </View>
+      <View style={styles.footerInline}>
+        <Button label="Review Details" onPress={onReview} />
+        <Button label="Keep Private" variant="secondary" onPress={onKeepPrivate} />
+      </View>
+    </>
+  );
+}
+
+function PostedStep({ onDone }: { onDone: () => void }) {
+  return (
+    <>
+      <Pill label="Posted" tone="green" />
+      <Text style={styles.title}>Shared with the community.</Text>
+      <Text style={styles.copy}>
+        Your privacy-safe rate card is on the Community Rate Board. Posts may be reviewed, and you
+        can remove yours anytime.
+      </Text>
+      <View style={styles.footerInline}>
+        <Button label="Done" onPress={onDone} />
+      </View>
     </>
   );
 }
@@ -387,5 +542,58 @@ const styles = StyleSheet.create({
   optionCopy: {
     ...type.bodySmall,
     color: colors.textMuted,
+  },
+  // consent
+  checkRow: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    gap: spacing.md,
+    marginTop: spacing.xl,
+  },
+  checkbox: {
+    alignItems: 'center',
+    borderColor: colors.hairline,
+    borderRadius: radii.sm - 4,
+    borderWidth: 2,
+    height: 26,
+    justifyContent: 'center',
+    width: 26,
+  },
+  checkboxOn: {
+    backgroundColor: palette.routeGreen,
+    borderColor: palette.routeGreen,
+  },
+  checkboxMark: {
+    color: palette.mapIvory,
+    fontFamily: type.emphasis.fontFamily,
+    fontSize: 14,
+  },
+  checkCopy: {
+    ...type.bodySmall,
+    color: colors.text,
+    flex: 1,
+  },
+  // blocked
+  blockList: {
+    backgroundColor: 'rgba(169, 74, 59, 0.08)',
+    borderColor: 'rgba(169, 74, 59, 0.22)',
+    borderRadius: radii.md,
+    borderWidth: 1,
+    marginTop: spacing.lg,
+    padding: spacing.lg,
+  },
+  blockRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  blockDot: {
+    color: colors.danger,
+    fontSize: 14,
+  },
+  blockText: {
+    ...type.bodySmall,
+    color: colors.text,
+    flex: 1,
   },
 });
