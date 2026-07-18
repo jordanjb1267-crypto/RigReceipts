@@ -74,6 +74,9 @@ export default function RootLayout() {
           <Stack.Screen name="(onboarding)" />
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="rate-card" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="rate-board" />
+          <Stack.Screen name="lane-detail" />
+          <Stack.Screen name="compare" options={{ presentation: 'modal' }} />
         </Stack>
       </SafeAreaProvider>
     </QueryClientProvider>

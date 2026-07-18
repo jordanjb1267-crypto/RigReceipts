@@ -123,7 +123,7 @@ function ErrorState({ onRetry }: { onRetry: () => void }) {
 // Board
 // ---------------------------------------------------------------------------
 
-type TabPath = '/scan' | '/loads' | '/miles' | '/reports';
+type TabPath = '/scan' | '/loads' | '/miles' | '/reports' | '/rate-board';
 
 function Board({ data, onNavigate }: { data: BoardData; onNavigate: (p: TabPath) => void }) {
   const isEmpty =
@@ -226,7 +226,11 @@ function PopulatedBoard({
         <WidgetCard
           label="Freight Intelligence"
           headerRight={<Pill label="Rates" tone="green" />}
-          onPress={() => onNavigate('/reports')}
+          onPress={() =>
+            isFeatureEnabled('community_rate_board_enabled')
+              ? onNavigate('/rate-board')
+              : onNavigate('/reports')
+          }
         >
           <Text style={styles.widgetNote}>
             Check rates, brokers, and recent community lane activity.

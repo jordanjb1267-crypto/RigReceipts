@@ -56,6 +56,8 @@ export type {
   LaneAggregate,
   LaneConfidence,
 } from './freight';
+export { laneKey, filterCommunityPosts } from './rateBoard';
+export type { CommunityRatePost, BoardTab, BoardFilters, BoardContext } from './rateBoard';
 export {
   trueCostPerMile,
   breakEvenAllMileRpm,

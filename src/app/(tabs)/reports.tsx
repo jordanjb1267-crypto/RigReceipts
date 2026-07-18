@@ -1,13 +1,18 @@
+import { useRouter } from 'expo-router';
 import { StyleSheet, Text } from 'react-native';
 
 import { Card, Pill, RouteBand, Screen } from '@/components';
+import { isFeatureEnabled } from '@/config/flags';
 import { colors, spacing, type } from '@/theme';
 
 /**
  * Reports: calendar, daily bulletins, grades, monthly closeout, exports
- * (Loops 9–11). Interactive pieces arrive in Phases 11–12.
+ * (Loops 9–11). Also the entry to Freight Intelligence (Rate Board), flag-gated.
  */
 export default function ReportsScreen() {
+  const router = useRouter();
+  const boardEnabled = isFeatureEnabled('community_rate_board_enabled');
+
   return (
     <Screen
       kicker="Monthly Atlas"
@@ -21,6 +26,17 @@ export default function ReportsScreen() {
           day for its bulletin.
         </Text>
       </Card>
+
+      {boardEnabled && (
+        <RouteBand
+          marker="≈"
+          markerTone="green"
+          title="Community Rate Board"
+          subtitle="Recent driver-shared rates by lane and equipment."
+          value="Open"
+          onPress={() => router.push('/rate-board')}
+        />
+      )}
 
       <RouteBand
         marker="R"

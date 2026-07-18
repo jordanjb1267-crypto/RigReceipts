@@ -96,10 +96,33 @@ Post to Community). Default is never public; posting is disabled unless
 `community_rate_posting_enabled` **and** the rate is verification-eligible. A
 `rateCard` draft store feeds the modal; opened from the onboarding result.
 
+## Phase D — Community Rate Board, read side (shipped)
+
+Gated by `community_rate_board_enabled`, on mock data:
+
+- **Feed** (`app/rate-board.tsx`): header + the permanent "Historical rate
+  information only. These are not available loads." clarification, the four tabs
+  (For You / Recent / Watched / Completed), a filter sheet (equipment, completed-
+  only), and community cards. Ordering is recency/verification only — never
+  engagement (Section 13).
+- **Client safety controls** on every card: Report (the Section-22 categories +
+  "Thanks. We'll review this rate card."), Hide, and Block Contributor ("you
+  will no longer see rate cards from this contributor"), persisted locally.
+- **Lane detail** (`app/lane-detail.tsx`): the Section-17 community snapshot via
+  `computeLaneAggregate`, with the Section-18 threshold → "Limited Community
+  Data" fallback and confidence labels. Never called an official/guaranteed rate.
+- **Compare to My Costs** (`app/compare.tsx`, Section 16): uses the viewer's
+  saved cost profile or a Quick Estimate; shows community rate vs the viewer's
+  break-even and target, with the "Make this rate personal" prompt when no
+  profile exists.
+- Pure `filterCommunityPosts` + `laneKey` in the domain (unit-tested); a
+  persisted board store (hidden / blocked / watched lanes) and a `costProfile`
+  store. Wired from the dashboard FI widget and the Reports tab.
+
 ## Next (in order)
 
-Community Rate Board feed + filters + Compare-to-My-Costs + reporting/blocking +
-moderation queue (Phase D) → RevenueCat wiring + contextual paywalls (Phase E) →
-hardening, PostHog/Sentry, store metadata, community terms (Phase F). Public
-posting stays flagged off until the moderation infrastructure (Section 51) is
-live.
+Community Rate Board **posting + moderation** (first-public-post flow Section 20,
+automated pre-publish checks Section 21, moderation queue Section 51) →
+RevenueCat wiring + contextual paywalls (Phase E) → hardening, PostHog/Sentry,
+store metadata, community terms (Phase F). **Public posting stays flagged off**
+until the moderation infrastructure is live.
