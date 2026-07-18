@@ -170,8 +170,24 @@ Gated by `community_rate_posting_enabled`, on top of the read side:
   sessions at the same project. Remote migration names differ from the repo
   filenames (the connector timestamps its own history); contents are identical.
 
+## Phase 3 — auth + profile bootstrap (shipped)
+
+- RN-correct Supabase client (`src/lib/supabase.ts`): AsyncStorage session
+  persistence, auto token refresh, no URL detection. `isSupabaseConfigured()`
+  keeps device-only mode working with no `.env` (offline-first).
+- Auth store (`src/store/auth.ts`): mirrors the persisted session +
+  `onAuthStateChange`; initialized once from the root layout; `signOut()`.
+- Account screen: real **email OTP** flow (email → 6-digit code → session) with
+  errors inline and every path falling back to "Keep Using This Device" —
+  accounts are never forced. On sign-in: `bootstrapProfile` upserts the
+  `profiles` row (with the onboarding role) and ensures a free `subscriptions`
+  row (both owner-scoped by RLS). `account_created` analytics.
+- **One-time dashboard step:** for codes (not links) to arrive, add
+  `{{ .Token }}` to the Magic Link email template (Auth → Email Templates) —
+  auth email templates aren't editable via the connector.
+
 ## Next (Phase F)
 
-RevenueCat SDK (needs API keys) → real Supabase restore + migrations + RLS
-audit → PostHog adapter for the analytics facade → community terms page, store
-metadata, device QA.
+RevenueCat SDK (needs API keys) → replace mock board/captures with live
+Supabase reads/writes → PostHog adapter for the analytics facade → Apple/Google
+sign-in for store builds → community terms page, store metadata, device QA.

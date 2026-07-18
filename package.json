@@ -63,7 +63,10 @@
     "testMatch": [
       "**/__tests__/**/*.test.ts",
       "**/__tests__/**/*.test.tsx"
-    ]
+    ],
+    "moduleNameMapper": {
+      "^@react-native-async-storage/async-storage$": "@react-native-async-storage/async-storage/jest/async-storage-mock"
+    }
   },
   "private": true
 }

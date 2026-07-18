@@ -1,10 +1,20 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 /**
- * Lazy Supabase client. Auth/session persistence (AsyncStorage) is wired in
- * Phase 3 — nothing imports this at app startup yet.
+ * Supabase client configured for React Native: sessions persist in
+ * AsyncStorage, tokens auto-refresh, and URL session detection is off (no
+ * browser redirects in the app). Auth flows use email OTP, which needs no
+ * deep-link handling.
+ *
+ * The app must keep working with no configuration (offline-first, device-only
+ * mode) — callers check {@link isSupabaseConfigured} before using the client.
  */
 let client: SupabaseClient | null = null;
+
+export function isSupabaseConfigured(): boolean {
+  return Boolean(process.env.EXPO_PUBLIC_SUPABASE_URL && process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY);
+}
 
 export function getSupabaseClient(): SupabaseClient {
   if (client) return client;
@@ -17,6 +27,13 @@ export function getSupabaseClient(): SupabaseClient {
     );
   }
 
-  client = createClient(url, anonKey);
+  client = createClient(url, anonKey, {
+    auth: {
+      storage: AsyncStorage,
+      autoRefreshToken: true,
+      persistSession: true,
+      detectSessionInUrl: false,
+    },
+  });
   return client;
 }

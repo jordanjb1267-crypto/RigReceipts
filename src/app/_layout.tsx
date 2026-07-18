@@ -15,10 +15,14 @@ import { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { initSentry } from '@/lib/sentry';
+import { useAuthStore } from '@/store/auth';
 import { useOnboardingStore } from '@/store/onboarding';
 
 SplashScreen.preventAutoHideAsync();
 initSentry();
+// Loads the persisted Supabase session and subscribes to auth changes.
+// No-op when Supabase is not configured (device-only mode).
+useAuthStore.getState().init();
 
 const queryClient = new QueryClient();
 
