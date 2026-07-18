@@ -21,3 +21,35 @@ export const SCAN_TYPES = [
 ] as const;
 
 export type ScanTypeSlug = (typeof SCAN_TYPES)[number]['slug'];
+
+/**
+ * The expense category an auto-created expense uses for each scan type. Pure
+ * document scans (BOL, POD, inspection) are records, not expenses, so they map
+ * to `null` and never create an expense row.
+ */
+export const SCAN_TYPE_TO_CATEGORY: Record<
+  ScanTypeSlug,
+  import('./categories').ExpenseCategorySlug | null
+> = {
+  receipt: 'misc',
+  fuel: 'fuel',
+  repair_invoice: 'repairs',
+  lumper: 'lumper',
+  bol: null,
+  pod: null,
+  scale_ticket: 'scales',
+  toll: 'tolls',
+  parking: 'parking',
+  meal: 'meals',
+  shower: 'showers',
+  hotel: 'lodging',
+  permit: 'permits_registration',
+  inspection: null,
+  other: 'misc',
+};
+
+export function scanTypeToExpenseCategory(
+  scanType: ScanTypeSlug,
+): import('./categories').ExpenseCategorySlug | null {
+  return SCAN_TYPE_TO_CATEGORY[scanType];
+}

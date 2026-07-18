@@ -262,10 +262,36 @@ The purchases boundary now resolves to a real RevenueCat adapter
 Runtime verification (the Test Store modal, real entitlement grants) needs a
 native dev build with the key set — it can't run in this headless environment.
 
+## Captures sync — Supabase (shipped)
+
+The offline capture queue now backs up to the live backend
+(`src/data/captureSync.ts`):
+
+- **Storage + rows:** each capture uploads its image to the private `receipts`
+  bucket under `{userId}/…` (RN-safe `fetch(uri).arrayBuffer()` upload), records
+  a `document_scans` row (`review_status: 'confirmed'` — the review sheet already
+  required a confirm), and, when the scan type maps to a category and an amount
+  exists, an `expenses` row linked to the scan. Verified live: `document_scans`
+  and `expenses` are RLS-enabled with owner-scoped policies and the `receipts`
+  bucket enforces the per-user folder, so every write is authorized as the
+  caller.
+- **Scan-type → category** is a pure, canon-tested domain map
+  (`scanTypeToExpenseCategory`): fuel→fuel, hotel→lodging, scale_ticket→scales,
+  permit→permits_registration, receipt/other→misc, …; document-only scans
+  (BOL/POD/inspection) map to `null` and never create an expense.
+- **Offline-first:** captures still save locally first. A save triggers an
+  immediate best-effort sync when signed in; anything that fails stays
+  `pending_sync` and a startup/sign-in **backfill** (`initCaptureSync`, guarded
+  against concurrent runs) retries the queue. The scan confirmation copy now
+  reflects account backup vs device-only.
+
+Runtime verification (real image upload, row creation) needs a native build with
+a signed-in session — it can't run in this headless environment; the pure
+mapping/path/content-type helpers are unit-tested.
+
 ## Next
 
-Live captures/expenses sync (storage upload + `document_scans`/`expenses` rows)
-→ RevenueCat dashboard products/entitlements/offering + App Store Connect / Play
+RevenueCat dashboard products/entitlements/offering + App Store Connect / Play
 Console setup for production keys → server lane-aggregate job writing
 `lane_rate_aggregates` → Apple/Google sign-in for store builds → community terms
 page, store metadata, device QA.

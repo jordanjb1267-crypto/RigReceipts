@@ -1,6 +1,6 @@
 export { EXPENSE_CATEGORIES, expenseCategoryLabel } from './categories';
 export type { ExpenseCategorySlug } from './categories';
-export { SCAN_TYPES } from './scanTypes';
+export { SCAN_TYPES, SCAN_TYPE_TO_CATEGORY, scanTypeToExpenseCategory } from './scanTypes';
 export type { ScanTypeSlug } from './scanTypes';
 export { CLAIM_STATUSES, OPEN_CLAIM_STATUSES, isOpenClaim } from './claimStatus';
 export type { ClaimStatus } from './claimStatus';

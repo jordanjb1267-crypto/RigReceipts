@@ -15,6 +15,7 @@ import { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { initAnalytics } from '@/analytics/provider';
+import { initCaptureSync } from '@/data/captureSync';
 import { initSentry } from '@/lib/sentry';
 import { useAuthStore } from '@/store/auth';
 import { useOnboardingStore } from '@/store/onboarding';
@@ -27,6 +28,8 @@ useAuthStore.getState().init();
 // Wires the PostHog sink behind track() when a project key is configured;
 // no-op (dev logger) otherwise. Subscribes to auth for the distinct id.
 void initAnalytics();
+// Backfills the offline capture queue to Supabase whenever a user is signed in.
+initCaptureSync();
 
 const queryClient = new QueryClient();
 

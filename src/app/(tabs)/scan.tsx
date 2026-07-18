@@ -5,8 +5,10 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button, Card, Pill, RouteBand, Screen } from '@/components';
+import { syncCapture } from '@/data/captureSync';
 import { SCAN_TYPES, ScanTypeSlug } from '@/domain';
 import { OcrEngineName, parseReceipt, recognizeDocument } from '@/ocr';
+import { useAuthStore } from '@/store/auth';
 import { useCapturesStore } from '@/store/captures';
 import { colors, palette, radii, spacing, type } from '@/theme';
 
@@ -32,6 +34,7 @@ export default function ScanScreen() {
   const [stage, setStage] = useState<Stage>('picker');
   const [scanType, setScanType] = useState<ScanTypeSlug>('receipt');
   const [draft, setDraft] = useState<Draft | null>(null);
+  const signedIn = useAuthStore((s) => s.status === 'signed_in');
 
   const runOcr = async (imageUri: string | null, forceStub: boolean) => {
     setStage('processing');
@@ -97,7 +100,7 @@ export default function ScanScreen() {
         />
       )}
 
-      {stage === 'saved' && <SavedConfirm onAnother={reset} />}
+      {stage === 'saved' && <SavedConfirm onAnother={reset} signedIn={signedIn} />}
     </Screen>
   );
 }
@@ -242,10 +245,12 @@ function ReviewSheet({
   onCancel: () => void;
 }) {
   const addCapture = useCapturesStore((s) => s.addCapture);
+  const markSynced = useCapturesStore((s) => s.markSynced);
+  const userId = useAuthStore((s) => s.userId);
   const isFuel = draft.scanType === 'fuel' || draft.gallons !== '';
 
   const save = () => {
-    addCapture({
+    const id = addCapture({
       scanType: draft.scanType,
       imageUri: draft.imageUri,
       engine: draft.engine,
@@ -255,6 +260,15 @@ function ReviewSheet({
       date: draft.date.trim() || null,
       gallons: draft.gallons ? Number(draft.gallons) : null,
     });
+    if (userId) {
+      // Immediate best-effort sync; on failure it stays queued for the backfill.
+      const capture = useCapturesStore.getState().captures.find((c) => c.id === id);
+      if (capture) {
+        syncCapture(userId, capture)
+          .then((remoteScanId) => markSynced(id, remoteScanId))
+          .catch(() => {});
+      }
+    }
     onSaved();
   };
 
@@ -338,14 +352,17 @@ function Field({
   );
 }
 
-function SavedConfirm({ onAnother }: { onAnother: () => void }) {
+function SavedConfirm({ onAnother, signedIn }: { onAnother: () => void; signedIn: boolean }) {
   return (
     <>
-      <Card dark label="Saved" labelRight="Offline queue">
-        <Text style={styles.savedTitle}>Filed to your device.</Text>
+      <Card dark label="Saved" labelRight={signedIn ? 'Backing up' : 'Offline queue'}>
+        <Text style={styles.savedTitle}>
+          {signedIn ? 'Filed and backing up.' : 'Filed to your device.'}
+        </Text>
         <Text style={styles.savedCopy}>
-          It is stored locally and will sync when a backend is connected — nothing is lost if you
-          close the app.
+          {signedIn
+            ? 'Saved on this device and syncing to your account — nothing is lost if you close the app.'
+            : 'Stored on this device. Sign in from onboarding to back it up — nothing is lost if you close the app.'}
         </Text>
       </Card>
       <View style={{ marginTop: spacing.lg }}>

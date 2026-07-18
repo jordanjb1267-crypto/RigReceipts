@@ -23,15 +23,18 @@ export interface Capture {
   gallons: number | null;
   /** pending_sync until an upload succeeds. */
   status: 'pending_sync' | 'synced';
+  /** The remote document_scans id once synced (null when no image was stored). */
+  remoteScanId?: string | null;
   createdAt: number;
 }
 
-export type NewCapture = Omit<Capture, 'id' | 'status' | 'createdAt'>;
+export type NewCapture = Omit<Capture, 'id' | 'status' | 'createdAt' | 'remoteScanId'>;
 
 interface CapturesState {
   captures: Capture[];
   hydrated: boolean;
   addCapture: (draft: NewCapture) => string;
+  markSynced: (id: string, remoteScanId: string | null) => void;
   removeCapture: (id: string) => void;
   clear: () => void;
 }
@@ -54,6 +57,12 @@ export const useCapturesStore = create<CapturesState>()(
         set((s) => ({ captures: [capture, ...s.captures] }));
         return id;
       },
+      markSynced: (id, remoteScanId) =>
+        set((s) => ({
+          captures: s.captures.map((c) =>
+            c.id === id ? { ...c, status: 'synced', remoteScanId } : c,
+          ),
+        })),
       removeCapture: (id) => set((s) => ({ captures: s.captures.filter((c) => c.id !== id) })),
       clear: () => set({ captures: [] }),
     }),
