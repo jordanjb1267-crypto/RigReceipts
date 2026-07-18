@@ -88,6 +88,7 @@ export default function RootLayout() {
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="rate-card" options={{ presentation: 'modal' }} />
           <Stack.Screen name="rate-board" />
+          <Stack.Screen name="community-terms" options={{ presentation: 'modal' }} />
           <Stack.Screen name="lane-detail" />
           <Stack.Screen name="compare" options={{ presentation: 'modal' }} />
           <Stack.Screen name="paywall" options={{ presentation: 'modal' }} />

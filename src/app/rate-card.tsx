@@ -230,6 +230,7 @@ export default function RateCardModal() {
               runChecksAndPost();
             }}
             onCancel={() => setStep('share')}
+            onReadTerms={() => router.push('/community-terms')}
           />
         )}
 
@@ -342,7 +343,15 @@ function ShareStep({
 // First public post — consent (Section 20)
 // ---------------------------------------------------------------------------
 
-function AckStep({ onAgree, onCancel }: { onAgree: () => void; onCancel: () => void }) {
+function AckStep({
+  onAgree,
+  onCancel,
+  onReadTerms,
+}: {
+  onAgree: () => void;
+  onCancel: () => void;
+  onReadTerms: () => void;
+}) {
   const [agreed, setAgreed] = useState(false);
   return (
     <>
@@ -352,6 +361,9 @@ function AckStep({ onAgree, onCancel }: { onAgree: () => void; onCancel: () => v
         The Rate Board helps drivers understand what lanes have recently paid. It cannot be used to
         post, book, bid on, or arrange loads.
       </Text>
+      <Pressable onPress={onReadTerms} accessibilityRole="link">
+        <Text style={styles.termsLink}>Read the full Community Rate Board Terms →</Text>
+      </Pressable>
 
       <Pressable
         accessibilityRole="checkbox"
@@ -626,6 +638,11 @@ const styles = StyleSheet.create({
     ...type.bodySmall,
     color: colors.text,
     flex: 1,
+  },
+  termsLink: {
+    ...type.emphasis,
+    color: palette.highwayBlue,
+    marginTop: spacing.md,
   },
   // blocked
   blockList: {
