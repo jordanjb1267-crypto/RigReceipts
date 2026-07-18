@@ -27,7 +27,12 @@ create table expense_categories (
 create table profiles (
   id uuid primary key references auth.users (id) on delete cascade,
   display_name text,
-  role text check (role in ('company_driver', 'owner_operator', 'small_fleet', 'hotshot_local')),
+  role text check (
+    role in (
+      'owner_operator', 'leased_owner_operator', 'company_driver',
+      'small_fleet', 'dispatcher_ops', 'just_starting'
+    )
+  ),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -357,6 +362,7 @@ create index notifications_owner_unread_idx on notifications (owner_id) where re
 create or replace function set_updated_at()
 returns trigger
 language plpgsql
+set search_path = ''
 as $$
 begin
   new.updated_at := now();

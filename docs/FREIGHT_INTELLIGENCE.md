@@ -160,11 +160,15 @@ Gated by `community_rate_posting_enabled`, on top of the read side:
 - **Sentry: LIVE.** Project `rigreceipts-app` created in the `rigreceipts` org
   via the Sentry connector; DSN in `.env.example`; `@sentry/react-native` +
   Expo plugin wired, env-guarded (no PII, no document contents).
-- **Supabase: blocked on plan limit.** Org `RigDesk` has the paused project
-  `mtbmatpsjljmosdeosnn` (us-east-2); restore failed because the account is at
-  its 2-active-free-project limit. Once a slot is freed (pause/delete/upgrade
-  another project), restore + `apply_migration` for the 5 migrations + seed +
-  the `get_advisors` RLS audit can run via the connector in minutes.
+- **Supabase: LIVE.** Org `RigReceipts`, project `kfyzglmphwohbhigvdyy`
+  (ca-central-1, Postgres 17). All 6 migrations applied via the connector
+  (schema, RLS, storage buckets, freight schema, freight RLS, advisor
+  hardening), 23 categories seeded, and the `get_advisors` **security audit is
+  clean** — the single INFO (`rate_board_moderation_cases` has RLS with no
+  client policies) is by design: that table is service-role only (Section 51).
+  URL + publishable key are in `.env.example`; `.mcp.json` points local
+  sessions at the same project. Remote migration names differ from the repo
+  filenames (the connector timestamps its own history); contents are identical.
 
 ## Next (Phase F)
 
