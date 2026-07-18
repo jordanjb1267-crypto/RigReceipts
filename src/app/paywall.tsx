@@ -6,9 +6,16 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { track } from '@/analytics';
 import { Button, Pill } from '@/components';
 import { TIER_INFO, Tier } from '@/domain';
-import { createSandboxAdapter } from '@/payments/purchases';
+import { createPurchasesAdapter, purchasesMode } from '@/payments/purchases';
 import { useSubscriptionStore } from '@/store/subscription';
 import { colors, fonts, palette, radii, spacing, type } from '@/theme';
+
+const MODE_NOTE: Record<ReturnType<typeof purchasesMode>, string> = {
+  sandbox:
+    'Sandbox purchases — App Store / Google Play billing connects via RevenueCat before launch.',
+  test_store: 'RevenueCat Test Store — purchases are simulated on this build, not charged.',
+  live: 'Secure billing through RevenueCat, the App Store, and Google Play.',
+};
 
 type PaywallTrigger = 'rate_check_limit' | 'compare' | 'lane_history';
 
@@ -47,7 +54,8 @@ export default function PaywallModal() {
 
   const setTier = useSubscriptionStore((s) => s.setTier);
   const [purchasing, setPurchasing] = useState<Tier | null>(null);
-  const adapter = useMemo(() => createSandboxAdapter(setTier), [setTier]);
+  const adapter = useMemo(() => createPurchasesAdapter(setTier), [setTier]);
+  const mode = useMemo(() => purchasesMode(), []);
 
   useEffect(() => {
     track('paywall_viewed', { trigger });
@@ -135,9 +143,7 @@ export default function PaywallModal() {
 
         <Button label="Maybe Later" variant="secondary" onPress={() => router.back()} />
 
-        <Text style={styles.sandboxNote}>
-          Sandbox purchases — App Store / Google Play billing connects via RevenueCat before launch.
-        </Text>
+        <Text style={styles.sandboxNote}>{MODE_NOTE[mode]}</Text>
       </ScrollView>
     </View>
   );

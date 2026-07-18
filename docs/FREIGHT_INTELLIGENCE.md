@@ -235,9 +235,37 @@ The `track()` facade now has a real sink (`src/analytics/posthog.ts`):
   pre-account events stay attached. Never a name/email/document content — the
   facade's existing allow-list rules still apply.
 
+## Purchases — RevenueCat (shipped, Test Store)
+
+The purchases boundary now resolves to a real RevenueCat adapter
+(`src/payments/purchases.ts`), replacing the sandbox-only path:
+
+- **`react-native-purchases` 10.4.3**, required **lazily** inside the adapter's
+  methods so tests and the Metro bundle never touch the native module.
+  Autolinked under prebuild — no config plugin, but it needs a native build
+  (not Expo Go), which the app already required (camera, ML Kit, Sentry native).
+- **Env-gated key selection** (pure, tested): platform keys win
+  (`EXPO_PUBLIC_REVENUECAT_IOS_KEY` `appl_…`, `EXPO_PUBLIC_REVENUECAT_ANDROID_KEY`
+  `goog_…`), else a shared `EXPO_PUBLIC_REVENUECAT_KEY`. A `test_…` key drives
+  RevenueCat's **Test Store** — a simulated purchase modal, no App Store / Play
+  setup — and the paywall labels the mode honestly (Test Store vs live vs the
+  local sandbox fallback when no key is set).
+- **Pure, tested mapping:** `entitlementToTier` resolves the highest active RC
+  entitlement to a `Tier`; `findPurchasePackage` picks `${tier}_${term}` then
+  the standard package type. The dashboard must use entitlement identifiers
+  `driver_pro` / `owner_operator` / `fleet_lite` / `lifetime`.
+- **Adapter behavior:** `purchase` configures once, reads the current offering,
+  buys the package, and grants the tier from the resulting entitlements;
+  cancellation or a store error keeps the caller on their tier. `restore` maps
+  restored entitlements the same way. All owner-scoped by the store account.
+
+Runtime verification (the Test Store modal, real entitlement grants) needs a
+native dev build with the key set — it can't run in this headless environment.
+
 ## Next
 
-RevenueCat SDK (needs API keys) → live captures/expenses sync (storage upload +
-`document_scans`/`expenses` rows) → server lane-aggregate job writing
+Live captures/expenses sync (storage upload + `document_scans`/`expenses` rows)
+→ RevenueCat dashboard products/entitlements/offering + App Store Connect / Play
+Console setup for production keys → server lane-aggregate job writing
 `lane_rate_aggregates` → Apple/Google sign-in for store builds → community terms
 page, store metadata, device QA.
