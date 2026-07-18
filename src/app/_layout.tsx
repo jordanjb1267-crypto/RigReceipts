@@ -14,6 +14,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { initAnalytics } from '@/analytics/provider';
 import { initSentry } from '@/lib/sentry';
 import { useAuthStore } from '@/store/auth';
 import { useOnboardingStore } from '@/store/onboarding';
@@ -23,6 +24,9 @@ initSentry();
 // Loads the persisted Supabase session and subscribes to auth changes.
 // No-op when Supabase is not configured (device-only mode).
 useAuthStore.getState().init();
+// Wires the PostHog sink behind track() when a project key is configured;
+// no-op (dev logger) otherwise. Subscribes to auth for the distinct id.
+void initAnalytics();
 
 const queryClient = new QueryClient();
 

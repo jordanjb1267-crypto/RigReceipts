@@ -216,10 +216,28 @@ The board now runs against the live backend (`src/data/rateBoardApi.ts`):
   move the feed behind a column-hiding view or RPC before public launch
   (Section 51 gate).
 
+## Analytics — PostHog (shipped)
+
+The `track()` facade now has a real sink (`src/analytics/posthog.ts`):
+
+- **HTTP batch capture, no native module** — posts to PostHog's `/batch/`
+  endpoint via `fetch`, so it stays Hermes-safe, prebuild-free, and unit-tested
+  (pure `buildBatchPayload` + a queue/flush factory with injectable fetch/clock).
+  Events queue and flush in batches; a failed flush requeues (capped) so a brief
+  outage doesn't drop events. Same swap-a-provider pattern as the purchases
+  adapter — moving to `posthog-react-native` later only touches this file.
+- **Env-gated** — `initAnalytics()` (called from the root layout) wires the sink
+  only when `EXPO_PUBLIC_POSTHOG_KEY` is set; with no key the facade keeps its
+  dev logger and nothing leaves the device. Host defaults to US cloud;
+  `EXPO_PUBLIC_POSTHOG_HOST` switches to EU.
+- **Distinct id** — Supabase user id when signed in, else a persisted anonymous
+  device id; on sign-in it emits `$identify` aliasing the anon id to the user so
+  pre-account events stay attached. Never a name/email/document content — the
+  facade's existing allow-list rules still apply.
+
 ## Next
 
 RevenueCat SDK (needs API keys) → live captures/expenses sync (storage upload +
 `document_scans`/`expenses` rows) → server lane-aggregate job writing
-`lane_rate_aggregates` → PostHog adapter for the analytics facade →
-Apple/Google sign-in for store builds → community terms page, store metadata,
-device QA.
+`lane_rate_aggregates` → Apple/Google sign-in for store builds → community terms
+page, store metadata, device QA.
