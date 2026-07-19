@@ -101,5 +101,9 @@ export type {
   LoadRateCheckResult,
   LoadRateVerdict,
 } from './rpm';
+export { buildCsv, escapeCsvCell } from './csv';
+export type { CsvColumn } from './csv';
+export { gradePeriod, letterFor, GRADE_CATEGORIES } from './grades';
+export type { GradeCategory, LetterGrade, GradeInputs, CategoryGrade, PeriodGrade } from './grades';
 export { calculateDetention, DETENTION_DISCLAIMER } from './detention';
 export type { DetentionInputs, DetentionResult } from './detention';

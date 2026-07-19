@@ -93,6 +93,7 @@ export default function RootLayout() {
           <Stack.Screen name="compare" options={{ presentation: 'modal' }} />
           <Stack.Screen name="paywall" options={{ presentation: 'modal' }} />
           <Stack.Screen name="account-settings" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="rpm-coach" options={{ presentation: 'modal' }} />
         </Stack>
       </SafeAreaProvider>
     </QueryClientProvider>
