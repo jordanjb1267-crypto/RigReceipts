@@ -7,6 +7,11 @@ import { Button } from '@/components';
 import { useLoadsStore } from '@/store/loads';
 import { colors, radii, spacing, type } from '@/theme';
 
+const num = (v: string): number | null => {
+  const n = Number(v.replace(/[^0-9.]/g, ''));
+  return Number.isFinite(n) && n > 0 ? n : null;
+};
+
 /** Create a load folder — the header record for a run. */
 export default function AddLoadScreen() {
   const insets = useSafeAreaInsets();
@@ -18,12 +23,24 @@ export default function AddLoadScreen() {
   const [origin, setOrigin] = useState('');
   const [destination, setDestination] = useState('');
   const [note, setNote] = useState('');
+  const [grossRate, setGrossRate] = useState('');
+  const [loadedMiles, setLoadedMiles] = useState('');
+  const [deadheadMiles, setDeadheadMiles] = useState('');
 
   const canSave = loadNumber.trim().length > 0;
 
   const save = () => {
     if (!canSave) return;
-    addLoad({ loadNumber, broker, origin, destination, note });
+    addLoad({
+      loadNumber,
+      broker,
+      origin,
+      destination,
+      note,
+      grossRate: num(grossRate),
+      loadedMiles: num(loadedMiles),
+      deadheadMiles: num(deadheadMiles),
+    });
     router.back();
   };
 
@@ -103,6 +120,47 @@ export default function AddLoadScreen() {
           </Field>
         </View>
 
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Revenue &amp; miles (optional)</Text>
+          <Text style={styles.sectionHint}>
+            Add these to grade the load&apos;s rate. You can also fill them in later from the load
+            details.
+          </Text>
+          <Field label="Gross rate ($)">
+            <TextInput
+              value={grossRate}
+              onChangeText={(v) => setGrossRate(v.replace(/[^0-9.]/g, ''))}
+              keyboardType="decimal-pad"
+              placeholder="e.g. 2400"
+              placeholderTextColor="rgba(30,35,39,0.3)"
+              style={styles.input}
+              accessibilityLabel="Gross rate"
+            />
+          </Field>
+          <Field label="Loaded miles">
+            <TextInput
+              value={loadedMiles}
+              onChangeText={(v) => setLoadedMiles(v.replace(/[^0-9]/g, ''))}
+              keyboardType="number-pad"
+              placeholder="e.g. 900"
+              placeholderTextColor="rgba(30,35,39,0.3)"
+              style={styles.input}
+              accessibilityLabel="Loaded miles"
+            />
+          </Field>
+          <Field label="Deadhead miles">
+            <TextInput
+              value={deadheadMiles}
+              onChangeText={(v) => setDeadheadMiles(v.replace(/[^0-9]/g, ''))}
+              keyboardType="number-pad"
+              placeholder="e.g. 100"
+              placeholderTextColor="rgba(30,35,39,0.3)"
+              style={styles.input}
+              accessibilityLabel="Deadhead miles"
+            />
+          </Field>
+        </View>
+
         <Button label="Create load" disabled={!canSave} onPress={save} />
       </ScrollView>
     </View>
@@ -147,6 +205,8 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     padding: spacing.lg,
   },
+  sectionTitle: { ...type.h2, color: colors.text, marginBottom: spacing.xs },
+  sectionHint: { ...type.bodySmall, color: colors.textMuted, marginBottom: spacing.md },
   field: { marginBottom: spacing.md },
   fieldLabel: { ...type.emphasis, color: colors.text },
   input: {

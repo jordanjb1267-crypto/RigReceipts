@@ -30,6 +30,7 @@ export default function ReportsScreen() {
   const router = useRouter();
   const boardEnabled = isFeatureEnabled('community_rate_board_enabled');
   const brokerCheckEnabled = isFeatureEnabled('broker_check_enabled');
+  const roadGradeEnabled = isFeatureEnabled('road_grade_enabled');
   const captures = useCapturesStore((s) => s.captures);
 
   const month = useMemo(() => monthRange(new Date()), []);
@@ -121,13 +122,24 @@ export default function ReportsScreen() {
         value="Set"
         onPress={() => router.push('/rpm-coach')}
       />
-      <RouteBand
-        marker="G"
-        markerTone="blue"
-        title="Weekly & monthly grades"
-        subtitle="Rate, fuel, deadhead, paperwork, money owed — coached, not shamed."
-        value="Soon"
-      />
+      {roadGradeEnabled ? (
+        <RouteBand
+          marker="G"
+          markerTone="blue"
+          title="Road Grade"
+          subtitle="Rate, fuel, deadhead, paperwork, money owed — coached, not shamed."
+          value="Open"
+          onPress={() => router.push('/road-grade')}
+        />
+      ) : (
+        <RouteBand
+          marker="G"
+          markerTone="blue"
+          title="Weekly & monthly grades"
+          subtitle="Rate, fuel, deadhead, paperwork, money owed — coached, not shamed."
+          value="Soon"
+        />
+      )}
       {brokerCheckEnabled && (
         <RouteBand
           marker="B"

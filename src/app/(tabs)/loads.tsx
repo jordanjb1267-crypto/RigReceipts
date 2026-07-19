@@ -4,7 +4,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Card, Pill, RouteBand, Screen } from '@/components';
 import { isOpenLoad, loadStatusLabel, loadStatusTone, nextLoadStatus } from '@/domain';
 import { useLoadsStore } from '@/store/loads';
-import { colors, spacing, type } from '@/theme';
+import { colors, palette, spacing, type } from '@/theme';
 
 /**
  * Load packets (Loop 5). Create a load folder, track its lifecycle status, and
@@ -70,6 +70,14 @@ export default function LoadsScreen() {
               </Pressable>
               <View style={{ flex: 1 }} />
               <Pressable
+                accessibilityLabel="Open load details"
+                hitSlop={8}
+                onPress={() => router.push({ pathname: '/load-detail', params: { id: l.id } })}
+              >
+                <Text style={styles.details}>Details →</Text>
+              </Pressable>
+              <Text style={styles.dot}>·</Text>
+              <Pressable
                 accessibilityLabel="Remove load"
                 hitSlop={8}
                 onPress={() => removeLoad(l.id)}
@@ -77,7 +85,9 @@ export default function LoadsScreen() {
                 <Text style={styles.remove}>Remove</Text>
               </Pressable>
             </View>
-            <Text style={styles.tapHint}>Tap the status to advance it.</Text>
+            <Text style={styles.tapHint}>
+              Tap the status to advance it. Open details to add revenue, documents, and money owed.
+            </Text>
           </Card>
         ))}
     </Screen>
@@ -103,6 +113,8 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     marginTop: spacing.md,
   },
+  details: { ...type.labelTiny, color: palette.highwayBlue },
+  dot: { color: colors.textMuted },
   remove: { ...type.labelTiny, color: colors.textMuted },
   tapHint: { ...type.labelTiny, color: colors.textMuted, marginTop: spacing.sm },
 });

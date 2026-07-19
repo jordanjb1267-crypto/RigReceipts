@@ -8,6 +8,7 @@ const cfg = (overrides: Partial<Record<FeatureFlag, FlagConfig>>) =>
     community_rate_posting_enabled: { state: 'off' },
     lane_aggregates_enabled: { state: 'off' },
     broker_check_enabled: { state: 'off' },
+    road_grade_enabled: { state: 'off' },
     revised_onboarding_enabled: { state: 'off' },
     ...overrides,
   }) as Record<FeatureFlag, FlagConfig>;

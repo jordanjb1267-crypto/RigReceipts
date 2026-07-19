@@ -14,6 +14,7 @@ export const FEATURE_FLAGS = [
   'community_rate_posting_enabled',
   'lane_aggregates_enabled',
   'broker_check_enabled',
+  'road_grade_enabled',
   'revised_onboarding_enabled',
 ] as const;
 
@@ -46,6 +47,7 @@ export const DEFAULT_FLAGS: Record<FeatureFlag, FlagConfig> = {
   community_rate_posting_enabled: { state: 'off' },
   lane_aggregates_enabled: { state: 'off' },
   broker_check_enabled: { state: 'off' },
+  road_grade_enabled: { state: 'off' },
   revised_onboarding_enabled: { state: 'off' },
 };
 
@@ -58,6 +60,7 @@ const ENV_OVERRIDES: Record<FeatureFlag, string | undefined> = {
   community_rate_posting_enabled: process.env.EXPO_PUBLIC_FF_COMMUNITY_RATE_POSTING_ENABLED,
   lane_aggregates_enabled: process.env.EXPO_PUBLIC_FF_LANE_AGGREGATES_ENABLED,
   broker_check_enabled: process.env.EXPO_PUBLIC_FF_BROKER_CHECK_ENABLED,
+  road_grade_enabled: process.env.EXPO_PUBLIC_FF_ROAD_GRADE_ENABLED,
   revised_onboarding_enabled: process.env.EXPO_PUBLIC_FF_REVISED_ONBOARDING_ENABLED,
 };
 
