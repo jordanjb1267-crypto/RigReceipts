@@ -1,4 +1,5 @@
 import { useRouter } from 'expo-router';
+import { useMemo } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -13,10 +14,23 @@ import {
   WidgetCard,
 } from '@/components';
 import { isFeatureEnabled } from '@/config/flags';
+import { last7dRange, monthRange, summarizeRange } from '@/domain';
 import { useBoard } from '@/data/useBoard';
 import type { BoardData } from '@/mock/board';
+import { useCapturesStore } from '@/store/captures';
 import { Role, useOnboardingStore } from '@/store/onboarding';
 import { colors, fonts, palette, radii, spacing, toneColors, Tone, type } from '@/theme';
+
+/** Real captured-spend summary, derived from the local capture queue. */
+interface ReceiptsSummary {
+  hasRecords: boolean;
+  monthLabel: string;
+  monthTotalUsd: number;
+  weekTotalUsd: number;
+  records: number;
+  topLabel: string;
+  topAmountUsd: number;
+}
 
 const usd = (n: number) => `$${Math.round(n).toLocaleString()}`;
 const rpm = (n: number) => `$${n.toFixed(2)}`;
@@ -35,6 +49,24 @@ export default function DashboardScreen() {
   const router = useRouter();
   const role = useOnboardingStore((s) => s.role);
   const { data, isPending, isError, refetch } = useBoard();
+  const captures = useCapturesStore((s) => s.captures);
+
+  const receipts = useMemo<ReceiptsSummary>(() => {
+    const now = new Date();
+    const month = monthRange(now);
+    const m = summarizeRange(captures, month);
+    const w = summarizeRange(captures, last7dRange(now));
+    const records = m.expenseCount + m.documentCount;
+    return {
+      hasRecords: records > 0,
+      monthLabel: month.label ?? 'This month',
+      monthTotalUsd: m.totalUsd,
+      weekTotalUsd: w.totalUsd,
+      records,
+      topLabel: m.topCategory?.label ?? '—',
+      topAmountUsd: m.topCategory?.totalUsd ?? 0,
+    };
+  }, [captures]);
 
   return (
     <View style={styles.root}>
@@ -53,7 +85,12 @@ export default function DashboardScreen() {
         ) : isError || !data ? (
           <ErrorState onRetry={() => refetch()} />
         ) : (
-          <Board data={data} onNavigate={(path) => router.push(path)} />
+          <Board
+            data={data}
+            receipts={receipts}
+            onNavigate={(path) => router.push(path)}
+            onOpenCloseout={() => router.push('/monthly-closeout')}
+          />
         )}
       </ScrollView>
     </View>
@@ -125,7 +162,17 @@ function ErrorState({ onRetry }: { onRetry: () => void }) {
 
 type TabPath = '/scan' | '/loads' | '/miles' | '/reports' | '/rate-board';
 
-function Board({ data, onNavigate }: { data: BoardData; onNavigate: (p: TabPath) => void }) {
+function Board({
+  data,
+  receipts,
+  onNavigate,
+  onOpenCloseout,
+}: {
+  data: BoardData;
+  receipts: ReceiptsSummary;
+  onNavigate: (p: TabPath) => void;
+  onOpenCloseout: () => void;
+}) {
   const isEmpty =
     data.spend.total7dUsd === 0 && data.moneyOwed.totalUsd === 0 && data.loads.activeCount === 0;
 
@@ -136,12 +183,51 @@ function Board({ data, onNavigate }: { data: BoardData; onNavigate: (p: TabPath)
         <Text style={styles.headline}>{data.headline}</Text>
       </View>
 
+      {receipts.hasRecords && (
+        <ReceiptsWidget receipts={receipts} onOpenCloseout={onOpenCloseout} />
+      )}
+
       {isEmpty ? (
         <EmptyBoard onNavigate={onNavigate} />
       ) : (
         <PopulatedBoard data={data} onNavigate={onNavigate} />
       )}
     </>
+  );
+}
+
+/**
+ * Real captured-spend widget — the driver's own receipts, not sample data.
+ * Appears whenever the capture queue has anything this month, in both the
+ * empty and populated board states.
+ */
+function ReceiptsWidget({
+  receipts,
+  onOpenCloseout,
+}: {
+  receipts: ReceiptsSummary;
+  onOpenCloseout: () => void;
+}) {
+  return (
+    <WidgetCard
+      label="Your Receipts"
+      headerRight={<Pill label="From your scans" tone="green" />}
+      onPress={onOpenCloseout}
+    >
+      <Text style={styles.bigNum}>{usd(receipts.monthTotalUsd)}</Text>
+      <Text style={styles.widgetNote}>
+        {receipts.monthLabel} · {receipts.records} {receipts.records === 1 ? 'record' : 'records'}{' '}
+        captured
+      </Text>
+      <View style={styles.metricRow}>
+        <MetricTile label="Last 7 days" value={usd(receipts.weekTotalUsd)} />
+        <MetricTile
+          label="Top category"
+          value={receipts.topLabel}
+          caption={receipts.topAmountUsd > 0 ? usd(receipts.topAmountUsd) : undefined}
+        />
+      </View>
+    </WidgetCard>
   );
 }
 
