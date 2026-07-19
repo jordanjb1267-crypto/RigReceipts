@@ -119,14 +119,74 @@ export {
   LOAD_STATUSES,
   OPEN_LOAD_STATUSES,
   isOpenLoad,
+  isCompletedLoad,
   loadStatusLabel,
   loadStatusTone,
   nextLoadStatus,
+  LOAD_RATE_STATUSES,
+  loadRateStatusLabel,
+  loadRateStatusTone,
 } from './loads';
-export type { LoadStatus } from './loads';
+export type { LoadStatus, LoadRateStatus } from './loads';
+export {
+  DOCUMENT_TYPES,
+  DOCUMENT_STATUSES,
+  documentTypeLabel,
+  isDocumentPresent,
+  requiredDocsForLoad,
+  documentTypeForScanType,
+} from './documents';
+export type { DocumentType, DocumentStatus } from './documents';
+export {
+  RECEIVABLE_TYPES,
+  RECEIVABLE_STATUSES,
+  TERMINAL_RECEIVABLE_STATUSES,
+  receivableTypeLabel,
+  receivableStatusLabel,
+  isTerminalReceivable,
+  receivableOutstanding,
+  isReceivableOverdue,
+} from './receivables';
+export type { ReceivableType, ReceivableStatus } from './receivables';
+export {
+  assembleGradeInputs,
+  deriveLoadRate,
+  loadRevenue,
+  expectedFuelCost,
+  buildRateInput,
+  buildFuelInput,
+  buildDeadheadInput,
+  buildPaperworkInput,
+  buildMoneyOwedInput,
+} from './gradeInputs';
+export type {
+  GradableLoad,
+  LoadRateComputation,
+  FuelSource,
+  GradableReceivable,
+  AssembleArgs,
+} from './gradeInputs';
 export { summarizeBrokerHistory, RELIABILITY_LABEL, MIN_LOADS_TO_RATE } from './brokerCheck';
 export type { BrokerExperience, BrokerReliability, BrokerSummary } from './brokerCheck';
-export { gradePeriod, letterFor, GRADE_CATEGORIES } from './grades';
-export type { GradeCategory, LetterGrade, GradeInputs, CategoryGrade, PeriodGrade } from './grades';
+export {
+  gradePeriod,
+  letterFor,
+  GRADE_CATEGORIES,
+  CATEGORY_LABEL,
+  MIN_GRADABLE_FOR_OVERALL,
+} from './grades';
+export type {
+  GradeCategory,
+  LetterGrade,
+  GradeConfidence,
+  GradeInputs,
+  CategoryGrade,
+  PeriodGrade,
+  RateGradeInput,
+  FuelGradeInput,
+  DeadheadGradeInput,
+  PaperworkGradeInput,
+  MoneyOwedGradeInput,
+} from './grades';
 export { calculateDetention, DETENTION_DISCLAIMER } from './detention';
 export type { DetentionInputs, DetentionResult } from './detention';
