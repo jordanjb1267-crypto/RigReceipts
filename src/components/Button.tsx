@@ -5,7 +5,7 @@ import { colors, fonts, minTapTarget, palette, radii } from '@/theme';
 interface ButtonProps {
   label: string;
   onPress: () => void;
-  variant?: 'primary' | 'secondary';
+  variant?: 'primary' | 'secondary' | 'danger';
   dark?: boolean;
   disabled?: boolean;
   loading?: boolean;
@@ -23,6 +23,7 @@ export function Button({
   style,
 }: ButtonProps) {
   const isSecondary = variant === 'secondary';
+  const isDanger = variant === 'danger';
   return (
     <Pressable
       accessibilityRole="button"
@@ -31,7 +32,7 @@ export function Button({
       onPress={onPress}
       style={({ pressed }) => [
         styles.base,
-        isSecondary ? styles.secondary : styles.primary,
+        isSecondary ? styles.secondary : isDanger ? styles.danger : styles.primary,
         isSecondary && dark && styles.secondaryDark,
         (disabled || loading) && styles.disabled,
         pressed && styles.pressed,
@@ -71,6 +72,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
     borderColor: 'rgba(30, 35, 39, 0.18)',
     borderWidth: 1,
+  },
+  danger: {
+    backgroundColor: colors.danger,
   },
   secondaryDark: {
     borderColor: 'rgba(244, 241, 232, 0.20)',

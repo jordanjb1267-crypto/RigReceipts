@@ -59,6 +59,14 @@ export default function ReportsScreen() {
         subtitle="Confirm records, export PDF/CSV, lock the month."
         value="Soon"
       />
+      <RouteBand
+        marker="⚙"
+        markerTone="neutral"
+        title="Account &amp; data"
+        subtitle="Export a copy of your data or delete your account."
+        value="Open"
+        onPress={() => router.push('/account-settings')}
+      />
     </Screen>
   );
 }
