@@ -107,11 +107,14 @@ export {
   summarizeSpend,
   summarizeRange,
   expensesInRange,
+  inDateRange,
   effectiveDateMs,
   monthRange,
   last7dRange,
 } from './captureMetrics';
-export type { ExpenseLike, CategorySpend, SpendSummary, DateRange } from './captureMetrics';
+export type { Dated, ExpenseLike, CategorySpend, SpendSummary, DateRange } from './captureMetrics';
+export { summarizeTrips, tripsInRange, costPerMile } from './mileage';
+export type { TripLike, MileageSummary } from './mileage';
 export { summarizeBrokerHistory, RELIABILITY_LABEL, MIN_LOADS_TO_RATE } from './brokerCheck';
 export type { BrokerExperience, BrokerReliability, BrokerSummary } from './brokerCheck';
 export { gradePeriod, letterFor, GRADE_CATEGORIES } from './grades';

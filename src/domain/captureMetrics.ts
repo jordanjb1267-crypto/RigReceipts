@@ -12,15 +12,19 @@
 import { ExpenseCategorySlug, expenseCategoryLabel } from './categories';
 import { ScanTypeSlug, scanTypeToExpenseCategory } from './scanTypes';
 
-export interface ExpenseLike {
+/** Anything with an optional business date and a recorded-at fallback. */
+export interface Dated {
+  /** ISO `YYYY-MM-DD` of the record, or null to fall back to `createdAt`. */
+  date: string | null;
+  /** Epoch ms the record was created. */
+  createdAt: number;
+}
+
+export interface ExpenseLike extends Dated {
   scanType: ScanTypeSlug;
   /** Parsed amount in USD, or null when OCR/entry left it blank. */
   totalUsd: number | null;
   gallons: number | null;
-  /** ISO `YYYY-MM-DD` of the receipt, or null to fall back to `createdAt`. */
-  date: string | null;
-  /** Epoch ms the capture was recorded. */
-  createdAt: number;
 }
 
 export interface CategorySpend {
@@ -71,7 +75,7 @@ const MONTH_NAMES = [
  * local time so it lines up with locally-constructed month boundaries) and
  * falls back to when it was recorded.
  */
-export function effectiveDateMs(e: ExpenseLike): number {
+export function effectiveDateMs(e: Dated): number {
   if (e.date) {
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(e.date);
     if (m) {
@@ -100,15 +104,20 @@ export function last7dRange(now: Date): DateRange {
   return { startMs: endMs - 7 * 24 * 60 * 60 * 1000, endMs };
 }
 
+/** Filters dated records whose effective date falls within `[startMs, endMs)`. */
+export function inDateRange<T extends Dated>(items: readonly T[], range: DateRange): T[] {
+  return items.filter((e) => {
+    const ms = effectiveDateMs(e);
+    return ms >= range.startMs && ms < range.endMs;
+  });
+}
+
 /** Filters captures whose effective date falls within `[startMs, endMs)`. */
 export function expensesInRange<T extends ExpenseLike>(
   expenses: readonly T[],
   range: DateRange,
 ): T[] {
-  return expenses.filter((e) => {
-    const ms = effectiveDateMs(e);
-    return ms >= range.startMs && ms < range.endMs;
-  });
+  return inDateRange(expenses, range);
 }
 
 /** Aggregates a set of captures into a spend summary. */
