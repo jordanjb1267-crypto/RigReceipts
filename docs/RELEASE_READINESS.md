@@ -150,20 +150,21 @@ status, and a truck MPG profile). Remaining items:
   `load_receivables` has RLS + its owner policy, and the security advisor
   flagged nothing new (the two standing notices are the intentional
   service-role moderation table and the guarded account-deletion RPC).
-- **Auto-link captured scans to loads** — today documents are marked present
-  per load by hand in the load detail screen; wiring the Scan flow to attach a
-  BOL/POD/etc. straight to a load (and back-fill `presentDocTypes` from
-  captures) is a headless polish task.
 - **Promote `road_grade_enabled`** from `off` once validated on a device
   (§2C — which flags ship on).
 
-Genuinely decision-free leftovers, if wanted: auto-link scans→loads, a weekly
-(vs monthly) grade period toggle, or a README refresh documenting the now-live
-tabs and the Road Grade.
+Both prior headless polish items are now **done**: captured scans can be filed
+under a load (a BOL/POD then counts toward its paperwork automatically), and
+Road Grade has a **This month / Last 7 days** toggle. What's left there is a
+device-gated on-ramp — attaching a scan to a load _from the Scan/review flow_
+at capture time (rather than pulling it in from the load detail screen).
+
+The only genuinely decision-free leftover is a README refresh documenting the
+now-live tabs and the Road Grade.
 
 ---
 
-_Last updated after the Road Grade feature (five-category operating grade,
-end-to-end behind `road_grade_enabled`; 232 tests / 26 suites). Keep the
-"Needs a human" section honest — move items to section 1 only once they're
-actually built **and** pass the gate._
+_Last updated after auto-linking scans to loads + the weekly/monthly Road
+Grade toggle (239 tests / 27 suites). Keep the "Needs a human" section honest
+— move items to section 1 only once they're actually built **and** pass the
+gate._
