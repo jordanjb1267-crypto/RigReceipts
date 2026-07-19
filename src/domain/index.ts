@@ -115,6 +115,15 @@ export {
 export type { Dated, ExpenseLike, CategorySpend, SpendSummary, DateRange } from './captureMetrics';
 export { summarizeTrips, tripsInRange, costPerMile } from './mileage';
 export type { TripLike, MileageSummary } from './mileage';
+export {
+  LOAD_STATUSES,
+  OPEN_LOAD_STATUSES,
+  isOpenLoad,
+  loadStatusLabel,
+  loadStatusTone,
+  nextLoadStatus,
+} from './loads';
+export type { LoadStatus } from './loads';
 export { summarizeBrokerHistory, RELIABILITY_LABEL, MIN_LOADS_TO_RATE } from './brokerCheck';
 export type { BrokerExperience, BrokerReliability, BrokerSummary } from './brokerCheck';
 export { gradePeriod, letterFor, GRADE_CATEGORIES } from './grades';

@@ -97,6 +97,7 @@ export default function RootLayout() {
           <Stack.Screen name="broker-check" options={{ presentation: 'modal' }} />
           <Stack.Screen name="monthly-closeout" options={{ presentation: 'modal' }} />
           <Stack.Screen name="add-trip" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="add-load" options={{ presentation: 'modal' }} />
         </Stack>
       </SafeAreaProvider>
     </QueryClientProvider>
