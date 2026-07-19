@@ -103,6 +103,8 @@ export type {
 } from './rpm';
 export { buildCsv, escapeCsvCell } from './csv';
 export type { CsvColumn } from './csv';
+export { summarizeBrokerHistory, RELIABILITY_LABEL, MIN_LOADS_TO_RATE } from './brokerCheck';
+export type { BrokerExperience, BrokerReliability, BrokerSummary } from './brokerCheck';
 export { gradePeriod, letterFor, GRADE_CATEGORIES } from './grades';
 export type { GradeCategory, LetterGrade, GradeInputs, CategoryGrade, PeriodGrade } from './grades';
 export { calculateDetention, DETENTION_DISCLAIMER } from './detention';

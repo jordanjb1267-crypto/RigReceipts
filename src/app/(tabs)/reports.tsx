@@ -25,6 +25,7 @@ const CAPTURE_CSV_COLUMNS: CsvColumn<Capture>[] = [
 export default function ReportsScreen() {
   const router = useRouter();
   const boardEnabled = isFeatureEnabled('community_rate_board_enabled');
+  const brokerCheckEnabled = isFeatureEnabled('broker_check_enabled');
   const captures = useCapturesStore((s) => s.captures);
 
   const exportCsv = async () => {
@@ -80,6 +81,16 @@ export default function ReportsScreen() {
         subtitle="Rate, fuel, deadhead, paperwork, money owed — coached, not shamed."
         value="Soon"
       />
+      {brokerCheckEnabled && (
+        <RouteBand
+          marker="B"
+          markerTone="rust"
+          title="Broker Check"
+          subtitle="Your private log of how each broker pays — on time, in full, detention honored."
+          value="Open"
+          onPress={() => router.push('/broker-check')}
+        />
+      )}
       <RouteBand
         marker="✓"
         markerTone="amber"
