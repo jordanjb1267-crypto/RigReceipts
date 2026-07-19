@@ -6,7 +6,7 @@ legal review) before this can ship to the App Store and Google Play.
 
 Everything in "Built & verified" runs through the standard gate on every
 commit: `prettier` → `expo lint` → `tsc --noEmit` → `jest` → `expo export`
-(iOS + Android). At the time of writing that is **176 unit tests** across 22
+(iOS + Android). At the time of writing that is **186 unit tests** across 23
 suites, both platform bundles exporting clean.
 
 ---
@@ -34,6 +34,11 @@ suites, both platform bundles exporting clean.
   - **Weekly & monthly grades** — `gradePeriod` letter grading.
   - **CSV export** — RFC-4180 `buildCsv`, shared from Reports.
   - **Broker Check** — driver-private pay-reliability log (flag-gated).
+  - **Live capture metrics** (`captureMetrics.ts`) — the first real-data
+    (non-mock) surface: month-to-date spend, record counts, and a category
+    breakdown computed from the on-device capture queue. Feeds a real
+    "This month" card + **Monthly Closeout** modal (month-scoped CSV) on
+    Reports and a "Your Receipts" widget on the dashboard.
 
 ### Capture pipeline
 
@@ -118,13 +123,16 @@ finished headless from this environment.
 
 These _could_ be built here without blocking on the above:
 
-- Live Supabase-backed metrics on Dashboard / Loads / Miles (today they show
-  placeholders; the data already syncs).
+- **Loads / Miles live data** — these two tabs still show placeholders because
+  there is no load or trip store yet (Dashboard + Reports now render real
+  captured spend). Loads needs a load-packet store; Miles needs manual trip
+  entry (live GPS stays on hold — see §2A).
 - More domain tests / edge-case hardening.
-- A monthly-closeout report view composed from existing grade + CSV logic.
+- Grades wired to real inputs once miles + load data exist (today `gradePeriod`
+  has no real rate/deadhead/paperwork signals to score, so it stays "Soon").
 
 ---
 
-_Last updated as part of the Broker Check slice. Keep the "Needs a human"
-section honest — move items to section 1 only once they're actually built
-**and** pass the gate._
+_Last updated as part of the live capture-metrics slice (real spend on
+Reports + dashboard). Keep the "Needs a human" section honest — move items to
+section 1 only once they're actually built **and** pass the gate._
