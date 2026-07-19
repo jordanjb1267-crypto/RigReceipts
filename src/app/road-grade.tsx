@@ -9,7 +9,6 @@ import {
   assembleGradeInputs,
   CATEGORY_LABEL,
   CategoryGrade,
-  DocumentType,
   estimateAllMileTargets,
   expensesInRange,
   GradableLoad,
@@ -17,6 +16,7 @@ import {
   gradePeriod,
   isCompletedLoad,
   monthRange,
+  presentDocTypesForLoad,
   summarizeTrips,
   tripsInRange,
 } from '@/domain';
@@ -57,14 +57,6 @@ export default function RoadGradeScreen() {
     const month = monthRange(now);
     const inMonth = (ms: number) => ms >= month.startMs && ms < month.endMs;
 
-    const docsByLoad = new Map<string, DocumentType[]>();
-    for (const d of loadDocs) {
-      if (d.status === 'missing') continue;
-      const arr = docsByLoad.get(d.loadId) ?? [];
-      arr.push(d.docType);
-      docsByLoad.set(d.loadId, arr);
-    }
-
     const gradableLoads: GradableLoad[] = loads
       .filter((l) => inMonth(l.createdAt))
       .map((raw) => {
@@ -76,7 +68,7 @@ export default function RoadGradeScreen() {
           deadheadMiles: l.deadheadMiles,
           completed: isCompletedLoad(l.status),
           bolRequired: l.bolRequired,
-          presentDocTypes: docsByLoad.get(l.id) ?? [],
+          presentDocTypes: presentDocTypesForLoad(l.id, loadDocs, captures),
         };
       });
 

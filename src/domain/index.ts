@@ -135,8 +135,10 @@ export {
   isDocumentPresent,
   requiredDocsForLoad,
   documentTypeForScanType,
+  isRecognizedDocScanType,
+  presentDocTypesForLoad,
 } from './documents';
-export type { DocumentType, DocumentStatus } from './documents';
+export type { DocumentType, DocumentStatus, ManualLoadDoc, AttachableCapture } from './documents';
 export {
   RECEIVABLE_TYPES,
   RECEIVABLE_STATUSES,

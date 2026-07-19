@@ -73,3 +73,40 @@ export function documentTypeForScanType(scanType: string): DocumentType {
       return 'other';
   }
 }
+
+/** A scan type maps to a recognized load document (not the catch-all `other`). */
+export const isRecognizedDocScanType = (scanType: string): boolean =>
+  documentTypeForScanType(scanType) !== 'other';
+
+export interface ManualLoadDoc {
+  loadId: string;
+  docType: DocumentType;
+  status: DocumentStatus;
+}
+
+export interface AttachableCapture {
+  loadId?: string | null;
+  scanType: string;
+}
+
+/**
+ * The document types present on a load, merging two sources: manually-marked
+ * documents (not `missing`) and captured scans attached to the load whose scan
+ * type maps to a recognized document. Deduplicated. Feeds the Paperwork grade.
+ */
+export function presentDocTypesForLoad(
+  loadId: string,
+  manualDocs: readonly ManualLoadDoc[],
+  captures: readonly AttachableCapture[],
+): DocumentType[] {
+  const set = new Set<DocumentType>();
+  for (const d of manualDocs) {
+    if (d.loadId === loadId && isDocumentPresent(d.status)) set.add(d.docType);
+  }
+  for (const c of captures) {
+    if (c.loadId !== loadId) continue;
+    const t = documentTypeForScanType(c.scanType);
+    if (t !== 'other') set.add(t);
+  }
+  return [...set];
+}

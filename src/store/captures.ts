@@ -25,16 +25,20 @@ export interface Capture {
   status: 'pending_sync' | 'synced';
   /** The remote document_scans id once synced (null when no image was stored). */
   remoteScanId?: string | null;
+  /** Load this scan is filed under, when attached (feeds the Paperwork grade). */
+  loadId?: string | null;
   createdAt: number;
 }
 
-export type NewCapture = Omit<Capture, 'id' | 'status' | 'createdAt' | 'remoteScanId'>;
+export type NewCapture = Omit<Capture, 'id' | 'status' | 'createdAt' | 'remoteScanId' | 'loadId'>;
 
 interface CapturesState {
   captures: Capture[];
   hydrated: boolean;
   addCapture: (draft: NewCapture) => string;
   markSynced: (id: string, remoteScanId: string | null) => void;
+  /** File a scan under a load (or detach with null). */
+  assignCaptureToLoad: (id: string, loadId: string | null) => void;
   removeCapture: (id: string) => void;
   clear: () => void;
 }
@@ -52,6 +56,7 @@ export const useCapturesStore = create<CapturesState>()(
           ...draft,
           id,
           status: 'pending_sync',
+          loadId: null,
           createdAt: Date.now(),
         };
         set((s) => ({ captures: [capture, ...s.captures] }));
@@ -62,6 +67,10 @@ export const useCapturesStore = create<CapturesState>()(
           captures: s.captures.map((c) =>
             c.id === id ? { ...c, status: 'synced', remoteScanId } : c,
           ),
+        })),
+      assignCaptureToLoad: (id, loadId) =>
+        set((s) => ({
+          captures: s.captures.map((c) => (c.id === id ? { ...c, loadId } : c)),
         })),
       removeCapture: (id) => set((s) => ({ captures: s.captures.filter((c) => c.id !== id) })),
       clear: () => set({ captures: [] }),

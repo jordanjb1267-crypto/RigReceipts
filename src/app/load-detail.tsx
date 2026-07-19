@@ -7,8 +7,10 @@ import { Button, Pill } from '@/components';
 import {
   deriveLoadRate,
   DocumentType,
+  documentTypeForScanType,
   documentTypeLabel,
   estimateAllMileTargets,
+  isRecognizedDocScanType,
   loadRateStatusLabel,
   loadRateStatusTone,
   ReceivableType,
@@ -18,6 +20,7 @@ import {
   RECEIVABLE_TYPES,
   requiredDocsForLoad,
 } from '@/domain';
+import { useCapturesStore } from '@/store/captures';
 import { useCostProfileStore } from '@/store/costProfile';
 import { useLoadDocsStore } from '@/store/loadDocs';
 import { normalizeLoad, useLoadsStore } from '@/store/loads';
@@ -48,6 +51,9 @@ export default function LoadDetailScreen() {
   const receivables = useReceivablesStore((s) => s.receivables);
   const addReceivable = useReceivablesStore((s) => s.addReceivable);
   const removeReceivable = useReceivablesStore((s) => s.removeReceivable);
+
+  const captures = useCapturesStore((s) => s.captures);
+  const assignCaptureToLoad = useCapturesStore((s) => s.assignCaptureToLoad);
 
   const load = rawLoad ? normalizeLoad(rawLoad) : null;
 
@@ -122,6 +128,9 @@ export default function LoadDetailScreen() {
     'scale_ticket',
     'lumper_receipt',
   ];
+  const attachedScans = captures.filter((c) => c.loadId === load.id);
+  const availableScans = captures.filter((c) => !c.loadId && isRecognizedDocScanType(c.scanType));
+  const scannedTypes = new Set(attachedScans.map((c) => documentTypeForScanType(c.scanType)));
   const loadReceivables = receivables.filter((r) => r.loadId === load.id);
 
   const addRcv = () => {
@@ -211,17 +220,72 @@ export default function LoadDetailScreen() {
             return (
               <View key={t} style={styles.docRow}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.docLabel}>{documentTypeLabel(t)}</Text>
+                  <Text style={styles.docLabel}>
+                    {documentTypeLabel(t)}
+                    {scannedTypes.has(t) ? <Text style={styles.scanned}> · scanned</Text> : null}
+                  </Text>
                   {isRequired && <Text style={styles.docReq}>Required for completed loads</Text>}
                 </View>
                 <Switch
-                  value={present}
+                  value={present || scannedTypes.has(t)}
+                  disabled={scannedTypes.has(t)}
                   onValueChange={() => toggleDoc(t, present)}
                   trackColor={{ true: palette.routeGreen, false: '#c9c5bc' }}
                 />
               </View>
             );
           })}
+        </View>
+
+        {/* Attached scans */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Attached scans</Text>
+          {attachedScans.length === 0 && availableScans.length === 0 ? (
+            <Text style={styles.hint}>
+              Scans you capture on the Scan tab can be filed here — a BOL or POD then counts toward
+              this load&apos;s paperwork automatically.
+            </Text>
+          ) : (
+            <>
+              {attachedScans.map((c) => (
+                <View key={c.id} style={styles.docRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.docLabel}>
+                      {documentTypeLabel(documentTypeForScanType(c.scanType))}
+                    </Text>
+                    {c.vendor && <Text style={styles.docReq}>{c.vendor}</Text>}
+                  </View>
+                  <Pressable
+                    accessibilityLabel="Detach scan"
+                    hitSlop={8}
+                    onPress={() => assignCaptureToLoad(c.id, null)}
+                  >
+                    <Text style={styles.remove}>Detach</Text>
+                  </Pressable>
+                </View>
+              ))}
+              {availableScans.length > 0 && <Text style={styles.attachHeading}>Attach a scan</Text>}
+              {availableScans.map((c) => (
+                <View key={c.id} style={styles.docRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.docLabel}>
+                      {documentTypeLabel(documentTypeForScanType(c.scanType))}
+                    </Text>
+                    <Text style={styles.docReq}>
+                      {c.vendor ?? c.date ?? new Date(c.createdAt).toISOString().slice(0, 10)}
+                    </Text>
+                  </View>
+                  <Pressable
+                    accessibilityLabel="Attach scan"
+                    hitSlop={8}
+                    onPress={() => assignCaptureToLoad(c.id, load.id)}
+                  >
+                    <Text style={styles.attach}>Attach</Text>
+                  </Pressable>
+                </View>
+              ))}
+            </>
+          )}
         </View>
 
         {/* Receivables */}
@@ -370,6 +434,9 @@ const styles = StyleSheet.create({
   },
   docLabel: { ...type.body, color: colors.text },
   docReq: { ...type.labelTiny, color: colors.textMuted, marginTop: 2 },
+  scanned: { ...type.labelTiny, color: palette.routeGreen },
+  attach: { ...type.labelTiny, color: palette.highwayBlue },
+  attachHeading: { ...type.labelTiny, color: colors.textMuted, marginTop: spacing.md },
   rcvRow: {
     alignItems: 'center',
     borderTopColor: colors.border,
