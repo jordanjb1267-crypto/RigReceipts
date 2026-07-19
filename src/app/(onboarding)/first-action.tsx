@@ -1,12 +1,14 @@
 import { useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { track } from '@/analytics';
 import { Button, Card, OnboardingShell, Pill } from '@/components';
 import { isFeatureEnabled } from '@/config/flags';
 import {
   analyzeRateCheck,
+  EQUIPMENT_TYPES,
+  EquipmentType,
   estimateAllMileTargets,
   QUICK_ESTIMATE_PROFILE,
   RateCheckResult,
@@ -14,7 +16,32 @@ import {
 import { parseRateCon, RATE_CON_FIXTURES } from '@/ocr';
 import { useOnboardingStore } from '@/store/onboarding';
 import { useRateCardStore } from '@/store/rateCard';
-import { colors, radii, spacing, type } from '@/theme';
+import { colors, palette, radii, spacing, type } from '@/theme';
+
+/** Optional lane entered under "Add Trip Details" — feeds the Rate Card lane. */
+interface TripDetails {
+  originCity: string;
+  originState: string;
+  destinationCity: string;
+  destinationState: string;
+  equipmentType: EquipmentType;
+}
+
+const EMPTY_TRIP: TripDetails = {
+  originCity: '',
+  originState: '',
+  destinationCity: '',
+  destinationState: '',
+  equipmentType: 'dry_van',
+};
+
+/** The active progressive labels for the calculation interstitial (Section 30). */
+const CALC_STEPS = [
+  'Calculating loaded RPM.',
+  'Adding deadhead.',
+  'Applying operating costs.',
+  'Checking your target.',
+];
 
 const VERDICT_COPY: Record<
   RateCheckResult['verdict'],
@@ -56,13 +83,24 @@ function RateCheckBranch() {
   const [deadhead, setDeadhead] = useState('142');
   const [useActualCosts, setUseActualCosts] = useState(false);
   const [result, setResult] = useState<RateCheckResult | null>(null);
+  const [calculating, setCalculating] = useState(false);
+  const [tripOpen, setTripOpen] = useState(false);
+  const [trip, setTrip] = useState<TripDetails>(EMPTY_TRIP);
 
   const targets = useMemo(() => estimateAllMileTargets(QUICK_ESTIMATE_PROFILE)!, []);
 
-  const canCalculate = Number(offer) > 0 && Number(loaded) > 0;
+  const offerError = Number(offer) > 0 ? null : 'Enter the offered rate.';
+  const loadedError = Number(loaded) > 0 ? null : 'Loaded miles must be greater than zero.';
+  const canCalculate = !offerError && !loadedError;
 
   const calculate = () => {
+    if (!canCalculate) return;
     track('rate_check_started', { cost_mode: useActualCosts ? 'actual' : 'quick' });
+    setCalculating(true);
+  };
+
+  // Runs after the loading interstitial's minimum dwell (see RateCheckLoading).
+  const finishCalculation = () => {
     const r = analyzeRateCheck({
       offeredPay: Number(offer),
       loadedMiles: Number(loaded),
@@ -71,10 +109,15 @@ function RateCheckBranch() {
       targetAllMileRpm: targets.targetAllMileRpm,
       variableCostPerMile: QUICK_ESTIMATE_PROFILE.variableCostPerMile,
     });
+    setCalculating(false);
     setResult(r);
     track('rate_check_completed', { verdict: r.verdict });
     track('first_profit_verdict_viewed', { verdict: r.verdict });
   };
+
+  if (calculating) {
+    return <RateCheckLoading onDone={finishCalculation} />;
+  }
 
   if (result) {
     return (
@@ -83,6 +126,7 @@ function RateCheckBranch() {
         offer={Number(offer)}
         breakEven={targets.breakEvenAllMileRpm}
         target={targets.targetAllMileRpm}
+        trip={trip.originCity.trim() ? trip : null}
         onAdjust={() => setResult(null)}
       />
     );
@@ -97,10 +141,78 @@ function RateCheckBranch() {
       </Text>
 
       <Card label="The load" style={styles.formCard}>
-        <NumberField label="Offer amount ($)" value={offer} onChange={setOffer} />
-        <NumberField label="Loaded miles" value={loaded} onChange={setLoaded} />
+        <NumberField
+          label="Offer amount ($)"
+          value={offer}
+          onChange={setOffer}
+          error={offerError}
+        />
+        <NumberField label="Loaded miles" value={loaded} onChange={setLoaded} error={loadedError} />
         <NumberField label="Deadhead miles" value={deadhead} onChange={setDeadhead} last />
       </Card>
+
+      <Pressable
+        accessibilityRole="button"
+        onPress={() => setTripOpen((v) => !v)}
+        style={styles.discloseRow}
+      >
+        <Text style={styles.discloseLabel}>Add Trip Details</Text>
+        <Text style={styles.discloseChevron}>{tripOpen ? '▲' : '▼'}</Text>
+      </Pressable>
+      {tripOpen && (
+        <Card style={styles.formCard}>
+          <View style={styles.tripRow}>
+            <TextField
+              label="Origin city"
+              value={trip.originCity}
+              onChange={(v) => setTrip((t) => ({ ...t, originCity: v }))}
+              flex={2}
+            />
+            <TextField
+              label="State"
+              value={trip.originState}
+              onChange={(v) => setTrip((t) => ({ ...t, originState: v.toUpperCase().slice(0, 2) }))}
+              flex={1}
+            />
+          </View>
+          <View style={styles.tripRow}>
+            <TextField
+              label="Destination city"
+              value={trip.destinationCity}
+              onChange={(v) => setTrip((t) => ({ ...t, destinationCity: v }))}
+              flex={2}
+            />
+            <TextField
+              label="State"
+              value={trip.destinationState}
+              onChange={(v) =>
+                setTrip((t) => ({ ...t, destinationState: v.toUpperCase().slice(0, 2) }))
+              }
+              flex={1}
+            />
+          </View>
+          <Text style={[styles.fieldLabel, { marginTop: spacing.md }]}>Equipment</Text>
+          <View style={styles.equipWrap}>
+            {EQUIPMENT_TYPES.map((e) => {
+              const active = trip.equipmentType === e.slug;
+              return (
+                <Pressable
+                  key={e.slug}
+                  onPress={() => setTrip((t) => ({ ...t, equipmentType: e.slug }))}
+                  style={[styles.equipChip, active && styles.equipChipActive]}
+                >
+                  <Text style={[styles.equipChipText, active && styles.equipChipTextActive]}>
+                    {e.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Text style={styles.costNote}>
+            Optional — a lane makes the Rate Card you can share match this load.
+          </Text>
+        </Card>
+      )}
 
       <View style={styles.segment}>
         {(
@@ -136,17 +248,53 @@ function RateCheckBranch() {
   );
 }
 
+/** Loading interstitial (Section 30 / Screen 6). Active feel, brief dwell. */
+function RateCheckLoading({ onDone }: { onDone: () => void }) {
+  const [stepIndex, setStepIndex] = useState(0);
+  const doneRef = useRef(onDone);
+  useEffect(() => {
+    doneRef.current = onDone;
+  }, [onDone]);
+
+  useEffect(() => {
+    const rotate = setInterval(() => {
+      setStepIndex((i) => Math.min(i + 1, CALC_STEPS.length - 1));
+    }, 320);
+    const done = setTimeout(() => {
+      clearInterval(rotate);
+      doneRef.current();
+    }, 1100);
+    return () => {
+      clearInterval(rotate);
+      clearTimeout(done);
+    };
+  }, []);
+
+  return (
+    <OnboardingShell step={4} steps={5}>
+      <Pill label="Rate Check" tone="green" />
+      <View style={styles.loadingBlock}>
+        <ActivityIndicator color={palette.routeGreen} />
+        <Text style={styles.loadingTitle}>Running the numbers</Text>
+        <Text style={styles.loadingStep}>{CALC_STEPS[stepIndex]}</Text>
+      </View>
+    </OnboardingShell>
+  );
+}
+
 function ProfitResult({
   result,
   offer,
   breakEven,
   target,
+  trip,
   onAdjust,
 }: {
   result: RateCheckResult;
   offer: number;
   breakEven: number;
   target: number;
+  trip: TripDetails | null;
   onAdjust: () => void;
 }) {
   const router = useRouter();
@@ -164,14 +312,14 @@ function ProfitResult({
   };
 
   const createRateCard = () => {
-    // Onboarding's Rate Check doesn't collect a lane, so use a sample lane for
-    // the demo card; a saved Load supplies the real lane later.
+    // Use the lane from "Add Trip Details" when the driver entered one; otherwise
+    // a sample lane stands in for the demo card (a saved Load supplies it later).
     setCardSource({
-      originMetro: 'Chicago',
-      originState: 'IL',
-      destinationMetro: 'Atlanta',
-      destinationState: 'GA',
-      equipmentType: 'dry_van',
+      originMetro: trip?.originCity || 'Chicago',
+      originState: trip?.originState || 'IL',
+      destinationMetro: trip?.destinationCity || 'Atlanta',
+      destinationState: trip?.destinationState || 'GA',
+      equipmentType: trip?.equipmentType ?? 'dry_van',
       rateStatus: 'completed',
       verificationLevel: 'completed_load',
       grossRate: offer,
@@ -408,11 +556,13 @@ function NumberField({
   value,
   onChange,
   last,
+  error,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   last?: boolean;
+  error?: string | null;
 }) {
   return (
     <View style={[styles.field, last && styles.fieldLast]}>
@@ -424,6 +574,35 @@ function NumberField({
         style={styles.fieldInput}
         placeholder="0"
         placeholderTextColor="rgba(30,35,39,0.3)"
+        accessibilityLabel={label}
+      />
+      {error ? <Text style={styles.fieldError}>{error}</Text> : null}
+    </View>
+  );
+}
+
+function TextField({
+  label,
+  value,
+  onChange,
+  flex,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  flex: number;
+}) {
+  return (
+    <View style={[styles.field, styles.fieldLast, { flex }]}>
+      <Text style={styles.fieldLabel}>{label}</Text>
+      <TextInput
+        value={value}
+        onChangeText={onChange}
+        autoCapitalize="words"
+        style={styles.fieldInput}
+        placeholder="—"
+        placeholderTextColor="rgba(30,35,39,0.3)"
+        accessibilityLabel={label}
       />
     </View>
   );
@@ -524,6 +703,72 @@ const styles = StyleSheet.create({
     fontFamily: type.emphasis.fontFamily,
     fontSize: 16,
     padding: 0,
+  },
+  fieldError: {
+    ...type.bodySmall,
+    color: colors.danger,
+    marginTop: 6,
+  },
+  // trip details disclosure
+  discloseRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: spacing.lg,
+    paddingVertical: spacing.sm,
+  },
+  discloseLabel: {
+    ...type.emphasis,
+    color: colors.text,
+  },
+  discloseChevron: {
+    color: colors.textMuted,
+    fontSize: 12,
+  },
+  tripRow: {
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  equipWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  equipChip: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  equipChipActive: {
+    backgroundColor: colors.cta,
+    borderColor: colors.cta,
+  },
+  equipChipText: {
+    ...type.emphasis,
+    color: colors.text,
+    fontSize: 12,
+  },
+  equipChipTextActive: {
+    color: colors.textOnDark,
+  },
+  // loading interstitial
+  loadingBlock: {
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingVertical: spacing.xxl * 2,
+  },
+  loadingTitle: {
+    ...type.h2,
+    color: colors.text,
+    marginTop: spacing.sm,
+  },
+  loadingStep: {
+    ...type.body,
+    color: colors.textMuted,
   },
   // metrics
   metricGrid: {
