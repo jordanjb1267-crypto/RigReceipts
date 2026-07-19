@@ -81,17 +81,22 @@ the share sheet are exercised on device.
 ## Web deletion request (Google Play requirement)
 
 Google Play also requires a URL, reachable **without installing the app**, where
-a user can request account and data deletion. Publish a page at
-**`https://rigreceipts.app/delete-account`** (or accept requests at
-**privacy@rigreceipts.app**) that:
+a user can request account and data deletion. This page is built:
+**`web/delete-account.html`**, to host at
+**`https://rigreceipts.app/delete-account`**. It:
 
-- explains what is deleted and the retention exceptions (mirror this doc and the
-  Privacy Policy), and
-- lets a user submit a deletion request tied to their account email, fulfilled
-  by an operator invoking the same deletion (via the service role) for that user.
+- points to the in-app path as the fastest option;
+- explains what is deleted and the retention exceptions (mirroring this doc and
+  the Privacy Policy); and
+- provides a request form that composes an email to **privacy@rigreceipts.app**
+  with the account email and a confirmation.
 
-This page is not yet built — add it alongside the hosted Privacy Policy and
-Terms pages in `web/`.
+The email path is **operator-fulfilled**: it is a static page, so a request
+emails the team, who verify ownership and run the same deletion for that user
+via the service role (e.g., `select public.delete_current_account()` executed as
+that user, or an admin delete of the user's `auth.users` row). Wiring an
+automated verified web endpoint is an optional follow-up; the manual path meets
+the policy requirement.
 
 ## Testing
 

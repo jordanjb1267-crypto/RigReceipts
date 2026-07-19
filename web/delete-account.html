@@ -1,0 +1,312 @@
+<!doctype html>
+<!--
+  RigReceipts account & data deletion request — hostable page for
+  https://rigreceipts.app/delete-account
+  Satisfies Google Play's requirement for a web-reachable deletion path.
+  Static page: the email path composes a mailto to privacy@rigreceipts.app,
+  which an operator fulfills via the service role. Keep consistent with
+  docs/ACCOUNT_DELETION.md and the Privacy Policy.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="index,follow" />
+    <title>Delete Your Account — RigReceipts</title>
+    <style>
+      :root {
+        --bg: #f4f1e8;
+        --surface: #fbf8ef;
+        --ink: #1f2427;
+        --muted: #5c5b54;
+        --line: rgba(30, 35, 39, 0.12);
+        --route: #2e6b57;
+        --accent: #c8912d;
+        --danger: #a94a3b;
+        --maxw: 44rem;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #15191c;
+          --surface: #1e2327;
+          --ink: #eae6da;
+          --muted: #a3a196;
+          --line: rgba(244, 241, 232, 0.14);
+          --route: #4f9a80;
+          --danger: #cf6b59;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        -webkit-text-size-adjust: 100%;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, system-ui, sans-serif;
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+      }
+      .wrap {
+        max-width: var(--maxw);
+        margin: 0 auto;
+        padding: clamp(1.5rem, 4vw, 3.5rem) 1.25rem 4rem;
+      }
+      header {
+        border-bottom: 1px solid var(--line);
+        padding-bottom: 1.25rem;
+        margin-bottom: 2rem;
+      }
+      .mark {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 40px;
+        height: 40px;
+        border-radius: 11px;
+        background: var(--route);
+        color: #f4f1e8;
+        font-weight: 800;
+        font-size: 22px;
+        letter-spacing: -1px;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+      }
+      h1 {
+        font-size: clamp(1.75rem, 5vw, 2.4rem);
+        letter-spacing: -0.03em;
+        margin: 1.25rem 0 0.25rem;
+      }
+      h2 {
+        font-size: 1.2rem;
+        letter-spacing: -0.02em;
+        margin: 2.25rem 0 0.5rem;
+      }
+      p,
+      li {
+        color: var(--ink);
+      }
+      a {
+        color: var(--route);
+      }
+      strong {
+        font-weight: 700;
+      }
+      ol.steps {
+        counter-reset: step;
+        list-style: none;
+        padding: 0;
+        margin: 1rem 0;
+      }
+      ol.steps li {
+        position: relative;
+        padding-left: 2.4rem;
+        margin: 0.6rem 0;
+      }
+      ol.steps li::before {
+        counter-increment: step;
+        content: counter(step);
+        position: absolute;
+        left: 0;
+        top: 0.05rem;
+        width: 1.7rem;
+        height: 1.7rem;
+        border-radius: 8px;
+        background: var(--route);
+        color: #f4f1e8;
+        font-weight: 800;
+        font-size: 0.85rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 1.25rem 1.4rem;
+        margin: 1.25rem 0;
+      }
+      .field {
+        margin: 0.9rem 0;
+      }
+      label {
+        display: block;
+        font-size: 0.8rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+        margin-bottom: 0.35rem;
+      }
+      input,
+      textarea {
+        width: 100%;
+        font: inherit;
+        color: var(--ink);
+        background: var(--bg);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 0.65rem 0.75rem;
+      }
+      input:focus-visible,
+      textarea:focus-visible {
+        outline: 2px solid var(--route);
+        outline-offset: 1px;
+      }
+      textarea {
+        min-height: 4.5rem;
+        resize: vertical;
+      }
+      button {
+        font: inherit;
+        font-weight: 800;
+        letter-spacing: -0.01em;
+        color: #f4f1e8;
+        background: var(--danger);
+        border: 0;
+        border-radius: 12px;
+        padding: 0.85rem 1.1rem;
+        width: 100%;
+        cursor: pointer;
+        margin-top: 0.5rem;
+      }
+      button:hover {
+        filter: brightness(1.05);
+      }
+      .hint {
+        font-size: 0.85rem;
+        color: var(--muted);
+        margin-top: 0.6rem;
+      }
+      ul {
+        padding-left: 1.2rem;
+      }
+      li {
+        margin: 0.35rem 0;
+      }
+      footer {
+        margin-top: 3rem;
+        padding-top: 1.25rem;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        * {
+          transition: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="wrap">
+      <header>
+        <div class="brand"><span class="mark">R</span> RigReceipts</div>
+        <h1>Delete your account</h1>
+        <p style="color: var(--muted); margin: 0">
+          Remove your RigReceipts account and all data synced to it. This is permanent.
+        </p>
+      </header>
+
+      <h2>Fastest: delete in the app</h2>
+      <p>
+        If you have RigReceipts installed and can sign in, you can delete your account yourself:
+      </p>
+      <ol class="steps">
+        <li>Open RigReceipts and go to the <strong>Reports</strong> tab.</li>
+        <li>Tap <strong>Account &amp; data</strong>.</li>
+        <li>Tap <strong>Delete Account</strong> and confirm.</li>
+      </ol>
+      <p>Deletion happens immediately and cannot be undone.</p>
+
+      <h2>Request deletion without the app</h2>
+      <p>
+        If you can't access the app, send us a deletion request. We verify that the request comes
+        from the account owner before deleting.
+      </p>
+      <div class="card">
+        <form id="req">
+          <div class="field">
+            <label for="email">Account email</label>
+            <input
+              id="email"
+              type="email"
+              autocomplete="email"
+              placeholder="you@example.com"
+              required
+            />
+          </div>
+          <div class="field">
+            <label for="note">Anything we should know? (optional)</label>
+            <textarea id="note" placeholder="Optional details"></textarea>
+          </div>
+          <button type="submit">Email My Deletion Request</button>
+          <p class="hint">
+            This opens your email app with a pre-filled message to
+            <strong>privacy@rigreceipts.app</strong>. Prefer to write us directly? Email that
+            address with the subject "Account deletion request."
+          </p>
+        </form>
+      </div>
+
+      <h2>What gets deleted</h2>
+      <p>Whether you delete in the app or by request, we remove:</p>
+      <ul>
+        <li>your account and sign-in;</li>
+        <li>your loads, receipts, expenses, mileage, rate checks, and cost profile;</li>
+        <li>any rate cards you posted to the Community Rate Board;</li>
+        <li>the receipt and document images stored in your account.</li>
+      </ul>
+      <p>
+        Deleting your account removes all of the above together. Community rate ranges are built
+        from anonymized, aggregated data with no link to you, so there is nothing personal to remove
+        there. We may retain minimal records where the law requires it (for example, tax or
+        fraud-prevention obligations), as described in our
+        <a href="/privacy">Privacy Policy</a>.
+      </p>
+
+      <h2>How long it takes</h2>
+      <p>
+        In-app deletion is immediate. Emailed requests are completed within <strong>30 days</strong>
+        of verifying ownership, and usually much sooner.
+      </p>
+
+      <p style="margin-top: 2rem">
+        <a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms of Service</a>
+      </p>
+
+      <footer>© 2026 RigReceipts. Built for the driver.</footer>
+    </main>
+
+    <script>
+      document.getElementById('req').addEventListener('submit', function (e) {
+        e.preventDefault();
+        var email = document.getElementById('email').value.trim();
+        var note = document.getElementById('note').value.trim();
+        if (!email) return;
+        var subject = 'Account deletion request';
+        var body =
+          'I request deletion of my RigReceipts account and all associated data.\n\n' +
+          'Account email: ' +
+          email +
+          '\n' +
+          (note ? 'Notes: ' + note + '\n' : '') +
+          '\nI confirm I am the owner of this account.';
+        window.location.href =
+          'mailto:privacy@rigreceipts.app?subject=' +
+          encodeURIComponent(subject) +
+          '&body=' +
+          encodeURIComponent(body);
+      });
+    </script>
+  </body>
+</html>
