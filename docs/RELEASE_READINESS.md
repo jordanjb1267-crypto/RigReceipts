@@ -6,7 +6,7 @@ legal review) before this can ship to the App Store and Google Play.
 
 Everything in "Built & verified" runs through the standard gate on every
 commit: `prettier` → `expo lint` → `tsc --noEmit` → `jest` → `expo export`
-(iOS + Android). At the time of writing that is **186 unit tests** across 23
+(iOS + Android). At the time of writing that is **196 unit tests** across 25
 suites, both platform bundles exporting clean.
 
 ---
@@ -39,6 +39,19 @@ suites, both platform bundles exporting clean.
     breakdown computed from the on-device capture queue. Feeds a real
     "This month" card + **Monthly Closeout** modal (month-scoped CSV) on
     Reports and a "Your Receipts" widget on the dashboard.
+
+### Real-data tabs (all five tabs now hold live local data)
+
+- **Scan → captures** — the capture queue is the source of truth for scanned
+  receipts (offline-first, syncs to Supabase when signed in).
+- **Miles** (`mileage.ts` + trips store) — manual trip entry with loaded /
+  deadhead totals and a real **cost-per-mile** for the month (captured
+  expenses ÷ entered miles). Live GPS stays out of scope (§2A).
+- **Loads** (`loads.ts` + loads store) — load folders with a booked →
+  in-transit → delivered → paid lifecycle. Document packets + detention link
+  in later (see §3).
+- **Reports / Dashboard** — real month-to-date spend, category breakdown, and
+  a "Your Receipts" widget, as above.
 
 ### Capture pipeline
 
@@ -119,20 +132,34 @@ finished headless from this environment.
 
 ---
 
-## 3. Suggested next headless slices (optional, no human needed)
+## 3. Next up — needs a product decision on the data model
 
-These _could_ be built here without blocking on the above:
+The headless real-data work is done: all five tabs hold live local data.
+What remains is mostly blocked on **how the data model should grow**, which is
+a product call, not just wiring:
 
-- **Loads / Miles live data** — these two tabs still show placeholders because
-  there is no load or trip store yet (Dashboard + Reports now render real
-  captured spend). Loads needs a load-packet store; Miles needs manual trip
-  entry (live GPS stays on hold — see §2A).
-- More domain tests / edge-case hardening.
-- Grades wired to real inputs once miles + load data exist (today `gradePeriod`
-  has no real rate/deadhead/paperwork signals to score, so it stays "Soon").
+- **Grades** — `gradePeriod` supports partial scoring, but only **deadhead**
+  has a clean signal today (from trips). The other four need model decisions
+  first: _rate_ needs a per-load **revenue/rate** field; _fuel_ needs a
+  fuel-specific budget split out of the variable CPM; _paperwork_ needs
+  **documents linked to loads** (which scans belong to which load); _money
+  owed_ needs **detention / lumper / reimbursement** tracking. A one-category
+  letter would mislead, so grades stays "Soon" until at least a couple of
+  these land.
+- **Load packets** — attaching captured BOL/POD/scale/lumper scans to a load,
+  plus detention on the load. Needs the capture↔load link decided.
+- **Load revenue** — add rate/revenue to a load to unlock real RPM + the rate
+  grade.
+
+None of these is hard to build; each just needs you to confirm the shape
+(fields, statuses, how captures attach to loads) before I commit to it.
+
+Genuinely decision-free leftovers, if wanted: more domain edge-case tests, or
+a README refresh documenting the now-live tabs.
 
 ---
 
-_Last updated as part of the live capture-metrics slice (real spend on
-Reports + dashboard). Keep the "Needs a human" section honest — move items to
-section 1 only once they're actually built **and** pass the gate._
+_Last updated after the Miles + Loads slices (all five tabs now hold real
+local data; 196 tests / 25 suites). Keep the "Needs a human" section honest —
+move items to section 1 only once they're actually built **and** pass the
+gate._
