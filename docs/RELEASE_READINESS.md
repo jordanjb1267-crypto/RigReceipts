@@ -145,10 +145,11 @@ The Road Grade data model is now built (load revenue/mileage, a
 `load_receivables` child model, load-attached documents with a workflow
 status, and a truck MPG profile). Remaining items:
 
-- **Apply migration `20260719000009_grades.sql`** to the live project — it is
-  authored, additive, and reversible, but the Supabase connector must be
-  re-authorized to apply it (OAuth can't run in this non-interactive session).
-  Needs a human (§2B).
+- **Migration `20260719000009_grades.sql` — applied ✓** to the live project
+  (`kfyzglmphwohbhigvdyy`). All nine migrations are now in the remote history;
+  `load_receivables` has RLS + its owner policy, and the security advisor
+  flagged nothing new (the two standing notices are the intentional
+  service-role moderation table and the guarded account-deletion RPC).
 - **Auto-link captured scans to loads** — today documents are marked present
   per load by hand in the load detail screen; wiring the Scan flow to attach a
   BOL/POD/etc. straight to a load (and back-fill `presentDocTypes` from
