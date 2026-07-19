@@ -6,7 +6,7 @@ legal review) before this can ship to the App Store and Google Play.
 
 Everything in "Built & verified" runs through the standard gate on every
 commit: `prettier` → `expo lint` → `tsc --noEmit` → `jest` → `expo export`
-(iOS + Android). At the time of writing that is **196 unit tests** across 25
+(iOS + Android). At the time of writing that is **232 unit tests** across 26
 suites, both platform bundles exporting clean.
 
 ---
@@ -31,7 +31,14 @@ suites, both platform bundles exporting clean.
   aggregates, verification levels, sensitive-text detection, board moderation.
 - Reports features shipped this batch — all pure + tested where there's logic:
   - **RPM Coach** — cost-profile editor → break-even / target RPM.
-  - **Weekly & monthly grades** — `gradePeriod` letter grading.
+  - **Road Grade** (flag-gated `road_grade_enabled`) — the full five-category
+    operating grade (rate, fuel, deadhead, paperwork, money owed). Each
+    category returns a letter + operational reason or a precise "what to add";
+    missing data is never a failing grade (proven by tests) and the overall
+    letter is withheld below three gradable categories. Reuses the Rate
+    Check / RPM Coach math — no competing rate engine. Fed by load revenue,
+    the trip ledger, fuel captures, load-attached documents, a
+    `load_receivables` model, and a truck MPG profile.
   - **CSV export** — RFC-4180 `buildCsv`, shared from Reports.
   - **Broker Check** — driver-private pay-reliability log (flag-gated).
   - **Live capture metrics** (`captureMetrics.ts`) — the first real-data
@@ -118,7 +125,7 @@ finished headless from this environment.
       5 load folders are flagged _proposals_ in `DECISIONS.md`).
 - [ ] Which flags to promote from `off` → `beta`/`production` for launch
       (Freight Intelligence, rate cards, rate board, posting, aggregates,
-      Broker Check, revised onboarding are all currently `off`).
+      Broker Check, Road Grade, revised onboarding are all currently `off`).
 - [ ] Pricing confirmation for the paywall tiers.
 
 ### D. Needs legal / compliance review
@@ -132,34 +139,30 @@ finished headless from this environment.
 
 ---
 
-## 3. Next up — needs a product decision on the data model
+## 3. Next up — mostly polish, some needs a human
 
-The headless real-data work is done: all five tabs hold live local data.
-What remains is mostly blocked on **how the data model should grow**, which is
-a product call, not just wiring:
+The Road Grade data model is now built (load revenue/mileage, a
+`load_receivables` child model, load-attached documents with a workflow
+status, and a truck MPG profile). Remaining items:
 
-- **Grades** — `gradePeriod` supports partial scoring, but only **deadhead**
-  has a clean signal today (from trips). The other four need model decisions
-  first: _rate_ needs a per-load **revenue/rate** field; _fuel_ needs a
-  fuel-specific budget split out of the variable CPM; _paperwork_ needs
-  **documents linked to loads** (which scans belong to which load); _money
-  owed_ needs **detention / lumper / reimbursement** tracking. A one-category
-  letter would mislead, so grades stays "Soon" until at least a couple of
-  these land.
-- **Load packets** — attaching captured BOL/POD/scale/lumper scans to a load,
-  plus detention on the load. Needs the capture↔load link decided.
-- **Load revenue** — add rate/revenue to a load to unlock real RPM + the rate
-  grade.
+- **Apply migration `20260719000009_grades.sql`** to the live project — it is
+  authored, additive, and reversible, but the Supabase connector must be
+  re-authorized to apply it (OAuth can't run in this non-interactive session).
+  Needs a human (§2B).
+- **Auto-link captured scans to loads** — today documents are marked present
+  per load by hand in the load detail screen; wiring the Scan flow to attach a
+  BOL/POD/etc. straight to a load (and back-fill `presentDocTypes` from
+  captures) is a headless polish task.
+- **Promote `road_grade_enabled`** from `off` once validated on a device
+  (§2C — which flags ship on).
 
-None of these is hard to build; each just needs you to confirm the shape
-(fields, statuses, how captures attach to loads) before I commit to it.
-
-Genuinely decision-free leftovers, if wanted: more domain edge-case tests, or
-a README refresh documenting the now-live tabs.
+Genuinely decision-free leftovers, if wanted: auto-link scans→loads, a weekly
+(vs monthly) grade period toggle, or a README refresh documenting the now-live
+tabs and the Road Grade.
 
 ---
 
-_Last updated after the Miles + Loads slices (all five tabs now hold real
-local data; 196 tests / 25 suites). Keep the "Needs a human" section honest —
-move items to section 1 only once they're actually built **and** pass the
-gate._
+_Last updated after the Road Grade feature (five-category operating grade,
+end-to-end behind `road_grade_enabled`; 232 tests / 26 suites). Keep the
+"Needs a human" section honest — move items to section 1 only once they're
+actually built **and** pass the gate._
