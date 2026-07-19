@@ -15,6 +15,7 @@ import {
   GradableReceivable,
   gradePeriod,
   isCompletedLoad,
+  last7dRange,
   monthRange,
   presentDocTypesForLoad,
   summarizeTrips,
@@ -51,14 +52,17 @@ export default function RoadGradeScreen() {
   const dieselPrice = useTruckProfileStore((s) => s.dieselPricePerGallon);
   const setTruckProfile = useTruckProfileStore((s) => s.setTruckProfile);
 
+  const [periodKind, setPeriodKind] = useState<'month' | 'week'>('month');
+
   const grade = useMemo(() => {
     const now = new Date();
     const nowMs = now.getTime();
-    const month = monthRange(now);
-    const inMonth = (ms: number) => ms >= month.startMs && ms < month.endMs;
+    const range = periodKind === 'month' ? monthRange(now) : last7dRange(now);
+    const rangeLabel = periodKind === 'month' ? (range.label ?? 'this month') : 'the last 7 days';
+    const inRange = (ms: number) => ms >= range.startMs && ms < range.endMs;
 
     const gradableLoads: GradableLoad[] = loads
-      .filter((l) => inMonth(l.createdAt))
+      .filter((l) => inRange(l.createdAt))
       .map((raw) => {
         const l = normalizeLoad(raw);
         return {
@@ -72,14 +76,14 @@ export default function RoadGradeScreen() {
         };
       });
 
-    const monthTrips = summarizeTrips(tripsInRange(trips, month));
+    const periodTrips = summarizeTrips(tripsInRange(trips, range));
 
-    const fuelCaptures = expensesInRange(captures, month).filter((c) => c.scanType === 'fuel');
+    const fuelCaptures = expensesInRange(captures, range).filter((c) => c.scanType === 'fuel');
     const actualFuelCost = fuelCaptures.reduce((sum, c) => sum + (c.totalUsd ?? 0), 0);
     const gallonsPurchased = fuelCaptures.reduce((sum, c) => sum + (c.gallons ?? 0), 0);
 
     const gradableReceivables: GradableReceivable[] = receivables
-      .filter((r) => inMonth(r.dateIncurred ? Date.parse(r.dateIncurred) : r.createdAt))
+      .filter((r) => inRange(r.dateIncurred ? Date.parse(r.dateIncurred) : r.createdAt))
       .map((r) => ({
         amountExpected: r.amountExpected,
         amountReceived: r.amountReceived,
@@ -91,9 +95,9 @@ export default function RoadGradeScreen() {
       loads: gradableLoads,
       targets: profile ? estimateAllMileTargets(profile) : null,
       hasCostProfile: profile !== null,
-      trips: { deadheadMiles: monthTrips.deadheadMiles, totalMiles: monthTrips.totalMiles },
+      trips: { deadheadMiles: periodTrips.deadheadMiles, totalMiles: periodTrips.totalMiles },
       fuel: {
-        businessMiles: monthTrips.totalMiles,
+        businessMiles: periodTrips.totalMiles,
         mpg,
         actualFuelCost,
         gallonsPurchased,
@@ -101,8 +105,8 @@ export default function RoadGradeScreen() {
       },
       receivables: gradableReceivables,
     });
-    return { period: gradePeriod(inputs), monthLabel: month.label ?? 'This month' };
-  }, [loads, trips, captures, receivables, loadDocs, profile, mpg, dieselPrice]);
+    return { period: gradePeriod(inputs), rangeLabel };
+  }, [periodKind, loads, trips, captures, receivables, loadDocs, profile, mpg, dieselPrice]);
 
   const { period } = grade;
 
@@ -121,7 +125,7 @@ export default function RoadGradeScreen() {
         </View>
         <Text style={styles.title}>Road Grade</Text>
         <Text style={styles.subtitle}>
-          How well you operated {grade.monthLabel} — and where you&apos;re losing money or creating
+          How well you operated {grade.rangeLabel} — and where you&apos;re losing money or creating
           risk.
         </Text>
       </View>
@@ -139,6 +143,21 @@ export default function RoadGradeScreen() {
           </View>
         ) : (
           <>
+            <View style={styles.segment}>
+              {(['month', 'week'] as const).map((k) => (
+                <Pressable
+                  key={k}
+                  accessibilityRole="button"
+                  accessibilityLabel={k === 'month' ? 'This month' : 'Last 7 days'}
+                  onPress={() => setPeriodKind(k)}
+                  style={[styles.segmentBtn, periodKind === k && styles.segmentBtnActive]}
+                >
+                  <Text style={[styles.segmentText, periodKind === k && styles.segmentTextActive]}>
+                    {k === 'month' ? 'This month' : 'Last 7 days'}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
             <OverallCard period={period} />
             {period.categories.map((c) => (
               <CategoryCard key={c.category} grade={c} />
@@ -287,6 +306,22 @@ const styles = StyleSheet.create({
   title: { ...type.h1, color: colors.text, marginTop: spacing.sm },
   subtitle: { ...type.body, color: colors.textMuted, marginTop: spacing.xs },
   body: { paddingHorizontal: spacing.xl, paddingTop: spacing.lg },
+  segment: {
+    backgroundColor: 'rgba(30, 35, 39, 0.06)',
+    borderRadius: radii.sm + 2,
+    flexDirection: 'row',
+    marginBottom: spacing.md,
+    padding: 3,
+  },
+  segmentBtn: {
+    alignItems: 'center',
+    borderRadius: radii.sm,
+    flex: 1,
+    paddingVertical: spacing.sm,
+  },
+  segmentBtnActive: { backgroundColor: colors.surface },
+  segmentText: { ...type.labelTiny, color: colors.textMuted },
+  segmentTextActive: { color: colors.text },
   card: {
     backgroundColor: colors.surface,
     borderColor: colors.border,
