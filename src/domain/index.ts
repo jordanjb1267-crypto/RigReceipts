@@ -103,6 +103,15 @@ export type {
 } from './rpm';
 export { buildCsv, escapeCsvCell } from './csv';
 export type { CsvColumn } from './csv';
+export {
+  summarizeSpend,
+  summarizeRange,
+  expensesInRange,
+  effectiveDateMs,
+  monthRange,
+  last7dRange,
+} from './captureMetrics';
+export type { ExpenseLike, CategorySpend, SpendSummary, DateRange } from './captureMetrics';
 export { summarizeBrokerHistory, RELIABILITY_LABEL, MIN_LOADS_TO_RATE } from './brokerCheck';
 export type { BrokerExperience, BrokerReliability, BrokerSummary } from './brokerCheck';
 export { gradePeriod, letterFor, GRADE_CATEGORIES } from './grades';

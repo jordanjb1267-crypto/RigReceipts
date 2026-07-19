@@ -1,11 +1,15 @@
 import { useRouter } from 'expo-router';
-import { Alert, Share, StyleSheet, Text } from 'react-native';
+import { useMemo } from 'react';
+import { Alert, Share, StyleSheet, Text, View } from 'react-native';
 
 import { Card, Pill, RouteBand, Screen } from '@/components';
 import { isFeatureEnabled } from '@/config/flags';
-import { buildCsv, CsvColumn, SCAN_TYPES } from '@/domain';
+import { buildCsv, CsvColumn, monthRange, SCAN_TYPES, summarizeRange } from '@/domain';
 import { Capture, useCapturesStore } from '@/store/captures';
 import { colors, spacing, type } from '@/theme';
+
+const usd = (n: number) =>
+  `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const scanLabel = (slug: string) => SCAN_TYPES.find((t) => t.slug === slug)?.label ?? slug;
 
@@ -28,6 +32,10 @@ export default function ReportsScreen() {
   const brokerCheckEnabled = isFeatureEnabled('broker_check_enabled');
   const captures = useCapturesStore((s) => s.captures);
 
+  const month = useMemo(() => monthRange(new Date()), []);
+  const monthSummary = useMemo(() => summarizeRange(captures, month), [captures, month]);
+  const monthRecords = monthSummary.expenseCount + monthSummary.documentCount;
+
   const exportCsv = async () => {
     if (captures.length === 0) {
       Alert.alert('Nothing to export yet', 'Scan a receipt or two, then export your records here.');
@@ -45,15 +53,54 @@ export default function ReportsScreen() {
     <Screen
       kicker="Monthly Atlas"
       title="Every day gets a cost marker."
-      headerRight={<Pill label="0% complete" tone="neutral" />}
+      headerRight={
+        <Pill
+          label={monthRecords > 0 ? `${monthRecords} records` : 'No records'}
+          tone={monthRecords > 0 ? 'green' : 'neutral'}
+        />
+      }
     >
-      <Card label="This month" labelRight="$0.00">
-        <Text style={styles.emptyTitle}>The calendar fills as you track.</Text>
-        <Text style={styles.emptyCopy}>
-          Each date will show spend, receipts, miles, load activity, and missing paperwork. Tap a
-          day for its bulletin.
-        </Text>
+      <Card label={`This month · ${month.label}`} labelRight={usd(monthSummary.totalUsd)}>
+        {monthRecords === 0 ? (
+          <>
+            <Text style={styles.emptyTitle}>The calendar fills as you track.</Text>
+            <Text style={styles.emptyCopy}>
+              Each date will show spend, receipts, miles, load activity, and missing paperwork. Tap
+              a day for its bulletin.
+            </Text>
+          </>
+        ) : (
+          <>
+            <Text style={styles.emptyTitle}>{usd(monthSummary.totalUsd)} in captured spend.</Text>
+            <Text style={styles.emptyCopy}>
+              {monthSummary.expenseCount} {monthSummary.expenseCount === 1 ? 'expense' : 'expenses'}
+              {monthSummary.topCategory
+                ? ` · most on ${monthSummary.topCategory.label} (${usd(
+                    monthSummary.topCategory.totalUsd,
+                  )})`
+                : ''}
+              . Open the closeout for the full breakdown.
+            </Text>
+            <View style={styles.catStrip}>
+              {monthSummary.byCategory.slice(0, 3).map((c) => (
+                <View key={c.category} style={styles.catChip}>
+                  <Text style={styles.catChipLabel}>{c.label}</Text>
+                  <Text style={styles.catChipValue}>{usd(c.totalUsd)}</Text>
+                </View>
+              ))}
+            </View>
+          </>
+        )}
       </Card>
+
+      <RouteBand
+        marker="§"
+        markerTone="green"
+        title="Monthly closeout"
+        subtitle="This month's spend by category, ready to export for taxes."
+        value="Open"
+        onPress={() => router.push('/monthly-closeout')}
+      />
 
       {boardEnabled && (
         <RouteBand
@@ -120,5 +167,26 @@ const styles = StyleSheet.create({
   emptyCopy: {
     ...type.body,
     color: colors.textMuted,
+  },
+  catStrip: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  catChip: {
+    backgroundColor: 'rgba(46, 107, 87, 0.08)',
+    borderRadius: 10,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: 6,
+  },
+  catChipLabel: {
+    ...type.labelTiny,
+    color: colors.textMuted,
+  },
+  catChipValue: {
+    ...type.emphasis,
+    color: colors.text,
+    fontVariant: ['tabular-nums'],
   },
 });
