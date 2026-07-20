@@ -116,6 +116,36 @@ export type { Dated, ExpenseLike, CategorySpend, SpendSummary, DateRange } from 
 export { summarizeTrips, tripsInRange, costPerMile } from './mileage';
 export type { TripLike, MileageSummary } from './mileage';
 export {
+  ACCOUNTING_CATEGORIES,
+  BUSINESS_SUBTYPES,
+  TRAILER_CONFIGURATIONS,
+  TRACKING_MODES,
+  CLASSIFICATION_SOURCES,
+  START_CHOICES,
+  NEXT_CHOICES,
+  ACCOUNTING_LABELS,
+  TRAILER_LABELS,
+  effectiveMiles,
+  activeSegment,
+  isBusinessCategory,
+  summarizeSegments,
+  loadMileage,
+  unclassifiedMiles,
+} from './mileageSession';
+export type {
+  AccountingCategory,
+  BusinessSubtype,
+  TrailerConfiguration,
+  TrackingMode,
+  ClassificationSource,
+  MileageSegment,
+  MileageSession,
+  Classification,
+  ClassificationChoice,
+  MileageBreakdown,
+  LoadMileage,
+} from './mileageSession';
+export {
   LOAD_STATUSES,
   OPEN_LOAD_STATUSES,
   isOpenLoad,

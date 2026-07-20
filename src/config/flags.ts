@@ -15,6 +15,11 @@ export const FEATURE_FLAGS = [
   'lane_aggregates_enabled',
   'broker_check_enabled',
   'road_grade_enabled',
+  'live_mileage_core_enabled',
+  'background_mileage_tracking_enabled',
+  'automatic_trip_detection_enabled',
+  'mileage_geofence_suggestions_enabled',
+  'odometer_reconciliation_enabled',
   'revised_onboarding_enabled',
 ] as const;
 
@@ -48,6 +53,14 @@ export const DEFAULT_FLAGS: Record<FeatureFlag, FlagConfig> = {
   lane_aggregates_enabled: { state: 'off' },
   broker_check_enabled: { state: 'off' },
   road_grade_enabled: { state: 'off' },
+  // Live Mileage Core ships in V1 (production sets this on after device QA);
+  // the repo default stays conservative like every other flag.
+  live_mileage_core_enabled: { state: 'off' },
+  // Background GPS / automation stay off until real-device validation (§8–§10).
+  background_mileage_tracking_enabled: { state: 'off' },
+  automatic_trip_detection_enabled: { state: 'off' },
+  mileage_geofence_suggestions_enabled: { state: 'off' },
+  odometer_reconciliation_enabled: { state: 'off' },
   revised_onboarding_enabled: { state: 'off' },
 };
 
@@ -61,6 +74,13 @@ const ENV_OVERRIDES: Record<FeatureFlag, string | undefined> = {
   lane_aggregates_enabled: process.env.EXPO_PUBLIC_FF_LANE_AGGREGATES_ENABLED,
   broker_check_enabled: process.env.EXPO_PUBLIC_FF_BROKER_CHECK_ENABLED,
   road_grade_enabled: process.env.EXPO_PUBLIC_FF_ROAD_GRADE_ENABLED,
+  live_mileage_core_enabled: process.env.EXPO_PUBLIC_FF_LIVE_MILEAGE_CORE_ENABLED,
+  background_mileage_tracking_enabled:
+    process.env.EXPO_PUBLIC_FF_BACKGROUND_MILEAGE_TRACKING_ENABLED,
+  automatic_trip_detection_enabled: process.env.EXPO_PUBLIC_FF_AUTOMATIC_TRIP_DETECTION_ENABLED,
+  mileage_geofence_suggestions_enabled:
+    process.env.EXPO_PUBLIC_FF_MILEAGE_GEOFENCE_SUGGESTIONS_ENABLED,
+  odometer_reconciliation_enabled: process.env.EXPO_PUBLIC_FF_ODOMETER_RECONCILIATION_ENABLED,
   revised_onboarding_enabled: process.env.EXPO_PUBLIC_FF_REVISED_ONBOARDING_ENABLED,
 };
 

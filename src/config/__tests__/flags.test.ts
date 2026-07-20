@@ -9,6 +9,11 @@ const cfg = (overrides: Partial<Record<FeatureFlag, FlagConfig>>) =>
     lane_aggregates_enabled: { state: 'off' },
     broker_check_enabled: { state: 'off' },
     road_grade_enabled: { state: 'off' },
+    live_mileage_core_enabled: { state: 'off' },
+    background_mileage_tracking_enabled: { state: 'off' },
+    automatic_trip_detection_enabled: { state: 'off' },
+    mileage_geofence_suggestions_enabled: { state: 'off' },
+    odometer_reconciliation_enabled: { state: 'off' },
     revised_onboarding_enabled: { state: 'off' },
     ...overrides,
   }) as Record<FeatureFlag, FlagConfig>;
