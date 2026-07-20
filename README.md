@@ -23,8 +23,14 @@ Built and unit-tested today:
   Closeout** (month-scoped CSV export), and **RPM Coach** (cost profile →
   break-even / target RPM).
 - **Miles** — manual trip entry with loaded/deadhead totals and a real
-  **cost-per-mile** (captured expenses ÷ entered miles). Live GPS is out of
-  scope (needs on-device background location).
+  **cost-per-mile** (captured expenses ÷ entered miles).
+- **Live Mileage** (flag-gated) — a driver-confirmed session/segment state
+  machine: Start → Going to Pickup → Deadhead → I'm Loaded → Loaded → Mark
+  Delivered → What's Next, with five mutually-exclusive accounting categories,
+  a daily timeline + corrections, unclassified-mile review, and actual miles
+  flowing into load profitability + the Deadhead grade. Manual confirmation is
+  the V1 core; background GPS is a device-gated follow-up (see
+  `docs/LIVE_MILEAGE_PLAN.md`).
 - **Loads** — load folders with a booked → in-transit → delivered → paid
   lifecycle, per-load revenue/mileage, attached documents, and a
   `load_receivables` money-owed model.
@@ -46,7 +52,7 @@ Built and unit-tested today:
   `supabase/migrations/`, **applied** to the live project
 - **State/sync:** Zustand (persisted stores), TanStack Query,
   `@supabase/supabase-js`
-- **Tests:** Jest (`jest-expo`) — 239 unit tests across 27 suites
+- **Tests:** Jest (`jest-expo`) — 249 unit tests across 28 suites
 
 ## Getting started
 

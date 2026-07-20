@@ -18,6 +18,7 @@ import {
   last7dRange,
   monthRange,
   presentDocTypesForLoad,
+  summarizeSegments,
   summarizeTrips,
   tripsInRange,
 } from '@/domain';
@@ -25,6 +26,7 @@ import { useCapturesStore } from '@/store/captures';
 import { useCostProfileStore } from '@/store/costProfile';
 import { useLoadDocsStore } from '@/store/loadDocs';
 import { useLoadsStore, normalizeLoad } from '@/store/loads';
+import { useMileageStore } from '@/store/mileage';
 import { useReceivablesStore } from '@/store/receivables';
 import { useTripsStore } from '@/store/trips';
 import { useTruckProfileStore } from '@/store/truckProfile';
@@ -44,6 +46,7 @@ export default function RoadGradeScreen() {
 
   const loads = useLoadsStore((s) => s.loads);
   const trips = useTripsStore((s) => s.trips);
+  const segments = useMileageStore((s) => s.segments);
   const captures = useCapturesStore((s) => s.captures);
   const receivables = useReceivablesStore((s) => s.receivables);
   const loadDocs = useLoadDocsStore((s) => s.docs);
@@ -78,6 +81,14 @@ export default function RoadGradeScreen() {
 
     const periodTrips = summarizeTrips(tripsInRange(trips, range));
 
+    // Prefer Live Mileage segments when they carry business miles for the period
+    // (one source — never sum segments and trips together).
+    const periodSegments = segments.filter((s) => inRange(s.startedAt));
+    const seg = summarizeSegments(periodSegments);
+    const usingSegments = seg.totalBusiness > 0;
+    const deadheadMiles = usingSegments ? seg.deadhead : periodTrips.deadheadMiles;
+    const businessMiles = usingSegments ? seg.totalBusiness : periodTrips.totalMiles;
+
     const fuelCaptures = expensesInRange(captures, range).filter((c) => c.scanType === 'fuel');
     const actualFuelCost = fuelCaptures.reduce((sum, c) => sum + (c.totalUsd ?? 0), 0);
     const gallonsPurchased = fuelCaptures.reduce((sum, c) => sum + (c.gallons ?? 0), 0);
@@ -95,9 +106,9 @@ export default function RoadGradeScreen() {
       loads: gradableLoads,
       targets: profile ? estimateAllMileTargets(profile) : null,
       hasCostProfile: profile !== null,
-      trips: { deadheadMiles: periodTrips.deadheadMiles, totalMiles: periodTrips.totalMiles },
+      trips: { deadheadMiles, totalMiles: businessMiles },
       fuel: {
-        businessMiles: periodTrips.totalMiles,
+        businessMiles,
         mpg,
         actualFuelCost,
         gallonsPurchased,
@@ -106,7 +117,18 @@ export default function RoadGradeScreen() {
       receivables: gradableReceivables,
     });
     return { period: gradePeriod(inputs), rangeLabel };
-  }, [periodKind, loads, trips, captures, receivables, loadDocs, profile, mpg, dieselPrice]);
+  }, [
+    periodKind,
+    loads,
+    trips,
+    segments,
+    captures,
+    receivables,
+    loadDocs,
+    profile,
+    mpg,
+    dieselPrice,
+  ]);
 
   const { period } = grade;
 

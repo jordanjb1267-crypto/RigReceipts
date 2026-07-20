@@ -146,3 +146,31 @@ fabricated gap distance; one RPM engine; one mileage model.
 _Implementation proceeds in the §23 order. This environment can build and unit-
 test everything through the integrations; real GPS/background tracking and the
 §18 physical-device QA are the device-gated steps that require the user._
+
+## Build status
+
+- **Phase A (audit)** — this document.
+- **Phase B (state model + store + migration + flags)** — done. Pure
+  `mileageSession.ts` (10 tests), the `mileage` store state machine, the
+  `mileage_sessions` / `mileage_segments` migration (applied to the live
+  project, owner RLS, advisor-clean), and the five flags.
+- **Phase C (manual controls) + D (timeline/corrections/review)** — done.
+  `live-mileage.tsx` (the full driver-confirmed flow + per-segment manual
+  miles), `mileage-review.tsx` (daily timeline + category/miles/load
+  corrections + unclassified review), the Miles-tab entry, and the Road Board
+  widget.
+- **Phase E (integrations)** — done. Load detail shows actual loaded/deadhead/
+  total miles + actual all-mile RPM with an estimated→actual line and a "Use
+  actual miles" action (feeds the Rate grade + the completed load). Road Grade
+  prefers segment-derived deadhead + business miles when present (one source,
+  never summed with trips).
+
+### Still device-gated (Phase F/G — needs the user)
+
+- Real GPS distance + background tracking (`expo-location`, prebuild, custom
+  dev client) behind `background_mileage_tracking_enabled`; the §18
+  physical-device QA matrix; then flipping `live_mileage_core_enabled` (and,
+  once proven, the background flag) on in production.
+- Completed **Rate Sharing Card** "Actual all-mile RPM" labeling is a small
+  follow-up: once a driver taps "Use actual miles," the card already uses the
+  actual figure; the explicit estimated-vs-actual label on the card is V1.1.

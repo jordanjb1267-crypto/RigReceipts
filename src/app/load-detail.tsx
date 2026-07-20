@@ -11,6 +11,7 @@ import {
   documentTypeLabel,
   estimateAllMileTargets,
   isRecognizedDocScanType,
+  loadMileage,
   loadRateStatusLabel,
   loadRateStatusTone,
   ReceivableType,
@@ -24,6 +25,7 @@ import { useCapturesStore } from '@/store/captures';
 import { useCostProfileStore } from '@/store/costProfile';
 import { useLoadDocsStore } from '@/store/loadDocs';
 import { normalizeLoad, useLoadsStore } from '@/store/loads';
+import { useMileageStore } from '@/store/mileage';
 import { useReceivablesStore } from '@/store/receivables';
 import { colors, palette, radii, spacing, type } from '@/theme';
 
@@ -32,6 +34,7 @@ const num = (v: string): number | null => {
   return Number.isFinite(n) && n > 0 ? n : null;
 };
 const usd = (n: number) => `$${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+const round1 = (n: number): number => Math.round(n * 10) / 10;
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
 /** Load detail: revenue + miles, documents, and receivables — the grade inputs. */
@@ -54,6 +57,7 @@ export default function LoadDetailScreen() {
 
   const captures = useCapturesStore((s) => s.captures);
   const assignCaptureToLoad = useCapturesStore((s) => s.assignCaptureToLoad);
+  const segments = useMileageStore((s) => s.segments);
 
   const load = rawLoad ? normalizeLoad(rawLoad) : null;
 
@@ -118,6 +122,17 @@ export default function LoadDetailScreen() {
   const toggleDoc = (t: DocumentType, present: boolean) => {
     if (present) removeDoc(load.id, t);
     else setDoc(load.id, t, 'captured');
+  };
+
+  const actual = loadMileage(segments, load.id);
+  const hasActual = actual.totalMiles > 0;
+  const revenueNow = (num(gross) ?? 0) + (num(fsc) ?? 0);
+  const actualAllMileRpm = hasActual && revenueNow > 0 ? revenueNow / actual.totalMiles : null;
+  const actualEmpty = round1(actual.deadheadMiles + actual.otherBusinessMiles);
+  const useActualMiles = () => {
+    setLoaded(String(actual.loadedMiles));
+    setDeadhead(String(actualEmpty));
+    updateLoad(load.id, { loadedMiles: actual.loadedMiles, deadheadMiles: actualEmpty });
   };
 
   const required = requiredDocsForLoad(load.bolRequired);
@@ -202,6 +217,32 @@ export default function LoadDetailScreen() {
           )}
           <Button label="Save revenue" onPress={saveRevenue} />
         </View>
+
+        {/* Actual miles from Live Mileage */}
+        {hasActual && (
+          <View style={styles.card}>
+            <View style={styles.cardHead}>
+              <Text style={styles.cardTitle}>Actual miles · Live Mileage</Text>
+              {actualAllMileRpm !== null && (
+                <Pill label={`${actualAllMileRpm.toFixed(2)}/mi`} tone="green" />
+              )}
+            </View>
+            <Text style={styles.derived}>
+              {actual.loadedMiles} loaded · {actual.deadheadMiles} deadhead
+              {actual.otherBusinessMiles > 0
+                ? ` · ${actual.otherBusinessMiles} other business`
+                : ''}{' '}
+              · {actual.totalMiles} total
+            </Text>
+            {rate.allMileRpm !== null && actualAllMileRpm !== null && (
+              <Text style={styles.hint}>
+                Estimated all-mile RPM {rate.allMileRpm.toFixed(2)} → actual{' '}
+                {actualAllMileRpm.toFixed(2)}.
+              </Text>
+            )}
+            <Button label="Use actual miles" variant="secondary" onPress={useActualMiles} />
+          </View>
+        )}
 
         {/* Documents */}
         <View style={styles.card}>
