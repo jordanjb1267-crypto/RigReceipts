@@ -14,10 +14,20 @@ import {
   WidgetCard,
 } from '@/components';
 import { isFeatureEnabled } from '@/config/flags';
-import { last7dRange, monthRange, summarizeRange } from '@/domain';
+import {
+  ACCOUNTING_LABELS,
+  activeSegment,
+  effectiveMiles,
+  last7dRange,
+  monthRange,
+  summarizeRange,
+  summarizeSegments,
+  unclassifiedMiles,
+} from '@/domain';
 import { useBoard } from '@/data/useBoard';
 import type { BoardData } from '@/mock/board';
 import { useCapturesStore } from '@/store/captures';
+import { useMileageStore } from '@/store/mileage';
 import { Role, useOnboardingStore } from '@/store/onboarding';
 import { colors, fonts, palette, radii, spacing, toneColors, Tone, type } from '@/theme';
 
@@ -79,6 +89,10 @@ export default function DashboardScreen() {
         showsVerticalScrollIndicator={false}
       >
         <Header role={role} onProfile={() => router.push('/reports')} />
+
+        {isFeatureEnabled('live_mileage_core_enabled') && (
+          <LiveMileageWidget onOpen={(p) => router.push(p)} />
+        )}
 
         {isPending ? (
           <LoadingState />
@@ -453,6 +467,50 @@ function PopulatedBoard({
 // ---------------------------------------------------------------------------
 // Small pieces
 // ---------------------------------------------------------------------------
+
+/** Road Board Live Mileage widget (build prompt §14) — status + entry point. */
+function LiveMileageWidget({ onOpen }: { onOpen: (path: string) => void }) {
+  const segments = useMileageStore((s) => s.segments);
+  const active = activeSegment(segments);
+  const startOfDay = (() => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  })();
+  const today = summarizeSegments(segments.filter((s) => s.startedAt >= startOfDay));
+  const review = unclassifiedMiles(segments);
+  const miText = (n: number) => `${n.toLocaleString(undefined, { maximumFractionDigits: 1 })} mi`;
+
+  const stateLabel = active
+    ? ACCOUNTING_LABELS[active.accountingCategory]
+    : review > 0
+      ? 'Review needed'
+      : 'Ready to track';
+  const stateTone = active ? 'green' : review > 0 ? 'amber' : 'neutral';
+
+  return (
+    <WidgetCard
+      label="Live Mileage"
+      headerRight={<Pill label={stateLabel} tone={stateTone} />}
+      onPress={() => onOpen(review > 0 && !active ? '/mileage-review' : '/live-mileage')}
+    >
+      <Text style={styles.bigNum}>{miText(today.total)}</Text>
+      <Text style={styles.widgetNote}>
+        {active
+          ? `${ACCOUNTING_LABELS[active.accountingCategory]}${active.loadId ? ' · on a load' : ''} · ${miText(effectiveMiles(active))} this segment`
+          : review > 0
+            ? `${miText(review)} need review to keep your RPM accurate`
+            : 'Start a session to track deadhead through delivery.'}
+      </Text>
+      {(active || today.total > 0) && (
+        <View style={styles.metricRow}>
+          <MetricTile label="Loaded" value={miText(today.loaded)} />
+          <MetricTile label="Deadhead" value={miText(today.deadhead)} />
+          <MetricTile label="Empty" value={miText(today.businessEmpty)} />
+        </View>
+      )}
+    </WidgetCard>
+  );
+}
 
 function QuickActions({ onNavigate }: { onNavigate: (p: TabPath) => void }) {
   // Section 36 quick actions: Check Rate, Scan Rate Con, Scan Receipt, Add Load.

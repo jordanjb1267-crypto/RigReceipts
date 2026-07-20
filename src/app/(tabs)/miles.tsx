@@ -3,15 +3,21 @@ import { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Card, MetricTile, Pill, RouteBand, Screen } from '@/components';
+import { isFeatureEnabled } from '@/config/flags';
 import {
+  ACCOUNTING_LABELS,
+  activeSegment,
   costPerMile,
+  effectiveMiles,
   FREE_LIMITS,
   monthRange,
   summarizeRange,
   summarizeTrips,
   tripsInRange,
+  unclassifiedMiles,
 } from '@/domain';
 import { useCapturesStore } from '@/store/captures';
+import { useMileageStore } from '@/store/mileage';
 import { useTripsStore } from '@/store/trips';
 import { colors, palette, spacing, type } from '@/theme';
 
@@ -30,6 +36,14 @@ export default function MilesScreen() {
   const trips = useTripsStore((s) => s.trips);
   const removeTrip = useTripsStore((s) => s.removeTrip);
   const captures = useCapturesStore((s) => s.captures);
+
+  const liveEnabled = isFeatureEnabled('live_mileage_core_enabled');
+  const segments = useMileageStore((s) => s.segments);
+  const active = liveEnabled ? activeSegment(segments) : null;
+  const needsReview = liveEnabled ? unclassifiedMiles(segments) : 0;
+  const liveSubtitle = active
+    ? `${ACCOUNTING_LABELS[active.accountingCategory]} · ${effectiveMiles(active).toLocaleString(undefined, { maximumFractionDigits: 1 })} mi this segment`
+    : 'Start a session — deadhead to delivery, driver-confirmed.';
 
   const month = useMemo(() => monthRange(new Date()), []);
   const allTime = useMemo(() => summarizeTrips(trips), [trips]);
@@ -50,6 +64,29 @@ export default function MilesScreen() {
         />
       }
     >
+      {liveEnabled && (
+        <>
+          <RouteBand
+            marker="▶"
+            markerTone={active ? 'green' : 'blue'}
+            title="Live Mileage"
+            subtitle={liveSubtitle}
+            value={active ? 'Live' : 'Track'}
+            onPress={() => router.push('/live-mileage')}
+          />
+          {needsReview > 0 && (
+            <RouteBand
+              marker="!"
+              markerTone="rust"
+              title={`${needsReview.toLocaleString(undefined, { maximumFractionDigits: 1 })} mi need review`}
+              subtitle="Classify these miles to keep your deadhead and all-mile RPM accurate."
+              value="Review"
+              onPress={() => router.push('/mileage-review')}
+            />
+          )}
+        </>
+      )}
+
       <View style={styles.metricRow}>
         <MetricTile label="Total" value={hasTrips ? miles(allTime.totalMiles) : '—'} />
         <MetricTile label="Loaded" value={hasTrips ? miles(allTime.loadedMiles) : '—'} />

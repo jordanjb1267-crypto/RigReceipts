@@ -100,6 +100,8 @@ export default function RootLayout() {
           <Stack.Screen name="add-load" options={{ presentation: 'modal' }} />
           <Stack.Screen name="load-detail" options={{ presentation: 'modal' }} />
           <Stack.Screen name="road-grade" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="live-mileage" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="mileage-review" options={{ presentation: 'modal' }} />
         </Stack>
       </SafeAreaProvider>
     </QueryClientProvider>
