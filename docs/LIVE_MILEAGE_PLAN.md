@@ -164,6 +164,13 @@ test everything through the integrations; real GPS/background tracking and the
   actual miles" action (feeds the Rate grade + the completed load). Road Grade
   prefers segment-derived deadhead + business miles when present (one source,
   never summed with trips).
+- **Reporting (§16), trailer config (§K), analytics (§G hardening)** — done.
+  A Miles-tab mileage report (Total Business / Loaded / Empty Business =
+  Deadhead + Other / Personal / Unclassified + Deadhead Rate, no
+  double-count); a trailer-configuration chip row in the segment editor (a
+  secondary attribute, never its own category); and five typed lifecycle
+  analytics events fired from the confirmed transitions. State machine covered
+  by store-level tests (254 tests / 29 suites total).
 
 ### Still device-gated (Phase F/G — needs the user)
 
