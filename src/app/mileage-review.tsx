@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { track } from '@/analytics';
 import { Button, Pill } from '@/components';
 import {
   ACCOUNTING_CATEGORIES,
@@ -109,6 +110,7 @@ export default function MileageReviewScreen() {
               onToggle={() => setEditing(editing === seg.id ? null : seg.id)}
               onSave={(patch) => {
                 editSegment(seg.id, patch);
+                track('mileage_segment_reclassified', { category: patch.accountingCategory });
                 setEditing(null);
               }}
               onRemove={() => {

@@ -34,6 +34,12 @@ export const ANALYTICS_EVENTS = [
   'lane_alert_enabled',
   'rate_board_post_reported',
   'contributor_blocked',
+  // live mileage
+  'mileage_session_started',
+  'mileage_loaded_confirmed',
+  'mileage_delivered_confirmed',
+  'mileage_segment_reclassified',
+  'mileage_session_stopped',
   // monetization
   'paywall_viewed',
   'subscription_started',

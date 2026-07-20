@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { track } from '@/analytics';
 import { Button, Pill } from '@/components';
 import { isFeatureEnabled } from '@/config/flags';
 import {
@@ -65,8 +66,12 @@ export default function LiveMileageScreen() {
     choice: ClassificationChoice,
     loadId?: string,
   ) => {
-    if (mode === 'start') startTracking(choice, { loadId });
-    else beginSegment(choice, { loadId });
+    if (mode === 'start') {
+      startTracking(choice, { loadId });
+      track('mileage_session_started', { category: choice.category });
+    } else {
+      beginSegment(choice, { loadId });
+    }
     setMenu(null);
     setPending(null);
   };
@@ -83,12 +88,19 @@ export default function LiveMileageScreen() {
   const confirmLoaded = () => {
     imLoaded();
     if (active?.loadId) setLoadStatus(active.loadId, 'in_transit');
+    track('mileage_loaded_confirmed');
   };
 
   const confirmDelivered = () => {
     if (active?.loadId) setLoadStatus(active.loadId, 'delivered');
     markDelivered();
+    track('mileage_delivered_confirmed');
     setMenu('next');
+  };
+
+  const confirmStop = () => {
+    stopSession();
+    track('mileage_session_stopped');
   };
 
   const addMiles = () => {
@@ -208,7 +220,7 @@ export default function LiveMileageScreen() {
                   }
                 />
               )}
-              <Button label="Stop Tracking" variant="danger" onPress={stopSession} />
+              <Button label="Stop Tracking" variant="danger" onPress={confirmStop} />
             </View>
 
             <Pressable onPress={() => router.push('/mileage-review')} style={styles.timelineLink}>
