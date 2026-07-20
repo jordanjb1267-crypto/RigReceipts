@@ -12,6 +12,7 @@ import {
   FREE_LIMITS,
   monthRange,
   summarizeRange,
+  summarizeSegments,
   summarizeTrips,
   tripsInRange,
   unclassifiedMiles,
@@ -41,6 +42,8 @@ export default function MilesScreen() {
   const segments = useMileageStore((s) => s.segments);
   const active = liveEnabled ? activeSegment(segments) : null;
   const needsReview = liveEnabled ? unclassifiedMiles(segments) : 0;
+  const segReport = useMemo(() => summarizeSegments(segments), [segments]);
+  const showSegReport = liveEnabled && segments.length > 0;
   const liveSubtitle = active
     ? `${ACCOUNTING_LABELS[active.accountingCategory]} · ${effectiveMiles(active).toLocaleString(undefined, { maximumFractionDigits: 1 })} mi this segment`
     : 'Start a session — deadhead to delivery, driver-confirmed.';
@@ -85,6 +88,28 @@ export default function MilesScreen() {
             />
           )}
         </>
+      )}
+
+      {showSegReport && (
+        <Card
+          label="Mileage report"
+          labelRight={
+            segReport.deadheadRate !== null
+              ? `${Math.round(segReport.deadheadRate * 100)}% deadhead`
+              : undefined
+          }
+          style={styles.card}
+        >
+          <MileRow label="Total business miles" value={miles(segReport.totalBusiness)} strong />
+          <MileRow label="Loaded" value={miles(segReport.loaded)} />
+          <MileRow
+            label="Empty business"
+            value={miles(segReport.totalEmptyBusiness)}
+            sub={`Deadhead ${miles(segReport.deadhead)} · Other ${miles(segReport.businessEmpty)}`}
+          />
+          <MileRow label="Personal" value={miles(segReport.personal)} />
+          <MileRow label="Unclassified" value={miles(segReport.unclassified)} />
+        </Card>
       )}
 
       <View style={styles.metricRow}>
@@ -172,10 +197,50 @@ export default function MilesScreen() {
   );
 }
 
+function MileRow({
+  label,
+  value,
+  sub,
+  strong,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  strong?: boolean;
+}) {
+  return (
+    <View style={styles.mileRow}>
+      <View style={{ flex: 1 }}>
+        <Text style={strong ? styles.mileLabelStrong : styles.mileLabel}>{label}</Text>
+        {sub && <Text style={styles.mileSub}>{sub}</Text>}
+      </View>
+      <Text style={strong ? styles.mileValueStrong : styles.mileValue}>{value}</Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   metricRow: {
     flexDirection: 'row',
     gap: spacing.sm,
+  },
+  mileRow: {
+    alignItems: 'center',
+    borderTopColor: colors.border,
+    borderTopWidth: 1,
+    flexDirection: 'row',
+    gap: spacing.sm,
+    paddingVertical: spacing.sm + 2,
+  },
+  mileLabel: { ...type.body, color: colors.text },
+  mileLabelStrong: { ...type.emphasis, color: colors.text },
+  mileSub: { ...type.bodySmall, color: colors.textMuted, marginTop: 2 },
+  mileValue: { ...type.emphasis, color: colors.text, fontVariant: ['tabular-nums'] },
+  mileValueStrong: {
+    color: colors.text,
+    fontFamily: type.metricSm.fontFamily,
+    fontSize: 18,
+    fontVariant: ['tabular-nums'],
   },
   card: {
     marginTop: spacing.md,

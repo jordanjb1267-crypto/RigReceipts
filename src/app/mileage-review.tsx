@@ -11,6 +11,9 @@ import {
   effectiveMiles,
   MileageSegment,
   summarizeSegments,
+  TRAILER_CONFIGURATIONS,
+  TRAILER_LABELS,
+  TrailerConfiguration,
   unclassifiedMiles,
 } from '@/domain';
 import { useLoadsStore } from '@/store/loads';
@@ -138,12 +141,14 @@ function SegmentRow({
     accountingCategory: AccountingCategory;
     adjustedMiles: number | null;
     loadId: string | null;
+    trailerConfiguration: TrailerConfiguration;
   }) => void;
   onRemove: () => void;
 }) {
   const [category, setCategory] = useState<AccountingCategory>(seg.accountingCategory);
   const [milesText, setMilesText] = useState(String(effectiveMiles(seg)));
   const [loadId, setLoadId] = useState<string | null>(seg.loadId);
+  const [trailer, setTrailer] = useState<TrailerConfiguration>(seg.trailerConfiguration);
 
   const save = () => {
     const n = Number(milesText.replace(/[^0-9.]/g, ''));
@@ -151,6 +156,7 @@ function SegmentRow({
       accountingCategory: category,
       adjustedMiles: n > 0 ? n : null,
       loadId: category === 'loaded' || category === 'deadhead' ? loadId : null,
+      trailerConfiguration: trailer,
     });
   };
 
@@ -222,6 +228,21 @@ function SegmentRow({
               </View>
             </>
           )}
+
+          <Text style={styles.editLabel}>Trailer</Text>
+          <View style={styles.chips}>
+            {TRAILER_CONFIGURATIONS.map((t) => (
+              <Pressable
+                key={t}
+                onPress={() => setTrailer(t)}
+                style={[styles.chip, trailer === t && styles.chipActive]}
+              >
+                <Text style={[styles.chipText, trailer === t && styles.chipTextActive]}>
+                  {TRAILER_LABELS[t]}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
 
           <View style={styles.editActions}>
             <Button label="Save" onPress={save} />
