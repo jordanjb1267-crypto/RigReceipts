@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -17,6 +17,11 @@ import {
   summarizeSegments,
   unclassifiedMiles,
 } from '@/domain';
+import {
+  startForegroundTracking,
+  stopForegroundTracking,
+  TrackingStartReason,
+} from '@/location/mileageTracker';
 import { useLoadsStore } from '@/store/loads';
 import { useMileageStore } from '@/store/mileage';
 import { colors, palette, radii, spacing, type } from '@/theme';
@@ -51,6 +56,25 @@ export default function LiveMileageScreen() {
   const [menu, setMenu] = useState<'start' | 'next' | 'load' | null>(null);
   const [pending, setPending] = useState<Pending>(null);
   const [milesText, setMilesText] = useState('');
+  const [gpsStatus, setGpsStatus] = useState<TrackingStartReason | 'idle'>('idle');
+
+  // GPS foreground distance runs only while a session is active — permission is
+  // requested at that moment, never before. On a full app build this measures
+  // miles automatically; in Expo Go / web the native module is absent and the
+  // manual "Add miles" entry below stays the way in. Background tracking is a
+  // separate flag and is not started here.
+  useEffect(() => {
+    if (!enabled || !activeSessionId) return;
+    let cancelled = false;
+    startForegroundTracking().then((r) => {
+      if (!cancelled) setGpsStatus(r.reason);
+    });
+    return () => {
+      cancelled = true;
+      setGpsStatus('idle');
+      stopForegroundTracking();
+    };
+  }, [enabled, activeSessionId]);
 
   const active = activeSegment(segments);
   const today = useMemo(() => {
@@ -176,6 +200,13 @@ export default function LiveMileageScreen() {
               </View>
               <Text style={styles.segMiles}>{mi(effectiveMiles(active))}</Text>
               <Text style={styles.segLabel}>Current segment</Text>
+
+              {(() => {
+                const hint = gpsHint(gpsStatus);
+                return hint ? (
+                  <Text style={[styles.gpsHint, { color: hint.color }]}>{hint.text}</Text>
+                ) : null;
+              })()}
 
               <View style={styles.statRow}>
                 <Stat label="Today" value={mi(today.total)} />
@@ -311,6 +342,23 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
+/** Honest, user-facing line about whether GPS is measuring miles automatically. */
+function gpsHint(status: TrackingStartReason | 'idle'): { text: string; color: string } | null {
+  switch (status) {
+    case 'started':
+      return { text: '● GPS is measuring this segment', color: palette.routeGreen };
+    case 'permission_denied':
+      return { text: 'Location is off — add miles by hand below.', color: colors.textMuted };
+    case 'module_unavailable':
+      return {
+        text: 'Auto-tracking runs in the installed app — add miles by hand below.',
+        color: colors.textMuted,
+      };
+    default:
+      return null;
+  }
+}
+
 function toneFor(category: string) {
   switch (category) {
     case 'loaded':
@@ -364,6 +412,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
   },
   segLabel: { ...type.labelTiny, color: colors.textMuted },
+  gpsHint: { ...type.bodySmall, marginTop: spacing.sm },
   statRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.lg },
   stat: { flex: 1 },
   statLabel: { ...type.labelTiny, color: colors.textMuted },

@@ -50,6 +50,16 @@
         }
       ],
       [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "RigReceipts measures your trip miles while you drive so loaded and deadhead miles are tracked accurately for your profit and taxes. Location is only used while you have a mileage session running.",
+          "locationAlwaysAndWhenInUsePermission": "RigReceipts can keep measuring trip miles in the background while you drive, so a session keeps counting miles even when your screen is off. Location is only used while you have a mileage session running.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
+        }
+      ],
+      [
         "@sentry/react-native/expo",
         {
           "organization": "rigreceipts",

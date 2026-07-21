@@ -116,6 +116,21 @@ export type { Dated, ExpenseLike, CategorySpend, SpendSummary, DateRange } from 
 export { summarizeTrips, tripsInRange, costPerMile } from './mileage';
 export type { TripLike, MileageSummary } from './mileage';
 export {
+  haversineMiles,
+  stepAccumulator,
+  accumulateMiles,
+  initialAccumulator,
+  DEFAULT_ACCUMULATOR,
+} from './geo';
+export type {
+  GeoPoint,
+  GeoFix,
+  AccumulatorConfig,
+  AccumulatorState,
+  AccumulatorStep,
+  FixOutcome,
+} from './geo';
+export {
   ACCOUNTING_CATEGORIES,
   BUSINESS_SUBTYPES,
   TRAILER_CONFIGURATIONS,

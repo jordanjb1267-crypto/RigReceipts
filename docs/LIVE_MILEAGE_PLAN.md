@@ -172,12 +172,31 @@ test everything through the integrations; real GPS/background tracking and the
   analytics events fired from the confirmed transitions. State machine covered
   by store-level tests (254 tests / 29 suites total).
 
+- **GPS distance adapter (Phase F, written; device verification pending)** —
+  `src/domain/geo.ts` is the pure, tested core: haversine + a fix accumulator
+  that re-anchors across coverage gaps without fabricating the miles, discards
+  poor-accuracy fixes, ignores stationary jitter, and drops impossible-speed
+  spikes (build prompt §11, §24). `src/location/mileageTracker.ts` is the only
+  place GPS touches the store: it lazy-requires `expo-location` /
+  `expo-task-manager` (so Jest and the JS bundle never need them), converts
+  fixes into `appendMiles` calls through the accumulator, and exposes
+  foreground start/stop (V1) plus a background task path gated behind
+  `background_mileage_tracking_enabled`. `live-mileage.tsx` starts foreground
+  tracking only while a session is active — permission is requested at that
+  moment, never before — and shows an honest GPS-status line; manual entry
+  stays the fallback. `app.json` carries the `expo-location` config plugin
+  (when-in-use + always strings, iOS background mode, Android foreground
+  service). 16 new unit tests (geo core + `ingestFix` wiring) prove the
+  anti-fabrication rules headlessly.
+
 ### Still device-gated (Phase F/G — needs the user)
 
-- Real GPS distance + background tracking (`expo-location`, prebuild, custom
-  dev client) behind `background_mileage_tracking_enabled`; the §18
-  physical-device QA matrix; then flipping `live_mileage_core_enabled` (and,
-  once proven, the background flag) on in production.
+- Real on-device GPS verification of the adapter above (foreground accuracy vs.
+  odometer), plus background tracking via `expo prebuild` + a custom dev client
+  behind `background_mileage_tracking_enabled`; the §18 physical-device QA
+  matrix; then flipping `live_mileage_core_enabled` (and, once proven, the
+  background flag) on in production — landed together with the location
+  disclosures in the privacy policy and the store data-safety forms.
 - Completed **Rate Sharing Card** "Actual all-mile RPM" labeling is a small
   follow-up: once a driver taps "Use actual miles," the card already uses the
   actual figure; the explicit estimated-vs-actual label on the card is V1.1.
