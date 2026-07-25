@@ -9,9 +9,15 @@
 > `https://rigreceipts.app/privacy`. Keep it in sync with the store data-safety
 > declarations in `docs/STORE_METADATA.md`.
 
-RigReceipts ("RigReceipts," "we," "us") makes an app that helps truck drivers
-understand what a load really pays and keep track of receipts, miles, loads, and
-expenses. This policy explains what we collect, why, and the choices you have.
+RigReceipts is operated by **[Legal Entity]** ("RigReceipts," "we," "us"), which
+makes an app that helps truck drivers understand what a load really pays and keep
+track of receipts, miles, loads, and expenses. This policy explains what we
+collect, why, and the choices you have.
+
+<!-- FILL BEFORE PUBLISH: replace [Legal Entity] with the operator's exact legal
+     name and [Mailing Address] in "Contact us". When Live Mileage GPS ships,
+     merge docs/legal/PRIVACY_LOCATION_ADDENDUM.md. See
+     docs/LEGAL_LAUNCH_CHECKLIST.md. -->
 
 ## The short version
 
@@ -185,3 +191,6 @@ the community terms change.
 
 Questions or requests about privacy: **privacy@rigreceipts.app**
 General support: **support@rigreceipts.app**
+
+[Legal Entity]
+[Mailing Address]

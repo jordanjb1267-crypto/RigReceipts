@@ -9,10 +9,14 @@
 > [Privacy Policy](./PRIVACY_POLICY.md) and the in-app Community Rate Board
 > Terms.
 
-These Terms of Service ("Terms") are an agreement between you and RigReceipts
-("RigReceipts," "we," "us") governing your use of the RigReceipts mobile app and
-related services (the "Service"). By using the Service you agree to these Terms.
-If you do not agree, do not use the Service.
+These Terms of Service ("Terms") are an agreement between you and **[Legal
+Entity]**, which operates RigReceipts ("RigReceipts," "we," "us"), governing your
+use of the RigReceipts mobile app and related services (the "Service"). By using
+the Service you agree to these Terms. If you do not agree, do not use the Service.
+
+<!-- FILL BEFORE PUBLISH: replace every [Legal Entity] with the operator's exact
+     legal name (e.g. "RigReceipts LLC"); replace [Your Home State] in §15; add
+     [Mailing Address] where noted. See docs/LEGAL_LAUNCH_CHECKLIST.md. -->
 
 ## 1. Who can use RigReceipts
 
@@ -163,12 +167,27 @@ change means you accept the updated Terms.
 
 ## 15. Governing law and disputes
 
-_[Placeholder — set with counsel.]_ These Terms are governed by the laws of the
-jurisdiction in which RigReceipts is established, without regard to conflict-of-law
-rules. The venue for disputes, and whether disputes are resolved by arbitration or
-in court (and any class-action waiver), should be specified here after legal
-review and must comply with the app stores' requirements and applicable consumer
--protection law.
+These Terms are governed by the laws of the **State of [Your Home State], United
+States**, without regard to its conflict-of-law rules, except where the mandatory
+consumer-protection laws of your place of residence apply. You and [Legal Entity]
+agree that the state and federal courts located in [Your Home State] have
+exclusive jurisdiction over any dispute that is not subject to arbitration, and
+you consent to venue there.
+
+**Informal resolution first.** Before filing any claim, you agree to contact us at
+support@rigreceipts.app and to attempt to resolve the dispute informally for at
+least 30 days.
+
+**Arbitration and class-action waiver — _confirm with counsel before publishing._**
+Whether disputes are resolved by binding individual arbitration, and whether a
+class-action waiver applies, is the one substantive dispute-resolution decision to
+finalize with a lawyer. Any such clause must comply with the Apple App Store and
+Google Play requirements and applicable consumer-protection law. If no arbitration
+clause is adopted, disputes proceed in the courts identified above.
+
+Nothing in this section prevents either party from seeking injunctive relief for
+intellectual-property or unauthorized-access claims, or from bringing an eligible
+matter in small-claims court.
 
 ## 16. Contact
 
