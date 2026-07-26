@@ -4,12 +4,15 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
+  BrandMark,
   Button,
   Card,
+  ChecklistItem,
   GradeBadge,
   MetricTile,
   Pill,
   RouteBand,
+  SetupChecklist,
   TopoBackground,
   WidgetCard,
 } from '@/components';
@@ -26,6 +29,7 @@ import {
 } from '@/domain';
 import { useBoard } from '@/data/useBoard';
 import type { BoardData } from '@/mock/board';
+import { useActivationStore } from '@/store/activation';
 import { useCapturesStore } from '@/store/captures';
 import { useMileageStore } from '@/store/mileage';
 import { Role, useOnboardingStore } from '@/store/onboarding';
@@ -58,8 +62,42 @@ export default function DashboardScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const role = useOnboardingStore((s) => s.role);
+  const firstActionDone = useOnboardingStore((s) => s.firstActionDone);
+  const accountMode = useOnboardingStore((s) => s.accountMode);
+  const costsAdded = useActivationStore((s) => s.costsAdded);
+  const mileageEnabled = useActivationStore((s) => s.mileageEnabled);
+  const dismissed = useActivationStore((s) => s.dismissed);
+  const dismiss = useActivationStore((s) => s.dismiss);
   const { data, isPending, isError, refetch } = useBoard();
   const captures = useCapturesStore((s) => s.captures);
+
+  // "Finish setting up" checklist (design handoff §Road Board). The first two
+  // rows derive from onboarding and are never toggled by hand.
+  const checklist: ChecklistItem[] = [
+    { key: 'load', label: 'First load checked', hint: 'done', done: firstActionDone },
+    { key: 'role', label: 'Told us how you run', hint: 'done', done: !!role },
+    {
+      key: 'costs',
+      label: 'Add your truck costs',
+      hint: '~2 min',
+      done: costsAdded,
+      onPress: () => router.push('/rpm-coach'),
+    },
+    {
+      key: 'miles',
+      label: 'Turn on mileage',
+      hint: '~1 min',
+      done: mileageEnabled,
+      onPress: () => router.push('/live-mileage'),
+    },
+    {
+      key: 'account',
+      label: 'Back up your account',
+      hint: '~1 min',
+      done: accountMode === 'account',
+      onPress: () => router.push('/account-settings'),
+    },
+  ];
 
   const receipts = useMemo<ReceiptsSummary>(() => {
     const now = new Date();
@@ -89,6 +127,8 @@ export default function DashboardScreen() {
         showsVerticalScrollIndicator={false}
       >
         <Header role={role} onProfile={() => router.push('/reports')} />
+
+        {!dismissed && <SetupChecklist items={checklist} onDismiss={dismiss} />}
 
         {isFeatureEnabled('live_mileage_core_enabled') && (
           <LiveMileageWidget onOpen={(p) => router.push(p)} />
@@ -120,10 +160,10 @@ function Header({ role, onProfile }: { role: Role | null; onProfile: () => void 
   return (
     <View style={styles.header}>
       <View style={styles.logoRow}>
-        <View style={styles.logoMark}>
-          <Text style={styles.logoLetter}>R</Text>
-        </View>
-        <Text style={styles.brand}>RigReceipts</Text>
+        <BrandMark size={28} />
+        <Text style={styles.brand}>
+          Rig<Text style={styles.brandAccent}>Receipts</Text>
+        </Text>
       </View>
       <View style={styles.headerActions}>
         <Pressable accessibilityLabel="Search" style={styles.iconBtn}>
@@ -293,17 +333,13 @@ function PopulatedBoard({
 }) {
   return (
     <>
-      {/* Status strip */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.statusStrip}
-      >
+      {/* Four-up status row (§09) */}
+      <View style={styles.statusRow}>
         <StatusChip label="RPM" value={data.rpm.grade} tone="green" />
         <StatusChip label="Owed" value={usd(data.moneyOwed.totalUsd)} tone="amber" />
-        <StatusChip label="Records" value={`${data.records.pct}%`} tone="blue" />
-        <StatusChip label="Loads" value={`${data.loads.activeCount} active`} tone="neutral" />
-      </ScrollView>
+        <StatusChip label="Spend 7d" value={usd(data.spend.total7dUsd)} tone="blue" />
+        <StatusChip label="Closeout" value={`${data.closeout.pct}%`} tone="neutral" />
+      </View>
 
       {/* This Week hero */}
       <Card dark label="This Week's RPM Score" labelRight={data.rpm.grade}>
@@ -583,25 +619,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: spacing.sm,
   },
-  logoMark: {
-    alignItems: 'center',
-    backgroundColor: palette.routeGreen,
-    borderRadius: radii.sm,
-    height: 34,
-    justifyContent: 'center',
-    width: 34,
-  },
-  logoLetter: {
-    color: palette.mapIvory,
-    fontFamily: fonts.black,
-    fontSize: 20,
-    letterSpacing: -1,
-  },
   brand: {
     color: colors.text,
     fontFamily: fonts.extrabold,
     fontSize: 16,
     letterSpacing: -0.4,
+  },
+  brandAccent: {
+    color: palette.goodLight,
   },
   headerActions: {
     alignItems: 'center',
@@ -610,7 +635,7 @@ const styles = StyleSheet.create({
   },
   iconBtn: {
     alignItems: 'center',
-    backgroundColor: 'rgba(30, 35, 39, 0.05)',
+    backgroundColor: colors.surfaceRaised,
     borderRadius: radii.sm,
     height: 38,
     justifyContent: 'center',
@@ -622,14 +647,16 @@ const styles = StyleSheet.create({
   },
   avatar: {
     alignItems: 'center',
-    backgroundColor: colors.surfaceDark,
+    backgroundColor: colors.surfaceRaised,
+    borderColor: colors.border,
     borderRadius: radii.sm,
+    borderWidth: 1,
     height: 38,
     justifyContent: 'center',
     width: 38,
   },
   avatarText: {
-    color: colors.textOnDark,
+    color: colors.text,
     fontFamily: fonts.black,
     fontSize: 13,
     letterSpacing: -0.5,
@@ -665,22 +692,24 @@ const styles = StyleSheet.create({
   sampleTag: {
     marginTop: spacing.md,
   },
-  // status strip
-  statusStrip: {
+  // status row (four-up)
+  statusRow: {
+    flexDirection: 'row',
     gap: spacing.sm,
     paddingVertical: spacing.md,
   },
   statusChip: {
     backgroundColor: colors.surface,
     borderColor: colors.border,
-    borderRadius: radii.sm + 2,
+    borderRadius: radii.field,
     borderWidth: 1,
-    paddingHorizontal: spacing.md,
+    flex: 1,
+    paddingHorizontal: spacing.md - 2,
     paddingVertical: spacing.sm,
   },
   statusLabel: {
     ...type.labelTiny,
-    color: colors.textMuted,
+    color: colors.textFaint,
   },
   statusValue: {
     ...type.metricSm,
@@ -704,7 +733,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
   },
   quickGlyph: {
-    color: palette.routeGreen,
+    color: colors.action,
     fontFamily: fonts.bold,
     fontSize: 20,
   },
@@ -734,14 +763,14 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
   },
   fiChip: {
-    backgroundColor: 'rgba(46, 107, 87, 0.10)',
+    backgroundColor: 'rgba(46, 107, 87, 0.18)',
     borderRadius: radii.pill,
     paddingHorizontal: 12,
     paddingVertical: 7,
   },
   fiChipText: {
     ...type.labelTiny,
-    color: colors.cta,
+    color: colors.good,
   },
   bigNum: {
     color: colors.text,
@@ -792,8 +821,8 @@ const styles = StyleSheet.create({
   },
   calCell: {
     alignItems: 'center',
-    backgroundColor: 'rgba(30, 35, 39, 0.045)',
-    borderColor: 'rgba(30, 35, 39, 0.06)',
+    backgroundColor: colors.surfaceRaised,
+    borderColor: colors.border,
     borderRadius: radii.sm,
     borderWidth: 1,
     flex: 1,
@@ -812,7 +841,7 @@ const styles = StyleSheet.create({
   },
   // progress
   progressTrack: {
-    backgroundColor: 'rgba(30, 35, 39, 0.08)',
+    backgroundColor: colors.border,
     borderRadius: 999,
     height: 8,
     marginBottom: spacing.sm,
@@ -834,7 +863,7 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
   },
   skeletonHero: {
-    backgroundColor: 'rgba(30, 35, 39, 0.06)',
+    backgroundColor: colors.surfaceRaised,
     borderRadius: radii.md,
     height: 150,
     marginTop: spacing.md,
@@ -846,7 +875,7 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   skeletonTile: {
-    backgroundColor: 'rgba(30, 35, 39, 0.06)',
+    backgroundColor: colors.surfaceRaised,
     borderRadius: radii.sm,
     flex: 1,
     height: 72,

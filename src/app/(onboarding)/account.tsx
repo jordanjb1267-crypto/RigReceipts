@@ -138,7 +138,7 @@ export default function AccountRoute() {
                 autoFocus
                 style={styles.input}
                 placeholder="000000"
-                placeholderTextColor="rgba(30,35,39,0.3)"
+                placeholderTextColor="rgba(244,241,232,0.3)"
               />
             ) : (
               <TextInput
@@ -150,7 +150,7 @@ export default function AccountRoute() {
                 autoFocus
                 style={styles.input}
                 placeholder="you@example.com"
-                placeholderTextColor="rgba(30,35,39,0.3)"
+                placeholderTextColor="rgba(244,241,232,0.3)"
               />
             )}
             {onCodeStage && errorText !== '' && <Text style={styles.inlineError}>{errorText}</Text>}
@@ -252,8 +252,8 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
   },
   errorBox: {
-    backgroundColor: 'rgba(169, 74, 59, 0.08)',
-    borderColor: 'rgba(169, 74, 59, 0.22)',
+    backgroundColor: 'rgba(169, 74, 59, 0.16)',
+    borderColor: 'rgba(169, 74, 59, 0.4)',
     borderRadius: 14,
     borderWidth: 1,
     marginTop: spacing.lg,

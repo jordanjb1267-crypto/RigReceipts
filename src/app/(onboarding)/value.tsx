@@ -7,9 +7,24 @@ import { Button, OnboardingShell, Pill, RouteBand } from '@/components';
 import { colors, palette, radii, spacing, Tone, type } from '@/theme';
 
 const WATERFALL = [
-  { value: '$2.95', label: 'Loaded RPM', tone: palette.highwayBlue },
-  { value: '$2.38', label: 'All-Mile RPM', tone: palette.fuelAmber },
-  { value: '$0.46', label: 'Above Your Target', tone: palette.routeGreen },
+  {
+    value: '$2.95',
+    label: 'Loaded RPM',
+    tone: palette.highwayBlue,
+    explainer: 'What the broker pays per loaded mile.',
+  },
+  {
+    value: '$2.38',
+    label: 'All-Mile RPM',
+    tone: palette.action,
+    explainer: 'After deadhead is folded back in.',
+  },
+  {
+    value: '$0.46',
+    label: 'Above Your Target',
+    tone: palette.routeGreen,
+    explainer: 'Clears your break-even and target.',
+  },
 ];
 
 const WHAT_ELSE: { marker: string; tone: Tone; title: string; subtitle: string }[] = [
@@ -60,11 +75,13 @@ export default function ValueRoute() {
       footer={
         <>
           <Button label="Check a Load" onPress={goToRole} />
-          <Button
-            label="See What Else RigReceipts Does"
-            variant="secondary"
+          <Pressable
+            accessibilityRole="button"
             onPress={() => setSheetOpen(true)}
-          />
+            style={({ pressed }) => [styles.link, pressed && { opacity: 0.6 }]}
+          >
+            <Text style={styles.linkText}>See what else RigReceipts does →</Text>
+          </Pressable>
         </>
       }
     >
@@ -78,8 +95,11 @@ export default function ValueRoute() {
         {WATERFALL.map((step, i) => (
           <View key={step.label}>
             <View style={[styles.stepCard, { borderLeftColor: step.tone }]}>
-              <Text style={styles.stepValue}>{step.value}</Text>
-              <Text style={styles.stepLabel}>{step.label}</Text>
+              <View style={styles.stepLeft}>
+                <Text style={styles.stepValue}>{step.value}</Text>
+                <Text style={styles.stepLabel}>{step.label}</Text>
+              </View>
+              <Text style={styles.stepExplainer}>{step.explainer}</Text>
             </View>
             {i < WATERFALL.length - 1 && <Text style={styles.arrow}>↓</Text>}
           </View>
@@ -138,13 +158,19 @@ const styles = StyleSheet.create({
     marginTop: spacing.xl,
   },
   stepCard: {
+    alignItems: 'center',
     backgroundColor: colors.surface,
     borderColor: colors.border,
     borderLeftWidth: 4,
-    borderRadius: 14,
+    borderRadius: radii.field,
     borderWidth: 1,
+    flexDirection: 'row',
+    gap: spacing.md,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
+  },
+  stepLeft: {
+    minWidth: 96,
   },
   stepValue: {
     color: colors.text,
@@ -155,18 +181,31 @@ const styles = StyleSheet.create({
   },
   stepLabel: {
     ...type.labelTiny,
-    color: colors.textMuted,
+    color: colors.textFaint,
     marginTop: 2,
+  },
+  stepExplainer: {
+    ...type.bodySmall,
+    color: colors.textMuted,
+    flex: 1,
   },
   arrow: {
     alignSelf: 'center',
-    color: colors.textMuted,
+    color: colors.textFaint,
     fontSize: 18,
     paddingVertical: 4,
   },
+  link: {
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+  },
+  linkText: {
+    ...type.emphasis,
+    color: colors.action,
+  },
   // "what else" sheet
   backdrop: {
-    backgroundColor: 'rgba(30, 35, 39, 0.4)',
+    backgroundColor: 'rgba(9, 12, 14, 0.72)',
     flex: 1,
   },
   sheet: {

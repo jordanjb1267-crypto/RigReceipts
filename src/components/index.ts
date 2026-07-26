@@ -2,6 +2,7 @@ export { BrandMark } from './BrandMark';
 export { Button } from './Button';
 export { Card } from './Card';
 export { SetupChecklist } from './SetupChecklist';
+export type { ChecklistItem } from './SetupChecklist';
 export { ChoiceRow } from './ChoiceRow';
 export { GradeBadge } from './GradeBadge';
 export { Marker } from './Marker';

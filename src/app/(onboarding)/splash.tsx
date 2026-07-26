@@ -4,7 +4,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { track } from '@/analytics';
-import { TopoBackground } from '@/components';
+import { BrandMark, TopoBackground } from '@/components';
 import { colors, fonts, palette, spacing, type } from '@/theme';
 
 /** O1 · Splash / brand load. Tap anywhere to continue. */
@@ -18,12 +18,14 @@ export default function SplashRoute() {
 
   return (
     <Pressable style={styles.root} onPress={() => router.push('/(onboarding)/value')}>
-      <TopoBackground onDark opacity={0.1} />
+      <TopoBackground opacity={0.08} />
       <View style={[styles.center, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
-        <View style={styles.mark}>
-          <Text style={styles.markLetter}>R</Text>
+        <View style={styles.tile}>
+          <BrandMark size={64} ink={palette.mapIvory} canvas={palette.asphaltCharcoal} />
         </View>
-        <Text style={styles.wordmark}>RigReceipts</Text>
+        <Text style={styles.wordmark}>
+          Rig<Text style={styles.wordmarkAccent}>Receipts</Text>
+        </Text>
         <Text style={styles.subtitle}>Know what the load really pays.</Text>
         <Text style={styles.tagline}>
           Rates, receipts, miles, and real profit — built for the driver.
@@ -36,7 +38,7 @@ export default function SplashRoute() {
 
 const styles = StyleSheet.create({
   root: {
-    backgroundColor: colors.surfaceDark,
+    backgroundColor: colors.background,
     flex: 1,
   },
   center: {
@@ -45,29 +47,28 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: spacing.xl,
   },
-  mark: {
+  tile: {
     alignItems: 'center',
-    backgroundColor: palette.routeGreen,
-    borderRadius: 22,
-    height: 84,
+    backgroundColor: palette.asphaltCharcoal,
+    borderColor: 'rgba(244, 241, 232, 0.14)',
+    borderRadius: 26,
+    borderWidth: 1,
+    height: 96,
     justifyContent: 'center',
     marginBottom: spacing.xl,
-    width: 84,
-  },
-  markLetter: {
-    color: palette.mapIvory,
-    fontFamily: fonts.black,
-    fontSize: 48,
-    letterSpacing: -3,
+    width: 96,
   },
   wordmark: {
-    color: colors.textOnDark,
+    color: colors.text,
     fontFamily: fonts.black,
-    fontSize: 36,
-    letterSpacing: -1.5,
+    fontSize: 38,
+    letterSpacing: -1.8,
+  },
+  wordmarkAccent: {
+    color: palette.goodLight,
   },
   subtitle: {
-    color: colors.textOnDark,
+    color: colors.text,
     fontFamily: fonts.extrabold,
     fontSize: 20,
     letterSpacing: -0.6,
@@ -77,14 +78,14 @@ const styles = StyleSheet.create({
   },
   tagline: {
     ...type.body,
-    color: 'rgba(244, 241, 232, 0.55)',
+    color: colors.textMuted,
     marginTop: spacing.lg,
     textAlign: 'center',
   },
   hint: {
     ...type.label,
     alignSelf: 'center',
-    color: 'rgba(244, 241, 232, 0.5)',
+    color: colors.textFaint,
     position: 'absolute',
   },
 });
