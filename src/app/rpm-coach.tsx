@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button, Card, Pill } from '@/components';
 import { CostProfile, estimateAllMileTargets, QUICK_ESTIMATE_PROFILE } from '@/domain';
+import { useActivationStore } from '@/store/activation';
 import { useCostProfileStore } from '@/store/costProfile';
 import { colors, palette, radii, spacing, type } from '@/theme';
 
@@ -89,6 +90,7 @@ export default function RpmCoachScreen() {
   const save = () => {
     if (!milesValid) return;
     setProfile(profile);
+    useActivationStore.getState().setCostsAdded(true);
     router.back();
   };
 
@@ -165,7 +167,7 @@ export default function RpmCoachScreen() {
                   keyboardType="decimal-pad"
                   style={styles.input}
                   placeholder="0"
-                  placeholderTextColor="rgba(30,35,39,0.3)"
+                  placeholderTextColor="rgba(244,241,232,0.3)"
                   accessibilityLabel={f.label}
                 />
                 {f.suffix && <Text style={styles.affix}>{f.suffix}</Text>}
@@ -204,7 +206,7 @@ const styles = StyleSheet.create({
   kicker: { ...type.label, color: colors.textMuted },
   closeBtn: {
     alignItems: 'center',
-    backgroundColor: 'rgba(30, 35, 39, 0.06)',
+    backgroundColor: 'rgba(244, 241, 232, 0.06)',
     borderRadius: radii.sm,
     height: 34,
     justifyContent: 'center',

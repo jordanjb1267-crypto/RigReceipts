@@ -43,8 +43,8 @@ export default function RevealRoute() {
       <Card style={styles.saved}>
         <Text style={styles.savedTag}>✓ Already on your board</Text>
         <Text style={styles.savedCopy}>
-          The load you just checked is saved — its rate, miles, and profit verdict are waiting on the
-          board.
+          The load you just checked is saved — its rate, miles, and profit verdict are waiting on
+          the board.
         </Text>
       </Card>
 
@@ -101,4 +101,3 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
   },
 });
-

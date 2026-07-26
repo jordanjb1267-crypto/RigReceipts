@@ -22,6 +22,7 @@ import {
   stopForegroundTracking,
   TrackingStartReason,
 } from '@/location/mileageTracker';
+import { useActivationStore } from '@/store/activation';
 import { useLoadsStore } from '@/store/loads';
 import { useMileageStore } from '@/store/mileage';
 import { colors, palette, radii, spacing, type } from '@/theme';
@@ -92,6 +93,7 @@ export default function LiveMileageScreen() {
   ) => {
     if (mode === 'start') {
       startTracking(choice, { loadId });
+      useActivationStore.getState().setMileageEnabled(true);
       track('mileage_session_started', { category: choice.category });
     } else {
       beginSegment(choice, { loadId });
@@ -226,7 +228,7 @@ export default function LiveMileageScreen() {
                   onChangeText={(v) => setMilesText(v.replace(/[^0-9.]/g, ''))}
                   keyboardType="decimal-pad"
                   placeholder="Add miles to this segment"
-                  placeholderTextColor="rgba(30,35,39,0.3)"
+                  placeholderTextColor="rgba(244,241,232,0.3)"
                   style={styles.milesInput}
                   accessibilityLabel="Add miles to this segment"
                 />
@@ -381,7 +383,7 @@ const styles = StyleSheet.create({
   kicker: { ...type.label, color: colors.textMuted },
   closeBtn: {
     alignItems: 'center',
-    backgroundColor: 'rgba(30, 35, 39, 0.06)',
+    backgroundColor: 'rgba(244, 241, 232, 0.06)',
     borderRadius: radii.sm,
     height: 34,
     justifyContent: 'center',

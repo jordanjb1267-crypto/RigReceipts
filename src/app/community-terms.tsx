@@ -153,7 +153,7 @@ const styles = StyleSheet.create({
   kicker: { ...type.label, color: colors.textMuted },
   closeBtn: {
     alignItems: 'center',
-    backgroundColor: 'rgba(30, 35, 39, 0.06)',
+    backgroundColor: 'rgba(244, 241, 232, 0.06)',
     borderRadius: radii.sm,
     height: 34,
     justifyContent: 'center',

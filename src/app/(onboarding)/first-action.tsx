@@ -111,9 +111,7 @@ function RateCheckBranch() {
   const allMileRpm = canCalculate && total > 0 ? offerN / total : null;
   const delta = allMileRpm !== null ? allMileRpm - targets.targetAllMileRpm : null;
   const meterPct =
-    allMileRpm !== null
-      ? Math.min(97, Math.max(3, ((allMileRpm - 1.4) / 2.0) * 100))
-      : null;
+    allMileRpm !== null ? Math.min(97, Math.max(3, ((allMileRpm - 1.4) / 2.0) * 100)) : null;
 
   const calculate = () => {
     if (!canCalculate) return;
@@ -155,7 +153,9 @@ function RateCheckBranch() {
     <OnboardingShell step={4} steps={5}>
       <Pill label="Rate Check" tone="green" />
       <Text style={styles.title}>Let&apos;s see what the load pays.</Text>
-      <Text style={styles.body}>Enter the offer and miles. Deadhead is where good rates go bad.</Text>
+      <Text style={styles.body}>
+        Enter the offer and miles. Deadhead is where good rates go bad.
+      </Text>
 
       <View style={styles.fieldCard}>
         <FieldRow
@@ -195,7 +195,9 @@ function RateCheckBranch() {
               <Text style={styles.previewLabel}>All-mile RPM</Text>
               <Text style={styles.previewValue}>{rpm(allMileRpm)}</Text>
             </View>
-            <Text style={[styles.previewDelta, { color: delta >= 0 ? palette.goodLight : '#C99A7E' }]}>
+            <Text
+              style={[styles.previewDelta, { color: delta >= 0 ? palette.goodLight : '#C99A7E' }]}
+            >
               {delta >= 0 ? '+' : '−'}
               {rpm(Math.abs(delta))} vs target
             </Text>
@@ -283,7 +285,9 @@ function RateCheckBranch() {
               onPress={() => setUseActualCosts(key === 'actual')}
               style={[styles.segmentItem, active && styles.segmentItemActive]}
             >
-              <Text style={[styles.segmentLabel, active && styles.segmentLabelActive]}>{label}</Text>
+              <Text style={[styles.segmentLabel, active && styles.segmentLabelActive]}>
+                {label}
+              </Text>
             </Pressable>
           );
         })}
@@ -324,10 +328,13 @@ function RateCheckLoading({ onDone }: { onDone: () => void }) {
       const rotate = setInterval(() => {
         setStepIndex((i) => Math.min(i + 1, CALC_STEPS.length - 1));
       }, 420);
-      const done = setTimeout(() => {
-        clearInterval(rotate);
-        doneRef.current();
-      }, 420 * CALC_STEPS.length + 60);
+      const done = setTimeout(
+        () => {
+          clearInterval(rotate);
+          doneRef.current();
+        },
+        420 * CALC_STEPS.length + 60,
+      );
       cleanup.push(() => {
         clearInterval(rotate);
         clearTimeout(done);
@@ -436,7 +443,10 @@ function ProfitResult({
 
       <Card dark style={styles.resultCard}>
         {breakdown.map((row, i) => (
-          <View key={row.label} style={[styles.breakRow, i === breakdown.length - 1 && styles.last]}>
+          <View
+            key={row.label}
+            style={[styles.breakRow, i === breakdown.length - 1 && styles.last]}
+          >
             <Text style={styles.breakLabel}>{row.label}</Text>
             <Text style={styles.breakValue}>{row.value}</Text>
           </View>
@@ -721,7 +731,15 @@ function ResultMetric({ label, value }: { label: string; value: string }) {
   );
 }
 
-function ReviewLine({ label, value, last }: { label: string; value: string | null; last?: boolean }) {
+function ReviewLine({
+  label,
+  value,
+  last,
+}: {
+  label: string;
+  value: string | null;
+  last?: boolean;
+}) {
   return (
     <View style={[styles.reviewLine, last && styles.last]}>
       <Text style={styles.reviewLabel}>{label}</Text>
