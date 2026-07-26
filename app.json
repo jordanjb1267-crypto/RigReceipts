@@ -1,0 +1,75 @@
+{
+  "expo": {
+    "name": "RigReceipts",
+    "slug": "rigreceipts",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "rigreceipts",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "bundleIdentifier": "com.rigreceipts.app",
+      "supportsTablet": false,
+      "icon": "./assets/expo.icon"
+    },
+    "android": {
+      "package": "com.rigreceipts.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#1E2327",
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "backgroundImage": "./assets/images/android-icon-background.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "output": "static",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#1E2327",
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 76
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "RigReceipts uses the camera to scan receipts and load documents.",
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "RigReceipts accesses your photos so you can attach an existing receipt or document."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "RigReceipts measures your trip miles while you drive so loaded and deadhead miles are tracked accurately for your profit and taxes. Location is only used while you have a mileage session running.",
+          "locationAlwaysAndWhenInUsePermission": "RigReceipts can keep measuring trip miles in the background while you drive, so a session keeps counting miles even when your screen is off. Location is only used while you have a mileage session running.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
+        }
+      ],
+      [
+        "@sentry/react-native/expo",
+        {
+          "organization": "rigreceipts",
+          "project": "rigreceipts-app"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}

@@ -1,0 +1,1 @@
+First release. Check a load before you accept it: loaded vs all-mile RPM, break-even, and target after deadhead and fuel. Scan receipts and rate cons with on-device text reading, track miles and loads, and see historical driver-shared rates by lane. Private by design — no account required to start.

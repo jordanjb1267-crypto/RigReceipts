@@ -1,0 +1,1 @@
+trucking,owner operator,rate per mile,rpm,deadhead,freight,truck expenses,ifta,mileage,receipts

@@ -1,0 +1,5 @@
+# Vendored agent skills — keep upstream formatting.
+.agents/
+.claude/skills/
+# Written by `claude mcp add` — not ours to reformat.
+.mcp.json

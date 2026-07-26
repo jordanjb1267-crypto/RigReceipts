@@ -1,0 +1,3 @@
+RigReceipts is an expense, mileage, and rate-analysis tool for truck drivers. It is NOT a load board or freight marketplace — the "Rate Board" shows only historical, anonymized, driver-shared rate snapshots for transparency and is labeled "not available loads" throughout.
+
+Account is optional; core features work on-device without sign-in. A test account and a sandbox flow for in-app purchases (RevenueCat) can be provided on request. Camera is used only for on-device receipt/document text recognition, prompted contextually when the user chooses to scan.

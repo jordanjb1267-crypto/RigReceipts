@@ -1,0 +1,90 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { create } from 'zustand';
+import { createJSONStorage, persist } from 'zustand/middleware';
+
+import { ScanTypeSlug } from '@/domain';
+import { OcrEngineName } from '@/ocr';
+
+/**
+ * Local, offline-first capture queue. Scans are saved here immediately and
+ * persist across app restarts (spec §7: "store local pending records… avoid
+ * data loss on app close"). A later phase syncs `status: 'pending_sync'` rows
+ * up to Supabase and flips them to `synced`.
+ */
+export interface Capture {
+  id: string;
+  scanType: ScanTypeSlug;
+  imageUri: string | null;
+  engine: OcrEngineName | null;
+  rawText: string;
+  vendor: string | null;
+  totalUsd: number | null;
+  date: string | null;
+  gallons: number | null;
+  /** pending_sync until an upload succeeds. */
+  status: 'pending_sync' | 'synced';
+  /** The remote document_scans id once synced (null when no image was stored). */
+  remoteScanId?: string | null;
+  /** Load this scan is filed under, when attached (feeds the Paperwork grade). */
+  loadId?: string | null;
+  createdAt: number;
+}
+
+export type NewCapture = Omit<Capture, 'id' | 'status' | 'createdAt' | 'remoteScanId' | 'loadId'>;
+
+interface CapturesState {
+  captures: Capture[];
+  hydrated: boolean;
+  addCapture: (draft: NewCapture) => string;
+  markSynced: (id: string, remoteScanId: string | null) => void;
+  /** File a scan under a load (or detach with null). */
+  assignCaptureToLoad: (id: string, loadId: string | null) => void;
+  removeCapture: (id: string) => void;
+  clear: () => void;
+}
+
+const makeId = () => `cap_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+
+export const useCapturesStore = create<CapturesState>()(
+  persist(
+    (set) => ({
+      captures: [],
+      hydrated: false,
+      addCapture: (draft) => {
+        const id = makeId();
+        const capture: Capture = {
+          ...draft,
+          id,
+          status: 'pending_sync',
+          loadId: null,
+          createdAt: Date.now(),
+        };
+        set((s) => ({ captures: [capture, ...s.captures] }));
+        return id;
+      },
+      markSynced: (id, remoteScanId) =>
+        set((s) => ({
+          captures: s.captures.map((c) =>
+            c.id === id ? { ...c, status: 'synced', remoteScanId } : c,
+          ),
+        })),
+      assignCaptureToLoad: (id, loadId) =>
+        set((s) => ({
+          captures: s.captures.map((c) => (c.id === id ? { ...c, loadId } : c)),
+        })),
+      removeCapture: (id) => set((s) => ({ captures: s.captures.filter((c) => c.id !== id) })),
+      clear: () => set({ captures: [] }),
+    }),
+    {
+      name: 'rigreceipts.captures',
+      storage: createJSONStorage(() => AsyncStorage),
+      partialize: ({ hydrated: _hydrated, ...rest }) => rest,
+      onRehydrateStorage: () => () => {
+        useCapturesStore.setState({ hydrated: true });
+      },
+    },
+  ),
+);
+
+export const selectPendingSyncCount = (s: CapturesState) =>
+  s.captures.filter((c) => c.status === 'pending_sync').length;

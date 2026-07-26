@@ -1,0 +1,204 @@
+import { useRouter } from 'expo-router';
+import { useMemo } from 'react';
+import { Alert, Share, StyleSheet, Text, View } from 'react-native';
+
+import { Card, Pill, RouteBand, Screen } from '@/components';
+import { isFeatureEnabled } from '@/config/flags';
+import { buildCsv, CsvColumn, monthRange, SCAN_TYPES, summarizeRange } from '@/domain';
+import { Capture, useCapturesStore } from '@/store/captures';
+import { colors, spacing, type } from '@/theme';
+
+const usd = (n: number) =>
+  `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+const scanLabel = (slug: string) => SCAN_TYPES.find((t) => t.slug === slug)?.label ?? slug;
+
+const CAPTURE_CSV_COLUMNS: CsvColumn<Capture>[] = [
+  { header: 'Date', value: (c) => c.date ?? new Date(c.createdAt).toISOString().slice(0, 10) },
+  { header: 'Type', value: (c) => scanLabel(c.scanType) },
+  { header: 'Vendor', value: (c) => c.vendor },
+  { header: 'Amount (USD)', value: (c) => c.totalUsd },
+  { header: 'Gallons', value: (c) => c.gallons },
+  { header: 'Synced', value: (c) => (c.status === 'synced' ? 'yes' : 'pending') },
+];
+
+/**
+ * Reports: calendar, daily bulletins, grades, monthly closeout, exports
+ * (Loops 9–11). Also the entry to Freight Intelligence (Rate Board), flag-gated.
+ */
+export default function ReportsScreen() {
+  const router = useRouter();
+  const boardEnabled = isFeatureEnabled('community_rate_board_enabled');
+  const brokerCheckEnabled = isFeatureEnabled('broker_check_enabled');
+  const roadGradeEnabled = isFeatureEnabled('road_grade_enabled');
+  const captures = useCapturesStore((s) => s.captures);
+
+  const month = useMemo(() => monthRange(new Date()), []);
+  const monthSummary = useMemo(() => summarizeRange(captures, month), [captures, month]);
+  const monthRecords = monthSummary.expenseCount + monthSummary.documentCount;
+
+  const exportCsv = async () => {
+    if (captures.length === 0) {
+      Alert.alert('Nothing to export yet', 'Scan a receipt or two, then export your records here.');
+      return;
+    }
+    const csv = buildCsv(CAPTURE_CSV_COLUMNS, captures);
+    try {
+      await Share.share({ title: 'RigReceipts expenses (CSV)', message: csv });
+    } catch {
+      // dismissed
+    }
+  };
+
+  return (
+    <Screen
+      kicker="Monthly Atlas"
+      title="Every day gets a cost marker."
+      headerRight={
+        <Pill
+          label={monthRecords > 0 ? `${monthRecords} records` : 'No records'}
+          tone={monthRecords > 0 ? 'green' : 'neutral'}
+        />
+      }
+    >
+      <Card label={`This month · ${month.label}`} labelRight={usd(monthSummary.totalUsd)}>
+        {monthRecords === 0 ? (
+          <>
+            <Text style={styles.emptyTitle}>The calendar fills as you track.</Text>
+            <Text style={styles.emptyCopy}>
+              Each date will show spend, receipts, miles, load activity, and missing paperwork. Tap
+              a day for its bulletin.
+            </Text>
+          </>
+        ) : (
+          <>
+            <Text style={styles.emptyTitle}>{usd(monthSummary.totalUsd)} in captured spend.</Text>
+            <Text style={styles.emptyCopy}>
+              {monthSummary.expenseCount} {monthSummary.expenseCount === 1 ? 'expense' : 'expenses'}
+              {monthSummary.topCategory
+                ? ` · most on ${monthSummary.topCategory.label} (${usd(
+                    monthSummary.topCategory.totalUsd,
+                  )})`
+                : ''}
+              . Open the closeout for the full breakdown.
+            </Text>
+            <View style={styles.catStrip}>
+              {monthSummary.byCategory.slice(0, 3).map((c) => (
+                <View key={c.category} style={styles.catChip}>
+                  <Text style={styles.catChipLabel}>{c.label}</Text>
+                  <Text style={styles.catChipValue}>{usd(c.totalUsd)}</Text>
+                </View>
+              ))}
+            </View>
+          </>
+        )}
+      </Card>
+
+      <RouteBand
+        marker="§"
+        markerTone="green"
+        title="Monthly closeout"
+        subtitle="This month's spend by category, ready to export for taxes."
+        value="Open"
+        onPress={() => router.push('/monthly-closeout')}
+      />
+
+      {boardEnabled && (
+        <RouteBand
+          marker="≈"
+          markerTone="green"
+          title="Community Rate Board"
+          subtitle="Recent driver-shared rates by lane and equipment."
+          value="Open"
+          onPress={() => router.push('/rate-board')}
+        />
+      )}
+
+      <RouteBand
+        marker="R"
+        markerTone="green"
+        title="RPM Coach"
+        subtitle="Set fixed costs, pay, and profit targets to get your rate."
+        value="Set"
+        onPress={() => router.push('/rpm-coach')}
+      />
+      {roadGradeEnabled ? (
+        <RouteBand
+          marker="G"
+          markerTone="blue"
+          title="Road Grade"
+          subtitle="Rate, fuel, deadhead, paperwork, money owed — coached, not shamed."
+          value="Open"
+          onPress={() => router.push('/road-grade')}
+        />
+      ) : (
+        <RouteBand
+          marker="G"
+          markerTone="blue"
+          title="Weekly & monthly grades"
+          subtitle="Rate, fuel, deadhead, paperwork, money owed — coached, not shamed."
+          value="Soon"
+        />
+      )}
+      {brokerCheckEnabled && (
+        <RouteBand
+          marker="B"
+          markerTone="rust"
+          title="Broker Check"
+          subtitle="Your private log of how each broker pays — on time, in full, detention honored."
+          value="Open"
+          onPress={() => router.push('/broker-check')}
+        />
+      )}
+      <RouteBand
+        marker="✓"
+        markerTone="amber"
+        title="Export records (CSV)"
+        subtitle="Share your captured expenses as a spreadsheet for taxes or your accountant."
+        value="Export"
+        onPress={exportCsv}
+      />
+      <RouteBand
+        marker="⚙"
+        markerTone="neutral"
+        title="Account &amp; data"
+        subtitle="Export a copy of your data or delete your account."
+        value="Open"
+        onPress={() => router.push('/account-settings')}
+      />
+    </Screen>
+  );
+}
+
+const styles = StyleSheet.create({
+  emptyTitle: {
+    ...type.h2,
+    color: colors.text,
+    marginBottom: spacing.sm,
+  },
+  emptyCopy: {
+    ...type.body,
+    color: colors.textMuted,
+  },
+  catStrip: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  catChip: {
+    backgroundColor: 'rgba(46, 107, 87, 0.08)',
+    borderRadius: 10,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: 6,
+  },
+  catChipLabel: {
+    ...type.labelTiny,
+    color: colors.textMuted,
+  },
+  catChipValue: {
+    ...type.emphasis,
+    color: colors.text,
+    fontVariant: ['tabular-nums'],
+  },
+});

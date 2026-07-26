@@ -1,0 +1,426 @@
+<!doctype html>
+<!--
+  RigReceipts Privacy Policy — hostable page for https://rigreceipts.app/privacy
+  Canonical source: docs/PRIVACY_POLICY.md. Keep this page in sync with it.
+  Draft for counsel review; adjust jurisdiction sections and company details.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="index,follow" />
+    <title>Privacy Policy — RigReceipts</title>
+    <style>
+      :root {
+        --bg: #f4f1e8;
+        --surface: #fbf8ef;
+        --ink: #1f2427;
+        --muted: #5c5b54;
+        --line: rgba(30, 35, 39, 0.12);
+        --route: #2e6b57;
+        --accent: #c8912d;
+        --maxw: 46rem;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #15191c;
+          --surface: #1e2327;
+          --ink: #eae6da;
+          --muted: #a3a196;
+          --line: rgba(244, 241, 232, 0.14);
+          --route: #4f9a80;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        -webkit-text-size-adjust: 100%;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, system-ui, sans-serif;
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+      }
+      .wrap {
+        max-width: var(--maxw);
+        margin: 0 auto;
+        padding: clamp(1.5rem, 4vw, 3.5rem) 1.25rem 4rem;
+      }
+      header {
+        border-bottom: 1px solid var(--line);
+        padding-bottom: 1.25rem;
+        margin-bottom: 2rem;
+      }
+      .mark {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 40px;
+        height: 40px;
+        border-radius: 11px;
+        background: var(--route);
+        color: #f4f1e8;
+        font-weight: 800;
+        font-size: 22px;
+        letter-spacing: -1px;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+      }
+      h1 {
+        font-size: clamp(1.75rem, 5vw, 2.4rem);
+        letter-spacing: -0.03em;
+        margin: 1.25rem 0 0.25rem;
+      }
+      .updated {
+        color: var(--muted);
+        font-size: 0.9rem;
+        margin: 0;
+      }
+      h2 {
+        font-size: 1.3rem;
+        letter-spacing: -0.02em;
+        margin: 2.25rem 0 0.5rem;
+      }
+      h3 {
+        font-size: 1.05rem;
+        margin: 1.5rem 0 0.4rem;
+      }
+      p,
+      li {
+        color: var(--ink);
+      }
+      a {
+        color: var(--route);
+      }
+      strong {
+        font-weight: 700;
+      }
+      .note {
+        background: color-mix(in srgb, var(--accent) 12%, transparent);
+        border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+        border-radius: 12px;
+        padding: 1rem 1.1rem;
+        font-size: 0.95rem;
+      }
+      .summary {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 0.5rem 1.25rem;
+        margin: 1.5rem 0;
+      }
+      ul {
+        padding-left: 1.2rem;
+      }
+      li {
+        margin: 0.35rem 0;
+      }
+      .table-scroll {
+        overflow-x: auto;
+        margin: 1rem 0;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        min-width: 32rem;
+        font-size: 0.95rem;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 0.6rem 0.75rem;
+        border-bottom: 1px solid var(--line);
+        vertical-align: top;
+      }
+      th {
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+      }
+      footer {
+        margin-top: 3rem;
+        padding-top: 1.25rem;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="wrap">
+      <header>
+        <div class="brand"><span class="mark">R</span> RigReceipts</div>
+        <h1>Privacy Policy</h1>
+        <p class="updated">Last updated: July 19, 2026</p>
+      </header>
+
+      <p class="note">
+        <strong>Draft for review.</strong> This policy is written to match what the RigReceipts app
+        actually does today. It is a starting template, not legal advice — have counsel review it
+        and adapt the jurisdiction-specific sections and company details before publishing.
+      </p>
+
+      <p>
+        RigReceipts is operated by <strong>[Legal Entity]</strong> ("RigReceipts," "we," "us"),
+        which makes an app that helps truck drivers understand what a load really pays and keep
+        track of receipts, miles, loads, and expenses. This policy explains what we collect, why,
+        and the choices you have.
+      </p>
+
+      <div class="summary">
+        <h2 style="margin-top: 1rem">The short version</h2>
+        <ul>
+          <li>
+            You can use core RigReceipts <strong>without an account</strong>. In that mode your
+            records stay on your device.
+          </li>
+          <li>
+            If you <strong>create an account</strong>, your records back up to your private,
+            per-user space so they sync across devices.
+          </li>
+          <li>
+            <strong>Receipts and documents are read on your device.</strong> We don't upload an
+            image unless you save the record.
+          </li>
+          <li>
+            We collect <strong>pseudonymous usage and crash data</strong> to keep the app working
+            and improve it — never your document contents, amounts, names, or addresses.
+          </li>
+          <li>
+            We <strong>do not sell your data</strong>, show third-party ads, or track you across
+            other apps or websites.
+          </li>
+          <li>
+            Community rate posts are <strong>privacy-safe</strong>: your name, load numbers,
+            addresses, contacts, and documents are removed, and your identity is never shown.
+          </li>
+        </ul>
+      </div>
+
+      <h2>Who this applies to</h2>
+      <p>
+        This policy covers the RigReceipts mobile app for iOS and Android. It does not cover the App
+        Store, Google Play, or third-party services you reach through links, which have their own
+        policies.
+      </p>
+
+      <h2>What we collect and why</h2>
+      <p>
+        <strong>Account information.</strong> If you create an account, we collect your
+        <strong>email address</strong> to sign you in and to sync your data. Account creation is
+        optional.
+      </p>
+      <p>
+        <strong>Content you create.</strong> The records you enter or capture — receipts and rate
+        confirmations (including their images), expenses, loads, mileage, cost profiles, and rate
+        checks. When you are signed out, this stays on your device. When you are signed in, it is
+        stored in your private, per-user space so it can sync and restore. We use it only to provide
+        the app's features to you.
+      </p>
+      <p>
+        <strong>Camera and photos.</strong> When you scan a receipt or a rate confirmation, the
+        camera opens only for that action and the text is recognized
+        <strong>on your device</strong>. A captured image is stored (in your account space) only if
+        you save the record. We don't use your camera or photos for tracking or advertising.
+      </p>
+      <p>
+        <strong>Community Rate Board posts (optional).</strong> If you choose to post a rate, we
+        publish a <strong>privacy-safe snapshot</strong> — the metro-level lane, equipment, rate
+        status, and the pay figures you choose to include. Before anything is shared we remove your
+        name, load and document numbers, exact addresses and times, and all contacts. On the public
+        board your identity is never shown; posts carry a rotating, per-lane alias that cannot be
+        traced back to you or followed from lane to lane. You can remove your posts at any time, and
+        reports and blocks are handled by our moderation process.
+      </p>
+      <p>
+        <strong>Usage analytics.</strong> We collect <strong>pseudonymous</strong> product-usage
+        events (for example, that a rate check was completed, or a paywall was viewed) together with
+        low-cardinality context such as your selected role, subscription tier, and equipment type.
+        Events are tied to your account identifier or, when you are signed out, to a random device
+        identifier. We <strong>never</strong> include document contents, amounts tied to you, names,
+        or addresses in analytics.
+      </p>
+      <p>
+        <strong>Diagnostics and crash data.</strong> We collect crash reports and basic diagnostics
+        to find and fix problems. These are configured to exclude personal information and never
+        include your document contents.
+      </p>
+      <p>
+        <strong>Purchases.</strong> If you subscribe, we and our purchases provider record your
+        <strong>subscription status and plan</strong> so we can unlock features and restore
+        purchases. Your payment is processed by Apple or Google —
+        <strong>we do not receive your card number or bank details.</strong>
+      </p>
+
+      <h2>What we do not collect</h2>
+      <p>
+        We do <strong>not</strong> collect precise or coarse <strong>location</strong>, your
+        <strong>contacts</strong>, <strong>browsing history</strong>, <strong>health</strong> data,
+        or <strong>advertising identifiers</strong>. We do not build advertising profiles.
+      </p>
+
+      <h2>How we use your information</h2>
+      <ul>
+        <li>To provide, sync, and restore the features you use.</li>
+        <li>To operate the Community Rate Board and its safety and moderation controls.</li>
+        <li>To keep the app reliable and secure and to fix problems.</li>
+        <li>To understand which features are used so we can improve the app.</li>
+        <li>To process subscriptions and restore purchases.</li>
+        <li>To comply with law and enforce our terms.</li>
+      </ul>
+      <p>We do not use your information for third-party advertising or cross-app tracking.</p>
+
+      <h2>When we share information</h2>
+      <p>
+        We share information only with <strong>service providers</strong> who process it on our
+        behalf under contract, and only as needed to run the app:
+      </p>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Provider</th>
+              <th>Role</th>
+              <th>Where</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Supabase</td>
+              <td>Account, database, and file storage</td>
+              <td>Canada (ca-central-1)</td>
+            </tr>
+            <tr>
+              <td>PostHog</td>
+              <td>Product analytics</td>
+              <td>United States</td>
+            </tr>
+            <tr>
+              <td>Sentry</td>
+              <td>Crash reporting and diagnostics</td>
+              <td>United States</td>
+            </tr>
+            <tr>
+              <td>RevenueCat</td>
+              <td>Subscription management</td>
+              <td>United States</td>
+            </tr>
+            <tr>
+              <td>Apple / Google</td>
+              <td>Payment processing and app delivery</td>
+              <td>Per their policies</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        We may also disclose information if required by <strong>law</strong>, to protect rights and
+        safety, or as part of a <strong>business transfer</strong> (with notice where required). We
+        <strong>do not sell</strong> your personal information and we
+        <strong>do not share</strong> it for cross-context behavioral advertising.
+      </p>
+
+      <h2>Data retention</h2>
+      <p>
+        We keep your records for as long as your account is active. Content stored only on your
+        device stays until you delete it or uninstall the app. Analytics and crash data are retained
+        for a limited period for security and product analysis. When you delete your account, your
+        associated records are deleted (some minimal data may be retained where required for legal,
+        security, or fraud-prevention purposes).
+      </p>
+
+      <h2>Security</h2>
+      <p>
+        Data is <strong>encrypted in transit</strong> (HTTPS/TLS). Your account records are
+        protected by row-level security so that you can only access your own data. Receipt and
+        document text recognition runs <strong>on your device</strong>. No method of storage or
+        transmission is perfectly secure, but we work to protect your information.
+      </p>
+
+      <h2>Your choices and rights</h2>
+      <ul>
+        <li>
+          <strong>Use the app without an account</strong> to keep records on your device only.
+        </li>
+        <li>
+          <strong>Access and export</strong>: your records are visible in the app; contact us to
+          request an export.
+        </li>
+        <li><strong>Correct</strong>: edit your records in the app at any time.</li>
+        <li>
+          <strong>Delete</strong>: delete individual records in the app, or delete your account to
+          remove your associated data. Uninstalling the app removes device-only data.
+        </li>
+        <li><strong>Community posts</strong>: remove any rate card you posted at any time.</li>
+      </ul>
+      <p>
+        Depending on where you live, you may have additional rights (below). To exercise any right,
+        contact <a href="mailto:privacy@rigreceipts.app">privacy@rigreceipts.app</a>.
+      </p>
+
+      <h3>California (CCPA/CPRA)</h3>
+      <p>
+        In the past 12 months we have collected the categories described above (identifiers such as
+        email; commercial information such as your subscription status; user content; and
+        internet/usage activity such as analytics). We collect it for the business purposes
+        described above. <strong>We do not sell or share personal information</strong> as those
+        terms are defined under the CCPA/CPRA, and we do not use sensitive personal information to
+        infer characteristics. California residents may request access, deletion, and correction,
+        and will not be discriminated against for exercising these rights.
+      </p>
+
+      <h3>EU / UK (GDPR / UK GDPR)</h3>
+      <p>
+        RigReceipts is the data controller. Our legal bases are:
+        <strong>performance of a contract</strong> (providing the app and account features),
+        <strong>legitimate interests</strong> (keeping the app secure and improving it, balanced
+        against your rights), and <strong>consent</strong> where required. You have the rights of
+        access, rectification, erasure, restriction, portability, and objection, and you may lodge a
+        complaint with your local supervisory authority. Because our providers operate in Canada and
+        the United States, your data may be transferred there under appropriate safeguards.
+      </p>
+
+      <h2>Children</h2>
+      <p>
+        RigReceipts is a business tool for professional drivers. It is not directed to children, and
+        we do not knowingly collect personal information from children under 13 (or the minimum age
+        in your jurisdiction).
+      </p>
+
+      <h2>International users</h2>
+      <p>
+        We and our service providers process data in <strong>Canada</strong> and the
+        <strong>United States</strong>. By using RigReceipts you understand your information may be
+        processed in these locations, which may have different data-protection laws than your own.
+      </p>
+
+      <h2>Changes to this policy</h2>
+      <p>
+        We may update this policy as the app evolves. We will change the "Last updated" date above
+        and, for material changes, provide notice in the app. For the Community Rate Board
+        specifically, you will be asked to review and agree again if the community terms change.
+      </p>
+
+      <h2>Contact us</h2>
+      <p>
+        Questions or requests about privacy:
+        <a href="mailto:privacy@rigreceipts.app">privacy@rigreceipts.app</a><br />
+        General support: <a href="mailto:support@rigreceipts.app">support@rigreceipts.app</a><br />
+        [Legal Entity]<br />
+        [Mailing Address]
+      </p>
+
+      <footer>© 2026 RigReceipts. Built for the driver.</footer>
+    </main>
+  </body>
+</html>
