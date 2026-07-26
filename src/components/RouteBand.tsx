@@ -14,14 +14,15 @@ interface RouteBandProps {
   /** Right-aligned value or short action word. */
   value?: string | ReactNode;
   onPress?: () => void;
+  /** Retained for API compatibility (bands are dark now). */
   dark?: boolean;
   style?: ViewStyle;
 }
 
 /**
- * Route Band — the signature Industrial Atlas status/progress row
- * (Master Build Prompt §2). A waypoint marker on a dashed route line,
- * copy in the middle, value on the right.
+ * Route Band — the signature status/progress row: a waypoint marker on a dashed
+ * route line, copy in the middle, value on the right. The route line is Fuel
+ * Amber on the dark canvas.
  */
 export function RouteBand({
   marker,
@@ -30,24 +31,17 @@ export function RouteBand({
   subtitle,
   value,
   onPress,
-  dark,
   style,
 }: RouteBandProps) {
   const content = (
-    <View style={[styles.band, dark && styles.bandDark, style]}>
+    <View style={[styles.band, style]}>
       <View style={styles.routeLine} aria-hidden />
       <Marker label={marker} tone={markerTone} />
       <View style={styles.copy}>
-        <Text style={[styles.title, dark && styles.titleOnDark]}>{title}</Text>
-        {subtitle !== undefined && (
-          <Text style={[styles.subtitle, dark && styles.subtitleOnDark]}>{subtitle}</Text>
-        )}
+        <Text style={styles.title}>{title}</Text>
+        {subtitle !== undefined && <Text style={styles.subtitle}>{subtitle}</Text>}
       </View>
-      {typeof value === 'string' ? (
-        <Text style={[styles.value, dark && styles.titleOnDark]}>{value}</Text>
-      ) : (
-        value
-      )}
+      {typeof value === 'string' ? <Text style={styles.value}>{value}</Text> : value}
     </View>
   );
 
@@ -71,20 +65,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: colors.surface,
     borderColor: colors.border,
-    borderRadius: radii.md,
+    borderRadius: radii.row,
     borderWidth: 1,
     flexDirection: 'row',
-    gap: spacing.md - 2,
+    gap: spacing.md,
     marginTop: spacing.sm + 2,
     overflow: 'hidden',
-    padding: spacing.md,
-  },
-  bandDark: {
-    backgroundColor: 'rgba(244, 241, 232, 0.07)',
-    borderColor: colors.borderOnDark,
+    padding: spacing.md + 1,
   },
   routeLine: {
-    borderColor: 'rgba(61, 100, 128, 0.36)',
+    borderColor: 'rgba(217, 133, 43, 0.35)',
     borderLeftWidth: 1,
     borderStyle: 'dashed',
     bottom: 0,
@@ -97,19 +87,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   title: {
-    ...type.emphasis,
+    ...type.rowTitle,
     color: colors.text,
     marginBottom: 2,
-  },
-  titleOnDark: {
-    color: colors.textOnDark,
   },
   subtitle: {
     ...type.bodySmall,
     color: colors.textMuted,
-  },
-  subtitleOnDark: {
-    color: 'rgba(244, 241, 232, 0.58)',
   },
   value: {
     color: colors.text,

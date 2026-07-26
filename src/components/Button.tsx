@@ -1,23 +1,23 @@
 import { ActivityIndicator, Pressable, StyleSheet, Text, ViewStyle } from 'react-native';
 
-import { colors, fonts, minTapTarget, palette, radii } from '@/theme';
+import { colors, radii, sizes, type } from '@/theme';
 
 interface ButtonProps {
   label: string;
   onPress: () => void;
   variant?: 'primary' | 'secondary' | 'danger';
+  /** Retained for API compatibility (buttons are dark-theme now). */
   dark?: boolean;
   disabled?: boolean;
   loading?: boolean;
   style?: ViewStyle;
 }
 
-/** Route Green primary CTA and outlined secondary, per the mockup. */
+/** Fuel Amber pill primary CTA and bordered secondary (Night Atlas). */
 export function Button({
   label,
   onPress,
   variant = 'primary',
-  dark = false,
   disabled = false,
   loading = false,
   style,
@@ -33,20 +33,23 @@ export function Button({
       style={({ pressed }) => [
         styles.base,
         isSecondary ? styles.secondary : isDanger ? styles.danger : styles.primary,
-        isSecondary && dark && styles.secondaryDark,
         (disabled || loading) && styles.disabled,
         pressed && styles.pressed,
         style,
       ]}
     >
       {loading ? (
-        <ActivityIndicator color={isSecondary ? colors.text : palette.mapIvory} />
+        <ActivityIndicator color={isSecondary ? colors.text : colors.actionInk} />
       ) : (
         <Text
           style={[
             styles.label,
-            isSecondary ? styles.labelSecondary : styles.labelPrimary,
-            isSecondary && dark && styles.labelSecondaryDark,
+            isSecondary
+              ? styles.labelSecondary
+              : isDanger
+                ? styles.labelDanger
+                : styles.labelPrimary,
+            (disabled || loading) && styles.labelDisabled,
           ]}
         >
           {label}
@@ -59,44 +62,44 @@ export function Button({
 const styles = StyleSheet.create({
   base: {
     alignItems: 'center',
-    borderRadius: radii.sm + 4,
-    height: minTapTarget,
+    borderRadius: radii.cta,
+    height: sizes.button,
     justifyContent: 'center',
     paddingHorizontal: 18,
     width: '100%',
   },
   primary: {
-    backgroundColor: palette.routeGreen,
+    backgroundColor: colors.action,
   },
   secondary: {
     backgroundColor: 'transparent',
-    borderColor: 'rgba(30, 35, 39, 0.18)',
+    borderColor: colors.border,
     borderWidth: 1,
   },
   danger: {
-    backgroundColor: colors.danger,
-  },
-  secondaryDark: {
-    borderColor: 'rgba(244, 241, 232, 0.20)',
+    backgroundColor: 'rgba(169, 74, 59, 0.16)',
+    borderColor: 'rgba(169, 74, 59, 0.4)',
+    borderWidth: 1,
   },
   disabled: {
-    opacity: 0.45,
+    backgroundColor: colors.border,
   },
   pressed: {
     opacity: 0.85,
   },
   label: {
-    fontFamily: fonts.black,
-    fontSize: 14,
-    letterSpacing: -0.2,
+    ...type.button,
   },
   labelPrimary: {
-    color: palette.mapIvory,
+    color: colors.actionInk,
   },
   labelSecondary: {
     color: colors.text,
   },
-  labelSecondaryDark: {
-    color: colors.textOnDark,
+  labelDanger: {
+    color: '#C4655A',
+  },
+  labelDisabled: {
+    color: 'rgba(244, 241, 232, 0.35)',
   },
 });

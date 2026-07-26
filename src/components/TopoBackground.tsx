@@ -6,7 +6,7 @@ import { palette } from '@/theme';
 interface TopoBackgroundProps {
   /** Stroke opacity — keep subtle and functional (spec: §2 background language). */
   opacity?: number;
-  /** Light strokes for dark screens. */
+  /** Ivory strokes for the dark canvas (default). */
   onDark?: boolean;
 }
 
@@ -25,7 +25,7 @@ const CONTOUR_PATHS = [
  * Subtle atlas/topography backdrop. Absolutely fills its parent;
  * never intercepts touches.
  */
-export function TopoBackground({ opacity = 0.12, onDark = false }: TopoBackgroundProps) {
+export function TopoBackground({ opacity = 0.06, onDark = true }: TopoBackgroundProps) {
   return (
     <View pointerEvents="none" style={StyleSheet.absoluteFill}>
       <Svg

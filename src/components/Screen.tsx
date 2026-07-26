@@ -13,15 +13,16 @@ interface ScreenProps {
   /** Right side of the header row, e.g. a Pill. */
   headerRight?: ReactNode;
   children: ReactNode;
+  /** Retained for API compatibility (every screen is dark now). */
   dark?: boolean;
 }
 
 /** Standard tab screen scaffold: topo backdrop, kicker + title, scrollable body. */
-export function Screen({ kicker, title, headerRight, children, dark }: ScreenProps) {
+export function Screen({ kicker, title, headerRight, children }: ScreenProps) {
   const insets = useSafeAreaInsets();
   return (
-    <View style={[styles.root, dark && styles.rootDark]}>
-      <TopoBackground onDark={dark} opacity={dark ? 0.09 : 0.12} />
+    <View style={styles.root}>
+      <TopoBackground opacity={0.06} />
       <ScrollView
         contentContainerStyle={[
           styles.content,
@@ -30,8 +31,8 @@ export function Screen({ kicker, title, headerRight, children, dark }: ScreenPro
       >
         <View style={styles.topline}>
           <View style={styles.titleBlock}>
-            <Text style={[styles.kicker, dark && styles.kickerOnDark]}>{kicker}</Text>
-            <Text style={[styles.title, dark && styles.titleOnDark]}>{title}</Text>
+            <Text style={styles.kicker}>{kicker}</Text>
+            <Text style={styles.title}>{title}</Text>
           </View>
           {headerRight}
         </View>
@@ -46,11 +47,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     flex: 1,
   },
-  rootDark: {
-    backgroundColor: colors.surfaceDark,
-  },
   content: {
-    paddingHorizontal: spacing.xl,
+    paddingHorizontal: spacing.xl + 2,
   },
   topline: {
     alignItems: 'flex-start',
@@ -64,17 +62,11 @@ const styles = StyleSheet.create({
   },
   kicker: {
     ...type.label,
-    color: colors.textMuted,
-    marginBottom: 6,
-  },
-  kickerOnDark: {
-    color: 'rgba(244, 241, 232, 0.55)',
+    color: colors.textFaint,
+    marginBottom: 8,
   },
   title: {
     ...type.h1,
     color: colors.text,
-  },
-  titleOnDark: {
-    color: colors.textOnDark,
   },
 });
