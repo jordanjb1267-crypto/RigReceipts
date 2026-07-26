@@ -8,7 +8,7 @@ import { Button, Pill } from '@/components';
 import { TIER_INFO, Tier } from '@/domain';
 import { createPurchasesAdapter, purchasesMode } from '@/payments/purchases';
 import { useSubscriptionStore } from '@/store/subscription';
-import { colors, fonts, palette, radii, spacing, type } from '@/theme';
+import { colors, fonts, radii, spacing, type } from '@/theme';
 
 const MODE_NOTE: Record<ReturnType<typeof purchasesMode>, string> = {
   sandbox:
@@ -35,12 +35,11 @@ const TRIGGER_COPY: Record<PaywallTrigger, { headline: string; body: string }> =
   },
 };
 
-/** Section-45 value hierarchy — shown on every trigger. */
+/** Value hierarchy — four points, amber checks (design handoff §22). */
 const VALUE_POINTS = [
   'Check whether the load clears your target.',
   'Compare recent community rates with your costs.',
   'Track actual load profitability.',
-  'Monitor lanes and brokers.',
   'Organize receipts, miles, and tax records.',
 ];
 
@@ -88,9 +87,9 @@ export default function PaywallModal() {
         <Text style={styles.copy}>{copy.body}</Text>
 
         <View style={styles.values}>
-          {VALUE_POINTS.map((v, i) => (
+          {VALUE_POINTS.map((v) => (
             <View key={v} style={styles.valueRow}>
-              <Text style={styles.valueNum}>{i + 1}</Text>
+              <Text style={styles.valueCheck}>✓</Text>
               <Text style={styles.valueText}>{v}</Text>
             </View>
           ))}
@@ -172,11 +171,11 @@ const styles = StyleSheet.create({
   title: { ...type.h1, color: colors.text, marginTop: spacing.sm },
   copy: { ...type.body, color: colors.textMuted, marginTop: spacing.md },
   values: { marginTop: spacing.lg },
-  valueRow: { flexDirection: 'row', gap: spacing.md, paddingVertical: 6 },
-  valueNum: {
-    color: palette.routeGreen,
+  valueRow: { alignItems: 'center', flexDirection: 'row', gap: spacing.md, paddingVertical: 7 },
+  valueCheck: {
+    color: colors.action,
     fontFamily: fonts.black,
-    fontSize: 13,
+    fontSize: 14,
     width: 16,
   },
   valueText: { ...type.body, color: colors.text, flex: 1 },
@@ -189,7 +188,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
     padding: spacing.lg,
   },
-  planPrimary: { borderColor: palette.routeGreen, borderWidth: 2 },
+  planPrimary: { borderColor: colors.action, borderWidth: 2 },
   planHead: {
     alignItems: 'center',
     flexDirection: 'row',

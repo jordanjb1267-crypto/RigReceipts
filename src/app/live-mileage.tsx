@@ -198,6 +198,10 @@ export default function LiveMileageScreen() {
                   label={ACCOUNTING_LABELS[active.accountingCategory]}
                   tone={toneFor(active.accountingCategory)}
                 />
+                <View style={styles.recording}>
+                  <View style={styles.recDot} />
+                  <Text style={styles.recText}>RECORDING</Text>
+                </View>
                 {activeLoad && <Text style={styles.liveLoad}>Load {activeLoad.loadNumber}</Text>}
               </View>
               <Text style={styles.segMiles}>{mi(effectiveMiles(active))}</Text>
@@ -403,14 +407,26 @@ const styles = StyleSheet.create({
   liveCard: { backgroundColor: colors.surface },
   cardTitle: { ...type.h2, color: colors.text, marginBottom: spacing.md },
   copy: { ...type.body, color: colors.textMuted },
-  liveHead: { alignItems: 'center', flexDirection: 'row', gap: spacing.sm },
+  liveHead: { alignItems: 'center', flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   liveLoad: { ...type.emphasis, color: colors.text },
+  recording: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(169, 74, 59, 0.18)',
+    borderRadius: radii.pill,
+    flexDirection: 'row',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  recDot: { backgroundColor: '#C4655A', borderRadius: 4, height: 8, width: 8 },
+  recText: { ...type.labelTiny, color: '#C4655A' },
   segMiles: {
     color: colors.text,
-    fontFamily: type.metricLg.fontFamily,
-    fontSize: 40,
+    fontFamily: type.hero.fontFamily,
+    fontSize: 82,
     fontVariant: ['tabular-nums'],
-    letterSpacing: -1.5,
+    letterSpacing: -4,
+    lineHeight: 84,
     marginTop: spacing.md,
   },
   segLabel: { ...type.labelTiny, color: colors.textMuted },
