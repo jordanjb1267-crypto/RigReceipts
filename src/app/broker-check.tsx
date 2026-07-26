@@ -91,7 +91,7 @@ export default function BrokerCheckScreen() {
                 value={name}
                 onChangeText={setName}
                 placeholder="Broker name"
-                placeholderTextColor="rgba(30,35,39,0.3)"
+                placeholderTextColor="rgba(244,241,232,0.3)"
                 style={styles.input}
                 accessibilityLabel="Broker name"
               />
@@ -99,7 +99,7 @@ export default function BrokerCheckScreen() {
                 value={mc}
                 onChangeText={setMc}
                 placeholder="MC number (optional)"
-                placeholderTextColor="rgba(30,35,39,0.3)"
+                placeholderTextColor="rgba(244,241,232,0.3)"
                 keyboardType="number-pad"
                 style={[styles.input, styles.inputLast]}
                 accessibilityLabel="MC number"
@@ -153,7 +153,7 @@ export default function BrokerCheckScreen() {
                             onChangeText={(v) => setDays(v.replace(/[^0-9]/g, ''))}
                             keyboardType="number-pad"
                             placeholder="—"
-                            placeholderTextColor="rgba(30,35,39,0.3)"
+                            placeholderTextColor="rgba(244,241,232,0.3)"
                             style={styles.logInput}
                             accessibilityLabel="Days to pay"
                           />
@@ -209,7 +209,7 @@ const styles = StyleSheet.create({
   kicker: { ...type.label, color: colors.textMuted },
   closeBtn: {
     alignItems: 'center',
-    backgroundColor: 'rgba(30, 35, 39, 0.06)',
+    backgroundColor: 'rgba(244, 241, 232, 0.06)',
     borderRadius: radii.sm,
     height: 34,
     justifyContent: 'center',

@@ -9,6 +9,7 @@ interface WidgetCardProps {
   headerRight?: ReactNode;
   children: ReactNode;
   onPress?: () => void;
+  /** Raised hero-widget variant. */
   dark?: boolean;
 }
 
@@ -22,15 +23,15 @@ export function WidgetCard({ label, headerRight, children, onPress, dark }: Widg
       onPress={onPress}
       style={({ pressed }) => [
         styles.card,
-        dark && styles.dark,
+        dark && styles.raised,
         pressed && onPress ? styles.pressed : null,
       ]}
     >
       <View style={styles.header}>
-        <Text style={[styles.label, dark && styles.labelOnDark]}>{label}</Text>
+        <Text style={styles.label}>{label}</Text>
         <View style={styles.headerRight}>
           {headerRight}
-          {onPress ? <Text style={[styles.chevron, dark && styles.labelOnDark]}>›</Text> : null}
+          {onPress ? <Text style={styles.chevron}>›</Text> : null}
         </View>
       </View>
       {children}
@@ -42,14 +43,13 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: colors.surface,
     borderColor: colors.border,
-    borderRadius: radii.md + 2,
+    borderRadius: radii.card,
     borderWidth: 1,
     marginTop: spacing.md,
-    padding: spacing.lg - 2,
+    padding: spacing.lg,
   },
-  dark: {
-    backgroundColor: colors.surfaceDark,
-    borderColor: colors.borderOnDark,
+  raised: {
+    backgroundColor: colors.surfaceRaised,
   },
   pressed: {
     opacity: 0.85,
@@ -67,10 +67,7 @@ const styles = StyleSheet.create({
   },
   label: {
     ...type.label,
-    color: colors.textMuted,
-  },
-  labelOnDark: {
-    color: 'rgba(244, 241, 232, 0.55)',
+    color: colors.textFaint,
   },
   chevron: {
     color: colors.textMuted,

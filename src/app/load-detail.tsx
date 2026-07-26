@@ -372,7 +372,7 @@ export default function LoadDetailScreen() {
               onChangeText={(v) => setRcvAmount(v.replace(/[^0-9.]/g, ''))}
               keyboardType="decimal-pad"
               placeholder="Amount owed"
-              placeholderTextColor="rgba(30,35,39,0.3)"
+              placeholderTextColor="rgba(244,241,232,0.3)"
               style={styles.rcvInput}
               accessibilityLabel="Amount owed"
             />
@@ -405,7 +405,7 @@ function Field({
           onChangeText={(v) => onChange(v.replace(/[^0-9.]/g, ''))}
           keyboardType="decimal-pad"
           placeholder="0"
-          placeholderTextColor="rgba(30,35,39,0.3)"
+          placeholderTextColor="rgba(244,241,232,0.3)"
           style={styles.fieldInput}
           accessibilityLabel={label}
         />
@@ -421,7 +421,7 @@ const styles = StyleSheet.create({
   kicker: { ...type.label, color: colors.textMuted },
   closeBtn: {
     alignItems: 'center',
-    backgroundColor: 'rgba(30, 35, 39, 0.06)',
+    backgroundColor: 'rgba(244, 241, 232, 0.06)',
     borderRadius: radii.sm,
     height: 34,
     justifyContent: 'center',

@@ -73,7 +73,7 @@ export default function AddLoadScreen() {
               value={loadNumber}
               onChangeText={setLoadNumber}
               placeholder="e.g. 48291"
-              placeholderTextColor="rgba(30,35,39,0.3)"
+              placeholderTextColor="rgba(244,241,232,0.3)"
               style={styles.input}
               accessibilityLabel="Load number"
             />
@@ -83,7 +83,7 @@ export default function AddLoadScreen() {
               value={broker}
               onChangeText={setBroker}
               placeholder="Broker or shipper"
-              placeholderTextColor="rgba(30,35,39,0.3)"
+              placeholderTextColor="rgba(244,241,232,0.3)"
               style={styles.input}
               accessibilityLabel="Broker"
             />
@@ -93,7 +93,7 @@ export default function AddLoadScreen() {
               value={origin}
               onChangeText={setOrigin}
               placeholder="City, ST"
-              placeholderTextColor="rgba(30,35,39,0.3)"
+              placeholderTextColor="rgba(244,241,232,0.3)"
               style={styles.input}
               accessibilityLabel="Pickup"
             />
@@ -103,7 +103,7 @@ export default function AddLoadScreen() {
               value={destination}
               onChangeText={setDestination}
               placeholder="City, ST"
-              placeholderTextColor="rgba(30,35,39,0.3)"
+              placeholderTextColor="rgba(244,241,232,0.3)"
               style={styles.input}
               accessibilityLabel="Delivery"
             />
@@ -113,7 +113,7 @@ export default function AddLoadScreen() {
               value={note}
               onChangeText={setNote}
               placeholder="Appointment, commodity…"
-              placeholderTextColor="rgba(30,35,39,0.3)"
+              placeholderTextColor="rgba(244,241,232,0.3)"
               style={styles.input}
               accessibilityLabel="Note"
             />
@@ -132,7 +132,7 @@ export default function AddLoadScreen() {
               onChangeText={(v) => setGrossRate(v.replace(/[^0-9.]/g, ''))}
               keyboardType="decimal-pad"
               placeholder="e.g. 2400"
-              placeholderTextColor="rgba(30,35,39,0.3)"
+              placeholderTextColor="rgba(244,241,232,0.3)"
               style={styles.input}
               accessibilityLabel="Gross rate"
             />
@@ -143,7 +143,7 @@ export default function AddLoadScreen() {
               onChangeText={(v) => setLoadedMiles(v.replace(/[^0-9]/g, ''))}
               keyboardType="number-pad"
               placeholder="e.g. 900"
-              placeholderTextColor="rgba(30,35,39,0.3)"
+              placeholderTextColor="rgba(244,241,232,0.3)"
               style={styles.input}
               accessibilityLabel="Loaded miles"
             />
@@ -154,7 +154,7 @@ export default function AddLoadScreen() {
               onChangeText={(v) => setDeadheadMiles(v.replace(/[^0-9]/g, ''))}
               keyboardType="number-pad"
               placeholder="e.g. 100"
-              placeholderTextColor="rgba(30,35,39,0.3)"
+              placeholderTextColor="rgba(244,241,232,0.3)"
               style={styles.input}
               accessibilityLabel="Deadhead miles"
             />
@@ -187,7 +187,7 @@ const styles = StyleSheet.create({
   kicker: { ...type.label, color: colors.textMuted },
   closeBtn: {
     alignItems: 'center',
-    backgroundColor: 'rgba(30, 35, 39, 0.06)',
+    backgroundColor: 'rgba(244, 241, 232, 0.06)',
     borderRadius: radii.sm,
     height: 34,
     justifyContent: 'center',

@@ -284,7 +284,7 @@ function TruckFuelCard({
             onChangeText={(v) => setMpgText(v.replace(/[^0-9.]/g, ''))}
             keyboardType="decimal-pad"
             placeholder="6.5"
-            placeholderTextColor="rgba(30,35,39,0.3)"
+            placeholderTextColor="rgba(244,241,232,0.3)"
             style={styles.input}
             accessibilityLabel="Average MPG"
           />
@@ -296,7 +296,7 @@ function TruckFuelCard({
             onChangeText={(v) => setPriceText(v.replace(/[^0-9.]/g, ''))}
             keyboardType="decimal-pad"
             placeholder="3.90"
-            placeholderTextColor="rgba(30,35,39,0.3)"
+            placeholderTextColor="rgba(244,241,232,0.3)"
             style={styles.input}
             accessibilityLabel="Diesel price per gallon"
           />
@@ -318,7 +318,7 @@ const styles = StyleSheet.create({
   kicker: { ...type.label, color: colors.textMuted },
   closeBtn: {
     alignItems: 'center',
-    backgroundColor: 'rgba(30, 35, 39, 0.06)',
+    backgroundColor: 'rgba(244, 241, 232, 0.06)',
     borderRadius: radii.sm,
     height: 34,
     justifyContent: 'center',
@@ -329,7 +329,7 @@ const styles = StyleSheet.create({
   subtitle: { ...type.body, color: colors.textMuted, marginTop: spacing.xs },
   body: { paddingHorizontal: spacing.xl, paddingTop: spacing.lg },
   segment: {
-    backgroundColor: 'rgba(30, 35, 39, 0.06)',
+    backgroundColor: 'rgba(244, 241, 232, 0.06)',
     borderRadius: radii.sm + 2,
     flexDirection: 'row',
     marginBottom: spacing.md,
@@ -375,7 +375,7 @@ const styles = StyleSheet.create({
   reason: { ...type.body, color: colors.text },
   reasonMuted: { ...type.body, color: colors.textMuted, marginBottom: spacing.sm },
   pendingChip: {
-    backgroundColor: 'rgba(30, 35, 39, 0.06)',
+    backgroundColor: 'rgba(244, 241, 232, 0.06)',
     borderRadius: radii.pill,
     paddingHorizontal: 12,
     paddingVertical: 6,

@@ -22,6 +22,7 @@ import {
   stopForegroundTracking,
   TrackingStartReason,
 } from '@/location/mileageTracker';
+import { useActivationStore } from '@/store/activation';
 import { useLoadsStore } from '@/store/loads';
 import { useMileageStore } from '@/store/mileage';
 import { colors, palette, radii, spacing, type } from '@/theme';
@@ -92,6 +93,7 @@ export default function LiveMileageScreen() {
   ) => {
     if (mode === 'start') {
       startTracking(choice, { loadId });
+      useActivationStore.getState().setMileageEnabled(true);
       track('mileage_session_started', { category: choice.category });
     } else {
       beginSegment(choice, { loadId });
@@ -196,6 +198,10 @@ export default function LiveMileageScreen() {
                   label={ACCOUNTING_LABELS[active.accountingCategory]}
                   tone={toneFor(active.accountingCategory)}
                 />
+                <View style={styles.recording}>
+                  <View style={styles.recDot} />
+                  <Text style={styles.recText}>RECORDING</Text>
+                </View>
                 {activeLoad && <Text style={styles.liveLoad}>Load {activeLoad.loadNumber}</Text>}
               </View>
               <Text style={styles.segMiles}>{mi(effectiveMiles(active))}</Text>
@@ -226,7 +232,7 @@ export default function LiveMileageScreen() {
                   onChangeText={(v) => setMilesText(v.replace(/[^0-9.]/g, ''))}
                   keyboardType="decimal-pad"
                   placeholder="Add miles to this segment"
-                  placeholderTextColor="rgba(30,35,39,0.3)"
+                  placeholderTextColor="rgba(244,241,232,0.3)"
                   style={styles.milesInput}
                   accessibilityLabel="Add miles to this segment"
                 />
@@ -381,7 +387,7 @@ const styles = StyleSheet.create({
   kicker: { ...type.label, color: colors.textMuted },
   closeBtn: {
     alignItems: 'center',
-    backgroundColor: 'rgba(30, 35, 39, 0.06)',
+    backgroundColor: 'rgba(244, 241, 232, 0.06)',
     borderRadius: radii.sm,
     height: 34,
     justifyContent: 'center',
@@ -401,14 +407,26 @@ const styles = StyleSheet.create({
   liveCard: { backgroundColor: colors.surface },
   cardTitle: { ...type.h2, color: colors.text, marginBottom: spacing.md },
   copy: { ...type.body, color: colors.textMuted },
-  liveHead: { alignItems: 'center', flexDirection: 'row', gap: spacing.sm },
+  liveHead: { alignItems: 'center', flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   liveLoad: { ...type.emphasis, color: colors.text },
+  recording: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(169, 74, 59, 0.18)',
+    borderRadius: radii.pill,
+    flexDirection: 'row',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  recDot: { backgroundColor: '#C4655A', borderRadius: 4, height: 8, width: 8 },
+  recText: { ...type.labelTiny, color: '#C4655A' },
   segMiles: {
     color: colors.text,
-    fontFamily: type.metricLg.fontFamily,
-    fontSize: 40,
+    fontFamily: type.hero.fontFamily,
+    fontSize: 82,
     fontVariant: ['tabular-nums'],
-    letterSpacing: -1.5,
+    letterSpacing: -4,
+    lineHeight: 84,
     marginTop: spacing.md,
   },
   segLabel: { ...type.labelTiny, color: colors.textMuted },

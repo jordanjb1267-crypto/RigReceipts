@@ -2,9 +2,9 @@ import { useRouter } from 'expo-router';
 import { StyleSheet, Text } from 'react-native';
 
 import { track } from '@/analytics';
-import { Button, OnboardingShell, Pill, RouteBand } from '@/components';
+import { Button, Card, OnboardingShell, Pill, RouteBand } from '@/components';
 import { useOnboardingStore } from '@/store/onboarding';
-import { colors, spacing, type } from '@/theme';
+import { colors, palette, spacing, type } from '@/theme';
 
 /** O6 · Road Board reveal (Section 35). */
 export default function RevealRoute() {
@@ -39,6 +39,14 @@ export default function RevealRoute() {
       <Text style={styles.body}>
         Your loads, miles, expenses, rates, and money — all in one place.
       </Text>
+
+      <Card style={styles.saved}>
+        <Text style={styles.savedTag}>✓ Already on your board</Text>
+        <Text style={styles.savedCopy}>
+          The load you just checked is saved — its rate, miles, and profit verdict are waiting on
+          the board.
+        </Text>
+      </Card>
 
       <RouteBand
         marker="1"
@@ -76,5 +84,20 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     marginTop: spacing.md,
     marginBottom: spacing.sm,
+  },
+  saved: {
+    backgroundColor: 'rgba(46, 107, 87, 0.14)',
+    borderColor: 'rgba(46, 107, 87, 0.4)',
+    marginBottom: spacing.xs,
+    marginTop: spacing.sm,
+  },
+  savedTag: {
+    ...type.label,
+    color: palette.goodLight,
+  },
+  savedCopy: {
+    ...type.bodySmall,
+    color: colors.textMuted,
+    marginTop: spacing.xs,
   },
 });

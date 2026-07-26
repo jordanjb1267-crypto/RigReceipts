@@ -18,10 +18,15 @@ lawyer.** The rest of this doc is that list, ordered so you can execute it.
 ### App shell, design system, navigation
 
 - Expo SDK 57 / RN 0.86 / React 19 / expo-router, prebuild-ready.
-- Industrial Atlas theme + shared components (Marker, Pill, Card, MetricTile,
-  RouteBand, GradeBadge, WidgetCard, TopoBackground, Screen, Button).
-- Five-tab shell (Dashboard, Scan, Loads, Miles, Reports) + full onboarding
-  (splash → role → value → first-job → first-action → reveal → account).
+- **"Night Atlas" dark theme** (design handoff) — Fuel Amber `#D9852B` primary
+  action on a `#12171A` canvas; Inter + JetBrains Mono; the road-stem `BrandMark`
+  SVG; shared components (Marker, Pill, Card, MetricTile, RouteBand, GradeBadge,
+  WidgetCard, TopoBackground, Screen, Button, BrandMark, SetupChecklist) all on
+  one dark token path.
+- Five-tab shell (Dashboard, Scan, Loads, Miles, Reports; Scan is a normal tab,
+  no elevated button) + full onboarding (splash → role → value → first-job →
+  first-action → reveal → account) with the driver-confirmed rate-check flow,
+  the "finish setting up" activation checklist, and the four-up Road Board.
 
 ### Domain core (pure TS, unit-tested)
 

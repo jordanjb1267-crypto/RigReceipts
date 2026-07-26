@@ -1,7 +1,7 @@
 import { StyleSheet, Text, View } from 'react-native';
 
 import { equipmentLabel, SafeRateCard, VerificationLevel } from '@/domain';
-import { colors, fonts, radii, spacing, type } from '@/theme';
+import { colors, fonts, palette, radii, spacing, type } from '@/theme';
 
 const VERIFICATION_BADGE: Record<VerificationLevel, string | null> = {
   self_entered: null,
@@ -70,14 +70,14 @@ export function RateCardView({ card }: { card: SafeRateCard }) {
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: colors.surfaceDark,
-    borderColor: colors.borderOnDark,
-    borderRadius: radii.md + 2,
+    backgroundColor: palette.asphaltCharcoal,
+    borderColor: colors.border,
+    borderRadius: radii.card,
     borderWidth: 1,
     padding: spacing.xl,
   },
   route: {
-    color: colors.textOnDark,
+    color: colors.text,
     fontFamily: fonts.black,
     fontSize: 20,
     letterSpacing: -0.6,

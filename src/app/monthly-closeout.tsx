@@ -151,7 +151,7 @@ const styles = StyleSheet.create({
   kicker: { ...type.label, color: colors.textMuted },
   closeBtn: {
     alignItems: 'center',
-    backgroundColor: 'rgba(30, 35, 39, 0.06)',
+    backgroundColor: 'rgba(244, 241, 232, 0.06)',
     borderRadius: radii.sm,
     height: 34,
     justifyContent: 'center',
@@ -191,7 +191,7 @@ const styles = StyleSheet.create({
   catLabel: { ...type.emphasis, color: colors.text, flex: 1 },
   catAmount: { ...type.emphasis, color: colors.text, fontVariant: ['tabular-nums'] },
   barTrack: {
-    backgroundColor: 'rgba(30, 35, 39, 0.08)',
+    backgroundColor: 'rgba(244, 241, 232, 0.08)',
     borderRadius: 999,
     height: 6,
     overflow: 'hidden',

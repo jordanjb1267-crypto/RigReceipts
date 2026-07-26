@@ -423,7 +423,7 @@ const styles = StyleSheet.create({
   },
   closeBtn: {
     alignItems: 'center',
-    backgroundColor: 'rgba(30, 35, 39, 0.06)',
+    backgroundColor: 'rgba(244, 241, 232, 0.06)',
     borderRadius: radii.sm,
     height: 34,
     justifyContent: 'center',
@@ -455,7 +455,7 @@ const styles = StyleSheet.create({
   filterBar: { paddingBottom: spacing.sm, paddingHorizontal: spacing.xl },
   filterBtn: {
     alignSelf: 'flex-start',
-    backgroundColor: 'rgba(30, 35, 39, 0.05)',
+    backgroundColor: 'rgba(244, 241, 232, 0.06)',
     borderRadius: radii.sm,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
@@ -500,7 +500,7 @@ const styles = StyleSheet.create({
   cardActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.lg },
   action: {
     alignItems: 'center',
-    backgroundColor: 'rgba(30, 35, 39, 0.05)',
+    backgroundColor: 'rgba(244, 241, 232, 0.06)',
     borderRadius: radii.sm,
     paddingHorizontal: spacing.md,
     paddingVertical: 10,
@@ -520,7 +520,7 @@ const styles = StyleSheet.create({
   moderateText: { ...type.labelTiny, color: colors.textMuted },
   moderateDot: { color: colors.textMuted },
   // sheet
-  sheetBackdrop: { backgroundColor: 'rgba(30,35,39,0.4)', flex: 1 },
+  sheetBackdrop: { backgroundColor: 'rgba(9,12,14,0.72)', flex: 1 },
   sheet: {
     backgroundColor: colors.background,
     borderTopLeftRadius: radii.lg,

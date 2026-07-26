@@ -8,22 +8,20 @@ interface CardProps {
   /** Small uppercase label row: left text and optional right text. */
   label?: string;
   labelRight?: string;
-  /** Dark asphalt panel variant (hero cards). */
+  /** Raised hero-card variant (a touch brighter than the base surface). */
   dark?: boolean;
   compact?: boolean;
   style?: ViewStyle;
 }
 
-/** Paper card — the base surface of the Industrial Atlas system. */
+/** Card — the base translucent-ivory surface of the Night Atlas system. */
 export function Card({ children, label, labelRight, dark, compact, style }: CardProps) {
   return (
-    <View style={[styles.card, compact && styles.compact, dark && styles.dark, style]}>
+    <View style={[styles.card, compact && styles.compact, dark && styles.raised, style]}>
       {label !== undefined && (
         <View style={styles.labelRow}>
-          <Text style={[styles.label, dark && styles.labelOnDark]}>{label}</Text>
-          {labelRight !== undefined && (
-            <Text style={[styles.label, dark && styles.labelOnDark]}>{labelRight}</Text>
-          )}
+          <Text style={styles.label}>{label}</Text>
+          {labelRight !== undefined && <Text style={styles.label}>{labelRight}</Text>}
         </View>
       )}
       {children}
@@ -35,17 +33,16 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: colors.surface,
     borderColor: colors.border,
-    borderRadius: radii.md + 2,
+    borderRadius: radii.card,
     borderWidth: 1,
-    padding: spacing.lg - 2,
+    padding: spacing.lg,
   },
   compact: {
-    borderRadius: radii.md - 2,
+    borderRadius: radii.row,
     padding: spacing.md,
   },
-  dark: {
-    backgroundColor: colors.surfaceDark,
-    borderColor: colors.borderOnDark,
+  raised: {
+    backgroundColor: colors.surfaceRaised,
   },
   labelRow: {
     flexDirection: 'row',
@@ -54,9 +51,6 @@ const styles = StyleSheet.create({
   },
   label: {
     ...type.label,
-    color: colors.textMuted,
-  },
-  labelOnDark: {
-    color: 'rgba(244, 241, 232, 0.55)',
+    color: colors.textFaint,
   },
 });

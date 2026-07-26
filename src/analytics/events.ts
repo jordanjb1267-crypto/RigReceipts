@@ -34,6 +34,8 @@ export const ANALYTICS_EVENTS = [
   'lane_alert_enabled',
   'rate_board_post_reported',
   'contributor_blocked',
+  // activation
+  'activation_task_completed',
   // live mileage
   'mileage_session_started',
   'mileage_loaded_confirmed',

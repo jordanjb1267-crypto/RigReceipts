@@ -1,28 +1,20 @@
 import { Tabs } from 'expo-router';
-import { ColorValue, StyleSheet, Text, View } from 'react-native';
+import { ColorValue, StyleSheet, Text } from 'react-native';
 
-import { colors, fonts, palette, radii } from '@/theme';
+import { colors, fonts, palette } from '@/theme';
 
 function TabGlyph({ glyph, color }: { glyph: string; color: ColorValue }) {
   return <Text style={[styles.glyph, { color }]}>{glyph}</Text>;
 }
 
-/** Center Scan action — elevated Route Green square, per the mockup nav. */
-function ScanGlyph() {
-  return (
-    <View style={styles.scanButton}>
-      <Text style={styles.scanGlyph}>＋</Text>
-    </View>
-  );
-}
-
+/** Night Atlas tab bar: amber active tint, canvas-deep bar, Scan is a normal tab. */
 export default function TabsLayout() {
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: palette.routeGreen2,
-        tabBarInactiveTintColor: 'rgba(244, 241, 232, 0.5)',
+        tabBarActiveTintColor: palette.action,
+        tabBarInactiveTintColor: 'rgba(244, 241, 232, 0.42)',
         tabBarStyle: styles.tabBar,
         tabBarLabelStyle: styles.tabLabel,
       }}
@@ -38,9 +30,7 @@ export default function TabsLayout() {
         name="scan"
         options={{
           title: 'Scan',
-          tabBarIcon: () => <ScanGlyph />,
-          tabBarActiveTintColor: colors.textOnDark,
-          tabBarInactiveTintColor: 'rgba(244, 241, 232, 0.8)',
+          tabBarIcon: ({ color }) => <TabGlyph glyph="⎙" color={color} />,
         }}
       />
       <Tabs.Screen
@@ -70,8 +60,8 @@ export default function TabsLayout() {
 
 const styles = StyleSheet.create({
   tabBar: {
-    backgroundColor: palette.asphaltCharcoal,
-    borderTopColor: colors.borderOnDark,
+    backgroundColor: colors.canvasDeep,
+    borderTopColor: colors.border,
     borderTopWidth: 1,
   },
   tabLabel: {
@@ -80,24 +70,5 @@ const styles = StyleSheet.create({
   },
   glyph: {
     fontSize: 17,
-  },
-  scanButton: {
-    alignItems: 'center',
-    backgroundColor: palette.routeGreen,
-    borderRadius: radii.sm + 3,
-    height: 40,
-    justifyContent: 'center',
-    marginTop: -14,
-    shadowColor: palette.routeGreen,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.36,
-    shadowRadius: 12,
-    width: 40,
-  },
-  scanGlyph: {
-    color: palette.mapIvory,
-    fontFamily: fonts.bold,
-    fontSize: 20,
-    lineHeight: 24,
   },
 });
