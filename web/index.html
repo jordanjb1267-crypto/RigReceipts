@@ -1,0 +1,268 @@
+<!doctype html>
+<!--
+  RigReceipts landing page — hostable at https://rigreceipts.com
+  Referenced by fastlane/metadata/en-US/marketing_url.txt.
+  Pre-launch: no store badges until the app is actually live.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="index,follow" />
+    <title>RigReceipts — Know what the load really pays.</title>
+    <meta
+      name="description"
+      content="RigReceipts helps truck drivers see what a load really pays after deadhead, fuel, and real operating costs — plus receipts, mileage, loads, and money owed."
+    />
+    <style>
+      :root {
+        --bg: #12171a;
+        --deep: #0d1113;
+        --surface: rgba(244, 241, 232, 0.05);
+        --raised: rgba(244, 241, 232, 0.06);
+        --ink: #f4f1e8;
+        --muted: rgba(244, 241, 232, 0.55);
+        --faint: rgba(244, 241, 232, 0.45);
+        --line: rgba(244, 241, 232, 0.1);
+        --action: #d9852b;
+        --green: #5fa98c;
+        --maxw: 58rem;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        -webkit-text-size-adjust: 100%;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, system-ui, sans-serif;
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+      }
+      .wrap {
+        max-width: var(--maxw);
+        margin: 0 auto;
+        padding: clamp(1.5rem, 4vw, 3rem) 1.25rem 4rem;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+        font-size: 1.05rem;
+      }
+      .brand .green {
+        color: var(--green);
+      }
+      .lockup {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        margin: 0.6rem 0 0 3.25rem;
+        color: var(--faint);
+        font-size: 0.62rem;
+        font-weight: 700;
+        letter-spacing: 0.34em;
+        text-transform: uppercase;
+      }
+      .rule {
+        display: block;
+        width: 26px;
+        height: 1.5px;
+        background: var(--action);
+      }
+      h1 {
+        font-size: clamp(2.1rem, 7vw, 3.4rem);
+        line-height: 1.05;
+        letter-spacing: -0.045em;
+        font-weight: 900;
+        margin: 2.5rem 0 0;
+      }
+      .lede {
+        color: var(--muted);
+        font-size: clamp(1rem, 2.4vw, 1.15rem);
+        margin: 1rem 0 0;
+        max-width: 34rem;
+      }
+      .status {
+        display: inline-block;
+        margin-top: 1.75rem;
+        border: 1px solid rgba(217, 133, 43, 0.4);
+        background: rgba(217, 133, 43, 0.14);
+        color: var(--action);
+        border-radius: 999px;
+        padding: 0.5rem 1rem;
+        font-size: 0.85rem;
+        font-weight: 700;
+      }
+      h2 {
+        font-size: 1.5rem;
+        letter-spacing: -0.03em;
+        font-weight: 900;
+        margin: 3rem 0 0.25rem;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+        gap: 0.75rem;
+        margin-top: 1.25rem;
+      }
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        padding: 1.2rem 1.3rem;
+      }
+      .card h3 {
+        margin: 0 0 0.35rem;
+        font-size: 1rem;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+      }
+      .card p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.93rem;
+      }
+      .note {
+        background: var(--raised);
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        padding: 1.2rem 1.3rem;
+        margin-top: 1.25rem;
+        color: var(--muted);
+        font-size: 0.93rem;
+      }
+      a {
+        color: var(--action);
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.6rem;
+        margin-top: 1.25rem;
+      }
+      .links a {
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 0.45rem 0.95rem;
+        text-decoration: none;
+        color: var(--ink);
+        font-size: 0.92rem;
+      }
+      footer {
+        margin-top: 3.5rem;
+        padding-top: 1.25rem;
+        border-top: 1px solid var(--line);
+        color: var(--faint);
+        font-size: 0.88rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="wrap">
+      <header>
+        <div class="brand">
+          <svg width="44" height="44" viewBox="0 0 44 44" aria-hidden="true">
+            <rect width="44" height="44" rx="12" fill="#1E2327" />
+            <g transform="translate(10.3 7.5) scale(0.24167) translate(-6 -4)">
+              <path d="M40 56h36l28 68H68z" fill="#2E6B57" />
+              <path d="M18 4h20l2 120H6z" fill="#F4F1E8" />
+              <path
+                d="M34 4h30a22 22 0 0 1 22 22v14a22 22 0 0 1-22 22H34zm0 18h25a11 11 0 0 1 0 22H34z"
+                fill="#F4F1E8"
+                fill-rule="evenodd"
+              />
+              <path
+                d="M28 14 23 114"
+                stroke="#1E2327"
+                stroke-width="4.6"
+                stroke-dasharray="10,9"
+                stroke-linecap="round"
+                fill="none"
+              />
+            </g>
+          </svg>
+          <span>Rig<span class="green">Receipts</span></span>
+        </div>
+        <div class="lockup"><span class="rule"></span>Truck Expenses<span class="rule"></span></div>
+      </header>
+
+      <h1>Know what the load really pays.</h1>
+      <p class="lede">
+        A good loaded rate can still be a bad load. RigReceipts folds in deadhead, fuel, and your
+        real operating costs, then tells you what is actually left.
+      </p>
+      <span class="status">In development — coming to iOS and Android</span>
+
+      <h2>What it does</h2>
+      <div class="grid">
+        <div class="card">
+          <h3>Rate Check</h3>
+          <p>
+            Enter the offer and the miles. See your all-mile RPM against your break-even and your
+            target before you accept.
+          </p>
+        </div>
+        <div class="card">
+          <h3>Receipts</h3>
+          <p>
+            Scan fuel, tolls, repairs, and lumper receipts. Text is read on your device, and you
+            confirm every field before it saves.
+          </p>
+        </div>
+        <div class="card">
+          <h3>Mileage</h3>
+          <p>
+            Loaded, deadhead, and business miles tracked separately — because every empty mile comes
+            out of the same pocket.
+          </p>
+        </div>
+        <div class="card">
+          <h3>Loads</h3>
+          <p>
+            Keep the rate confirmation, BOL, POD, and receipts together in one packet, from booked
+            through paid.
+          </p>
+        </div>
+        <div class="card">
+          <h3>Money owed</h3>
+          <p>Detention, lumper, and reimbursements tracked until they actually land.</p>
+        </div>
+        <div class="card">
+          <h3>Road Grade</h3>
+          <p>
+            An honest read on rate, fuel, deadhead, paperwork, and money owed. Missing data is never
+            counted as a failure.
+          </p>
+        </div>
+      </div>
+
+      <h2>What it is not</h2>
+      <div class="note">
+        RigReceipts is not a load board, broker, or dispatch service, and nothing in it can be
+        booked or bid on. It does not give financial, accounting, tax, or legal advice — every
+        figure is an estimate based on the numbers you enter.
+      </div>
+
+      <h2>Contact</h2>
+      <p class="lede">
+        Questions, feedback, or press:
+        <a href="mailto:jburwell@rigreceipts.com">jburwell@rigreceipts.com</a>
+      </p>
+
+      <div class="links">
+        <a href="/support">Support</a>
+        <a href="/privacy">Privacy Policy</a>
+        <a href="/terms">Terms of Service</a>
+        <a href="/delete-account">Delete your account</a>
+      </div>
+
+      <footer>© 2026 RigReceipts. Built for the driver.</footer>
+    </main>
+  </body>
+</html>

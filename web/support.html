@@ -1,0 +1,222 @@
+<!doctype html>
+<!--
+  RigReceipts Support — hostable page for https://rigreceipts.com/support
+  Referenced by fastlane/metadata/en-US/support_url.txt. Apple requires this URL
+  to resolve to a real page before review.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="index,follow" />
+    <title>Support — RigReceipts</title>
+    <meta
+      name="description"
+      content="Get help with RigReceipts — rate checks, receipts, mileage, loads, subscriptions, and account deletion."
+    />
+    <style>
+      :root {
+        --bg: #f4f1e8;
+        --surface: #fbf8ef;
+        --ink: #1f2427;
+        --muted: #5c5b54;
+        --line: rgba(30, 35, 39, 0.12);
+        --route: #2e6b57;
+        --accent: #c8912d;
+        --maxw: 46rem;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #12171a;
+          --surface: #1e2327;
+          --ink: #f4f1e8;
+          --muted: #a3a196;
+          --line: rgba(244, 241, 232, 0.14);
+          --route: #5fa98c;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        -webkit-text-size-adjust: 100%;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, system-ui, sans-serif;
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+      }
+      .wrap {
+        max-width: var(--maxw);
+        margin: 0 auto;
+        padding: clamp(1.5rem, 4vw, 3.5rem) 1.25rem 4rem;
+      }
+      header {
+        border-bottom: 1px solid var(--line);
+        padding-bottom: 1.25rem;
+        margin-bottom: 2rem;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+        text-decoration: none;
+        color: var(--ink);
+      }
+      .brand .green {
+        color: var(--route);
+      }
+      h1 {
+        font-size: clamp(1.75rem, 5vw, 2.4rem);
+        letter-spacing: -0.03em;
+        margin: 1.25rem 0 0.25rem;
+      }
+      .lede {
+        color: var(--muted);
+        margin: 0;
+      }
+      h2 {
+        font-size: 1.2rem;
+        letter-spacing: -0.02em;
+        margin: 2.25rem 0 0.5rem;
+      }
+      a {
+        color: var(--route);
+      }
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 1.25rem 1.4rem;
+        margin: 1.25rem 0;
+      }
+      .contact {
+        font-size: 1.1rem;
+        font-weight: 700;
+      }
+      ul {
+        padding-left: 1.2rem;
+      }
+      li {
+        margin: 0.35rem 0;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-top: 1rem;
+      }
+      .links a {
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 0.45rem 0.9rem;
+        text-decoration: none;
+        font-size: 0.95rem;
+      }
+      footer {
+        margin-top: 3rem;
+        padding-top: 1.25rem;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="wrap">
+      <header>
+        <a class="brand" href="/">
+          <svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="true">
+            <rect width="40" height="40" rx="11" fill="#1E2327" />
+            <g transform="translate(9.38 7) scale(0.21667) translate(-6 -4)">
+              <path d="M40 56h36l28 68H68z" fill="#F4F1E8" />
+              <path d="M18 4h20l2 120H6z" fill="#F4F1E8" />
+              <path
+                d="M34 4h30a22 22 0 0 1 22 22v14a22 22 0 0 1-22 22H34zm0 18h25a11 11 0 0 1 0 22H34z"
+                fill="#F4F1E8"
+                fill-rule="evenodd"
+              />
+              <path
+                d="M28 14 23 114"
+                stroke="#1E2327"
+                stroke-width="5.4"
+                stroke-dasharray="10,9"
+                stroke-linecap="round"
+                fill="none"
+              />
+            </g>
+          </svg>
+          <span>Rig<span class="green">Receipts</span></span>
+        </a>
+        <h1>Support</h1>
+        <p class="lede">Questions, problems, or feedback — this reaches a human.</p>
+      </header>
+
+      <div class="card">
+        <p class="contact">
+          <a href="mailto:jburwell@rigreceipts.com">jburwell@rigreceipts.com</a>
+        </p>
+        <p style="margin-bottom: 0">
+          We read every message. Expect a reply within a couple of business days.
+        </p>
+      </div>
+
+      <h2>What to include</h2>
+      <p>The more of this you send, the faster we can fix it:</p>
+      <ul>
+        <li>Your phone and OS version (for example, iPhone 14 / iOS 18).</li>
+        <li>What you were doing when it happened, step by step.</li>
+        <li>What you expected versus what actually happened.</li>
+        <li>A screenshot, if the problem is something you can see.</li>
+      </ul>
+      <p>
+        Please do <strong>not</strong> email rate confirmations, bills of lading, or other documents
+        unless we ask — we do not need your paperwork to fix a bug.
+      </p>
+
+      <h2>Common questions</h2>
+
+      <h3>Billing, refunds, and cancelling</h3>
+      <p>
+        Subscriptions are processed by Apple and Google, not by us. Manage or cancel a subscription
+        in your Apple account settings or Google Play account settings. Refund requests are handled
+        by Apple or Google under their policies. If a purchase did not unlock, email us and we will
+        help sort it out.
+      </p>
+
+      <h3>Deleting your account or data</h3>
+      <p>
+        You can delete your account from inside the app under Settings. See
+        <a href="/delete-account">delete your account</a> for exactly what gets removed and how to
+        request it by email instead.
+      </p>
+
+      <h3>Your numbers look wrong</h3>
+      <p>
+        Rate checks, break-even figures, and RPM are estimates based on the costs and miles you
+        enter. If a figure looks off, check your cost profile in the RPM Coach first — an empty or
+        stale profile is the usual cause. If it still looks wrong, email us the numbers you entered
+        and what you expected.
+      </p>
+
+      <h3>Privacy and your data</h3>
+      <p>
+        See the <a href="/privacy">Privacy Policy</a> for what we collect and why. To exercise a
+        privacy right — access, correction, deletion, or export — email the address above.
+      </p>
+
+      <div class="links">
+        <a href="/privacy">Privacy Policy</a>
+        <a href="/terms">Terms of Service</a>
+        <a href="/delete-account">Delete your account</a>
+      </div>
+
+      <footer>© 2026 RigReceipts. Built for the driver.</footer>
+    </main>
+  </body>
+</html>

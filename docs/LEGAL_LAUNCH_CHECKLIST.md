@@ -103,17 +103,18 @@ under DPA, so mark them **Collected, not Shared** (confirm with counsel).
 remaining task. The store listings point at these URLs, and **each one must
 return a real page before submission** (Apple and Google both fetch them):
 
-| URL                                      | Serve from                                   | Required by                                                    |
-| ---------------------------------------- | -------------------------------------------- | -------------------------------------------------------------- |
-| `https://rigreceipts.com/privacy`        | `web/privacy.html`                           | Apple **and** Google (privacy-policy URL)                      |
-| `https://rigreceipts.com/terms`          | `web/terms.html`                             | Linked in-app + listings                                       |
-| `https://rigreceipts.com/delete-account` | `web/delete-account.html`                    | Google Play (account-deletion URL)                             |
-| `https://rigreceipts.com/support`        | needs a page — a simple contact page is fine | Apple (support URL, `fastlane/metadata/en-US/support_url.txt`) |
-| `https://rigreceipts.com`                | landing page (can be minimal)                | Apple marketing URL                                            |
+| URL                                      | Serve from                | Required by                                                    |
+| ---------------------------------------- | ------------------------- | -------------------------------------------------------------- |
+| `https://rigreceipts.com/privacy`        | `web/privacy.html`        | Apple **and** Google (privacy-policy URL)                      |
+| `https://rigreceipts.com/terms`          | `web/terms.html`          | Linked in-app + listings                                       |
+| `https://rigreceipts.com/delete-account` | `web/delete-account.html` | Google Play (account-deletion URL)                             |
+| `https://rigreceipts.com/support`        | `web/support.html`        | Apple (support URL, `fastlane/metadata/en-US/support_url.txt`) |
+| `https://rigreceipts.com`                | `web/index.html`          | Apple marketing URL                                            |
 
-The three `web/*.html` files are static and self-contained — any host works
-(Cloudflare Pages, Netlify, Vercel, GitHub Pages, S3). **`/support` and the root
-landing page do not exist yet and still need to be created.**
+All five `web/*.html` files now exist and are static and self-contained — no
+build step, no external requests. Any static host works (Cloudflare Pages,
+Netlify, Vercel, GitHub Pages, S3): serve the `web/` directory and map each file
+to the path above. **Nothing is deployed yet — hosting is the remaining task.**
 
 Before hosting, apply the §1 placeholder fills to the HTML so it matches the
 markdown (`[Legal Entity]`, `[Your Home State]`, `[Mailing Address]`, and the §15
