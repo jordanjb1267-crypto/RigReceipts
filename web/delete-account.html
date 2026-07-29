@@ -1,9 +1,9 @@
 <!doctype html>
 <!--
   RigReceipts account & data deletion request — hostable page for
-  https://rigreceipts.app/delete-account
+  https://rigreceipts.com/delete-account
   Satisfies Google Play's requirement for a web-reachable deletion path.
-  Static page: the email path composes a mailto to privacy@rigreceipts.app,
+  Static page: the email path composes a mailto to jburwell@rigreceipts.com,
   which an operator fulfills via the service role. Keep consistent with
   docs/ACCOUNT_DELETION.md and the Privacy Policy.
 -->
@@ -252,7 +252,7 @@
           <button type="submit">Email My Deletion Request</button>
           <p class="hint">
             This opens your email app with a pre-filled message to
-            <strong>privacy@rigreceipts.app</strong>. Prefer to write us directly? Email that
+            <strong>jburwell@rigreceipts.com</strong>. Prefer to write us directly? Email that
             address with the subject "Account deletion request."
           </p>
         </form>
@@ -302,7 +302,7 @@
           (note ? 'Notes: ' + note + '\n' : '') +
           '\nI confirm I am the owner of this account.';
         window.location.href =
-          'mailto:privacy@rigreceipts.app?subject=' +
+          'mailto:jburwell@rigreceipts.com?subject=' +
           encodeURIComponent(subject) +
           '&body=' +
           encodeURIComponent(body);

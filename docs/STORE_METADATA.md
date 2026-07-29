@@ -90,7 +90,7 @@ RigReceipts is not a load board, broker, dispatch service, or freight
 marketplace. It helps you understand what a load pays and run the financial side
 of your truck.
 
-Questions or feedback? support@rigreceipts.app
+Questions or feedback? jburwell@rigreceipts.com
 ```
 
 ## What's New (first release)

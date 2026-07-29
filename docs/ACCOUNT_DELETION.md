@@ -83,12 +83,12 @@ the share sheet are exercised on device.
 Google Play also requires a URL, reachable **without installing the app**, where
 a user can request account and data deletion. This page is built:
 **`web/delete-account.html`**, to host at
-**`https://rigreceipts.app/delete-account`**. It:
+**`https://rigreceipts.com/delete-account`**. It:
 
 - points to the in-app path as the fastest option;
 - explains what is deleted and the retention exceptions (mirroring this doc and
   the Privacy Policy); and
-- provides a request form that composes an email to **privacy@rigreceipts.app**
+- provides a request form that composes an email to **jburwell@rigreceipts.com**
   with the account email and a confirmation.
 
 The email path is **operator-fulfilled**: it is a static page, so a request

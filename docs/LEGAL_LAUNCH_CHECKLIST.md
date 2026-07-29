@@ -14,13 +14,13 @@ answers derived from the code.
 
 ## 1. Placeholders to fill (decisions already captured)
 
-| Token                      | Where                                        | Decision                                                                                                                                                                        |
-| -------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `[Legal Entity]`           | Privacy intro + Contact; ToS intro + §12/§15 | **Not formed yet** — one token throughout; replace with the exact legal name (e.g. "RigReceipts LLC") in one pass before publishing. Until then the operator is you personally. |
-| `[Your Home State]`        | ToS §15                                      | Governs under **your home state**. Insert the state name (e.g. "Texas") in §15 governing-law + venue.                                                                           |
-| `[Mailing Address]`        | Privacy → Contact us                         | **None yet** — a contact address is expected by CCPA and both store listings. Add a business address, P.O. box, or registered-agent address before launch.                      |
-| Contact emails             | Throughout                                   | **Keep `privacy@` / `support@` / `security@rigreceipts.app`.** Provision these mailboxes on the domain before launch — they appear in the store listings and both policies.     |
-| Arbitration / class-waiver | ToS §15                                      | The one substantive open **counsel decision**: adopt binding individual arbitration + class-action waiver, or default to courts. Must satisfy Apple/Google requirements.        |
+| Token                      | Where                                        | Decision                                                                                                                                                                                       |
+| -------------------------- | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `[Legal Entity]`           | Privacy intro + Contact; ToS intro + §12/§15 | **Not formed yet** — one token throughout; replace with the exact legal name (e.g. "RigReceipts LLC") in one pass before publishing. Until then the operator is you personally.                |
+| `[Your Home State]`        | ToS §15                                      | Governs under **your home state**. Insert the state name (e.g. "Texas") in §15 governing-law + venue.                                                                                          |
+| `[Mailing Address]`        | Privacy → Contact us                         | **None yet** — a contact address is expected by CCPA and both store listings. Add a business address, P.O. box, or registered-agent address before launch.                                     |
+| Contact email              | Throughout                                   | **DONE — `jburwell@rigreceipts.com`** is live and used everywhere (privacy, security, support). Optional polish: add `privacy@` / `support@` role aliases forwarding to it, then swap them in. |
+| Arbitration / class-waiver | ToS §15                                      | The one substantive open **counsel decision**: adopt binding individual arbitration + class-action waiver, or default to courts. Must satisfy Apple/Google requirements.                       |
 
 After filling the markdown, **re-sync the hosted `web/*.html` pages** (see §5) —
 they are the versions the store listings link to.
@@ -99,16 +99,25 @@ under DPA, so mark them **Collected, not Shared** (confirm with counsel).
 
 ## 5. Hosting the legal pages
 
-The store listings must point to public URLs. Host the three brand-styled pages:
+**Domain secured: `rigreceipts.com`.** Nothing is hosted on it yet — that is the
+remaining task. The store listings point at these URLs, and **each one must
+return a real page before submission** (Apple and Google both fetch them):
 
-- `web/privacy.html` → `https://rigreceipts.app/privacy`
-- `web/terms.html` → `https://rigreceipts.app/terms`
-- `web/delete-account.html` → `https://rigreceipts.app/delete-account`
+| URL                                      | Serve from                                   | Required by                                                    |
+| ---------------------------------------- | -------------------------------------------- | -------------------------------------------------------------- |
+| `https://rigreceipts.com/privacy`        | `web/privacy.html`                           | Apple **and** Google (privacy-policy URL)                      |
+| `https://rigreceipts.com/terms`          | `web/terms.html`                             | Linked in-app + listings                                       |
+| `https://rigreceipts.com/delete-account` | `web/delete-account.html`                    | Google Play (account-deletion URL)                             |
+| `https://rigreceipts.com/support`        | needs a page — a simple contact page is fine | Apple (support URL, `fastlane/metadata/en-US/support_url.txt`) |
+| `https://rigreceipts.com`                | landing page (can be minimal)                | Apple marketing URL                                            |
+
+The three `web/*.html` files are static and self-contained — any host works
+(Cloudflare Pages, Netlify, Vercel, GitHub Pages, S3). **`/support` and the root
+landing page do not exist yet and still need to be created.**
 
 Before hosting, apply the §1 placeholder fills to the HTML so it matches the
-markdown (the `[Legal Entity]`, `[Your Home State]`, `[Mailing Address]`, and the
-§15 governing-law text). Google Play specifically requires a reachable
-**account-deletion URL** and a **privacy-policy URL** in the console.
+markdown (`[Legal Entity]`, `[Your Home State]`, `[Mailing Address]`, and the §15
+governing-law text).
 
 ## 6. Counsel review checklist
 

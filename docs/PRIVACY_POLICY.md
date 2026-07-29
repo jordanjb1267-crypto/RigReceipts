@@ -6,7 +6,7 @@
 > actually does today. It is a starting template, not legal advice — have
 > counsel review it and adapt the jurisdiction-specific sections (California,
 > EU/UK, etc.) and the company/contact details before you publish it at
-> `https://rigreceipts.app/privacy`. Keep it in sync with the store data-safety
+> `https://rigreceipts.com/privacy`. Keep it in sync with the store data-safety
 > declarations in `docs/STORE_METADATA.md`.
 
 RigReceipts is operated by **[Legal Entity]** ("RigReceipts," "we," "us"), which
@@ -144,7 +144,7 @@ transmission is perfectly secure, but we work to protect your information.
 - **Community posts**: remove any rate card you posted at any time.
 
 Depending on where you live, you may have additional rights (below). To exercise
-any right, contact **privacy@rigreceipts.app**.
+any right, contact **jburwell@rigreceipts.com**.
 
 ### California (CCPA/CPRA)
 
@@ -189,8 +189,8 @@ the community terms change.
 
 ## Contact us
 
-Questions or requests about privacy: **privacy@rigreceipts.app**
-General support: **support@rigreceipts.app**
+Questions or requests about privacy: **jburwell@rigreceipts.com**
+General support: **jburwell@rigreceipts.com**
 
 [Legal Entity]
 [Mailing Address]

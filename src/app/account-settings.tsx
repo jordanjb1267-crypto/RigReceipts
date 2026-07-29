@@ -8,8 +8,8 @@ import { deleteAccount, exportUserData } from '@/data/account';
 import { useAuthStore } from '@/store/auth';
 import { colors, palette, radii, spacing, type } from '@/theme';
 
-const PRIVACY_URL = 'https://rigreceipts.app/privacy';
-const TERMS_URL = 'https://rigreceipts.app/terms';
+const PRIVACY_URL = 'https://rigreceipts.com/privacy';
+const TERMS_URL = 'https://rigreceipts.com/terms';
 
 /**
  * Account & data management (App Store 5.1.1(v) / Google Play): export a full

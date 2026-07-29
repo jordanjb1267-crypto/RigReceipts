@@ -5,7 +5,7 @@
 > **Draft for review.** These terms describe how RigReceipts works today. They
 > are a starting template, not legal advice — have counsel review and adapt the
 > company details, governing-law, and dispute-resolution sections before you
-> publish them at `https://rigreceipts.app/terms`. They pair with the
+> publish them at `https://rigreceipts.com/terms`. They pair with the
 > [Privacy Policy](./PRIVACY_POLICY.md) and the in-app Community Rate Board
 > Terms.
 
@@ -48,7 +48,7 @@ professional where appropriate.
 
 You can use core features without an account. If you create one, you are
 responsible for keeping your credentials secure and for activity under your
-account. Tell us promptly at security@rigreceipts.app if you suspect unauthorized
+account. Tell us promptly at jburwell@rigreceipts.com if you suspect unauthorized
 use. One person per account; do not share accounts.
 
 ## 4. Your content
@@ -175,7 +175,7 @@ exclusive jurisdiction over any dispute that is not subject to arbitration, and
 you consent to venue there.
 
 **Informal resolution first.** Before filing any claim, you agree to contact us at
-support@rigreceipts.app and to attempt to resolve the dispute informally for at
+jburwell@rigreceipts.com and to attempt to resolve the dispute informally for at
 least 30 days.
 
 **Arbitration and class-action waiver — _confirm with counsel before publishing._**
@@ -191,4 +191,4 @@ matter in small-claims court.
 
 ## 16. Contact
 
-Questions about these Terms: **support@rigreceipts.app**
+Questions about these Terms: **jburwell@rigreceipts.com**

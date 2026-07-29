@@ -65,7 +65,7 @@ lawyer.** The rest of this doc is that list, ordered so you can execute it.
 ### Capture pipeline
 
 - Camera + OCR abstraction (ML Kit, lazy-required with a stub fallback), receipt
-  + rate-con parsers with fixtures, capture→review flow, offline backfill queue.
+  - rate-con parsers with fixtures, capture→review flow, offline backfill queue.
 
 ### Backend (Supabase — project `kfyzglmphwohbhigvdyy`, ca-central-1)
 
