@@ -9,8 +9,7 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "bundleIdentifier": "com.rigreceipts.app",
-      "supportsTablet": false,
-      "icon": "./assets/expo.icon"
+      "supportsTablet": false
     },
     "android": {
       "package": "com.rigreceipts.app",
