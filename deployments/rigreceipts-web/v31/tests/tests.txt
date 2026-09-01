@@ -1,0 +1,61 @@
+# Tests
+
+## Test 1 - Calculate an ACCEPT verdict from all-mile target economics [sanity]
+Viewport: desktop
+Covers: existing freight offer calculator, shared economics kernel, ACCEPT verdict, all-mile semantics
+Description: Verifies the primary RR-W1 decision path remains unchanged after the private Roadside capability update.
+
+Steps:
+1. On the home page, enter offered pay 2200, loaded miles 900, deadhead 100
+2. Enter weekly fixed costs 1500, variable cost per mile 0.75, projected total miles 2500, expected loaded miles 2200, desired weekly pay 1500, and desired reserve 250
+3. Select Analyze this load
+
+Expected: The visible verdict is ACCEPT, loaded RPM is $2.44, all-mile RPM is $2.20, break-even all-mile RPM is $1.35, and target all-mile RPM is $2.05.
+
+## Test 2 - Search by coordinates and prepare a context-only RoadsideHandoff
+Viewport: mobile
+Covers: /roadside HostProjection, POST /api/roadside/search, TruckDown SearchByGeocode, exact listings normalization, qualified service filtering, POST /api/roadside/handoff, short-lived handoff persistence, authority boundary
+Description: Verifies coordinate search returns only qualified candidates and can prepare a 30-minute context handoff without creating an operational commitment.
+
+Steps:
+1. Open /roadside, enter "32.77670, -96.79700", select Heavy-duty towing, and select Find roadside help
+2. On a returned qualified provider candidate, select Prepare RigDesk handoff
+3. Review the RoadsideHandoff receipt
+
+Expected: The page says the candidates are an exact TruckDown service match, and the handoff receipt states context is available for 30 minutes. It explicitly says no service request, provider contact, dispatch, repair approval, payment authorization, or vehicle-ready state was created.
+
+## Test 3 - Search from city and state without device location
+Viewport: mobile
+Covers: POST /api/roadside/search, TruckDown SearchCityOrAddress, region-aware location resolution, SearchByCity, manual location path, no automatic device-location permission, no external operational effect
+Description: Verifies a user can search from city/state text while device coordinates remain an explicit opt-in faster path.
+
+Steps:
+1. Open /roadside and do not select Use my current location
+2. Enter "Dallas, TX", select Heavy-duty towing, and select Find roadside help
+3. Review the result or qualified-empty state
+
+Expected: The page reaches a provider-result or qualified-empty state without asking for device-location permission. It does not show the old coordinates-required message, and it states no provider was contacted and no service request was created.
+
+## Test 4 - Fail closed when location text cannot be resolved
+Viewport: mobile
+Covers: location-resolution guardrail, TruckDown location resolver failure/empty match, no fabricated coordinates, no external operational effect
+Description: Verifies unresolved location text does not cause RigDesk to invent a location or fall through to an unsafe provider search.
+
+Steps:
+1. Open /roadside
+2. Enter "zzzz-not-a-real-truck-location-99999", select Mobile truck repair, and select Find roadside help
+3. Review the visible status message
+
+Expected: A visible message says RigDesk could not resolve the location and suggests adding city/state/ZIP detail or using device coordinates. No provider is contacted and no service request is created.
+
+## Test 5 - Roadside remains private and publishes the consent and authority boundaries
+Viewport: desktop
+Covers: explicit location consent, noindex Roadside HostProjection, private-preview boundary, roadmap hold on authenticated case creation, no public handoff consumption
+Description: Verifies the private preview explains when location is sent and does not imply that public search or handoff preparation creates service authority.
+
+Steps:
+1. Open /roadside and review the location note and Use my current location control
+2. Review the Authority boundary and Next conversion cards
+3. Confirm the page remains a private integration preview and its metadata is noindex/nofollow
+
+Expected: The page states device location is requested only after selecting Use my current location; ordinary searches are not intentionally persisted; search and RoadsideHandoff create no service request/contact/dispatch/repair authority; authenticated create_service_case is described as a future gated step, not an exposed public action.
