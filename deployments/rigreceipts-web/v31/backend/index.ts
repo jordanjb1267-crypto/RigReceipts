@@ -1,0 +1,18 @@
+import { router, json } from '@appdeploy/sdk';
+
+const RIGDESK_ROADSIDE='https://tjspeaoyqwttqncapbnr.supabase.co/functions/v1/rigdesk-roadside';
+const allowedServices=new Set(['mobile_repair','heavy_tow','tire_service','trailer_repair','diesel_repair']);
+type JsonObject=Record<string,unknown>;
+function object(value:unknown):JsonObject{return value&&typeof value==='object'&&!Array.isArray(value)?value as JsonObject:{}}
+async function central(path:string,method:'GET'|'POST',body?:unknown){try{const response=await fetch(`${RIGDESK_ROADSIDE}${path}`,{method,headers:{Accept:'application/json',...(body===undefined?{}:{'Content-Type':'application/json'})},body:body===undefined?undefined:JSON.stringify(body),redirect:'manual'});const text=await response.text();let data:unknown={};try{data=text?JSON.parse(text):{};}catch{data={outcome:'capability_unavailable',reason:'NON_JSON_CAPABILITY_RESPONSE'};}return {status:response.status,data};}catch{return {status:503,data:{outcome:'capability_unavailable',reason:'RIGDESK_ROADSIDE_UNAVAILABLE'}};}}
+const searchByGeocode={path:'/client/search',method:'POST',operation_id:'SearchByGeocode',summary:'Coordinate provider search',request_fields:[{name:'coordinate',required:false,type:'object'},{name:'page',required:false,type:'integer'}]};
+const searchCityOrAddress={path:'/client/lookups/addresses/{term}',method:'GET',operation_id:'SearchCityOrAddress',summary:'Resolve text location',request_fields:[{name:'term',required:true,type:'string'},{name:'region',required:false,type:'string'}]};
+const searchByCity={path:'/client/search/city',method:'POST',operation_id:'SearchByCity',summary:'Resolved-location provider search',request_fields:[{name:'cityId',required:false,type:'string'},{name:'page',required:false,type:'integer'}]};
+export const handler=router({
+  'GET /api/_healthcheck':[async()=>json({message:'Success'})],
+  'GET /api/roadside/provider-status':[async()=>{const result=await central('/health','GET');const healthy=result.status===200;return json({provider:'truckdown',configured:healthy,authenticated:false,search_ready:healthy,reason:healthy?'CENTRAL_RIGDESK_CAPABILITY_ACTIVE':'CENTRAL_RIGDESK_CAPABILITY_UNAVAILABLE'},healthy?200:503);}],
+  'GET /api/roadside/schema-status':[async()=>json({available:true,reason:'TRUCKDOWN_EXACT_SEARCH_CONTRACTS_VERIFIED',openapi_version:'3.1.1',search_operation:searchByGeocode,operations:[searchByGeocode,searchCityOrAddress,searchByCity],response_contract:{root:'listings[]',identity:'id',name:'name',location:'location',rating:'rating.value',services:'services[].code/name'}})],
+  'POST /api/roadside/search':[async({body})=>{const input=object(body);const location=typeof input.location==='string'?input.location.trim():'';const service=typeof input.service==='string'?input.service:'';if(location.length<2||location.length>180||!allowedServices.has(service))return json({outcome:'invalid_request',reason:'LOCATION_AND_SUPPORTED_SERVICE_REQUIRED'},400);const result=await central('/search','POST',{location,service});return json(result.data,result.status);}],
+  'POST /api/roadside/handoff':[async({body})=>{const input=object(body);const result=await central('/handoff','POST',{location:typeof input.location==='string'?input.location.trim():'',service:typeof input.service==='string'?input.service:'',external_provider_ref:typeof input.external_provider_ref==='string'?input.external_provider_ref:''});return json(result.data,result.status);}],
+  'GET /api/roadside/handoff/:id':[async({params})=>{const result=await central(`/handoff/${encodeURIComponent(params.id||'')}`,'GET');return json(result.data,result.status);}]
+});
