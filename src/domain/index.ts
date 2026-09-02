@@ -203,8 +203,22 @@ export {
   LOAD_RATE_STATUSES,
   loadRateStatusLabel,
   loadRateStatusTone,
+  DRAFT_LOAD_NUMBER_PREFIX,
+  draftLoadNumber,
+  isDraftLoadNumber,
+  routeStop,
+  rateCheckLoadDraft,
+  rateConLoadDraft,
+  createFirstLoadSaver,
 } from './loads';
-export type { LoadStatus, LoadRateStatus } from './loads';
+export type {
+  LoadStatus,
+  LoadRateStatus,
+  OnboardingLoadDraft,
+  RateCheckSaveInput,
+  RateConReviewedFields,
+  FirstLoadSaveDeps,
+} from './loads';
 export {
   DOCUMENT_TYPES,
   DOCUMENT_STATUSES,

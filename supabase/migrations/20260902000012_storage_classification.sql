@@ -32,8 +32,10 @@ comment on column document_scans.storage_bucket is
   'Defaults to receipts because every pre-C2 object was written there; '
   'new writes persist the bucket chosen by the storage class of the scan type.';
 
+-- The client keys objects by its local capture id (see `storagePathFor` in
+-- src/data/captureSync.ts), not by the document_scans row id.
 comment on column document_scans.storage_path is
-  'Object path inside storage_bucket (per-user folder: {owner_id}/{scan_id}.{ext}).';
+  'Object path inside storage_bucket (per-user folder: {owner_id}/{capture_id}.{ext}).';
 
 -- ===========================================================================
 -- DOWN (manual rollback)

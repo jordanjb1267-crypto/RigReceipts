@@ -132,6 +132,84 @@ client only ever wrote to `receipts` before this change. Account deletion
 (`delete_current_account`) already sweeps `receipts`, `documents` and `reports`
 for the caller's folder and is unchanged.
 
+## C3 — onboarding load persistence
+
+### Defect closed
+
+The onboarding "Save this load" (Rate Check) and "Analyze this load" (Rate
+Confirmation) actions completed onboarding, emitted `first_load_saved` and
+navigated to Reveal **without creating a `LoadRecord`**. Both now persist
+exactly one local load first.
+
+### `evaluated` load status
+
+`LoadStatus` gains `evaluated` ahead of `booked` (`src/domain/loads.ts`):
+
+| Status       | Meaning                                                       | Open? | Completed? | `nextLoadStatus`                       |
+| ------------ | ------------------------------------------------------------- | ----- | ---------- | -------------------------------------- |
+| `evaluated`  | offer the user evaluated and saved; no evidence it was booked | yes   | no         | `booked`                               |
+| `booked`     | actually booked/accepted                                      | yes   | no         | `in_transit`                           |
+| `in_transit` |                                                               | yes   | no         | `delivered`                            |
+| `delivered`  |                                                               | yes   | yes        | `paid`                                 |
+| `paid`       |                                                               | no    | yes        | `booked` (intentional wrap, unchanged) |
+
+Transitions are an explicit switch, so `paid` never wraps to `evaluated`. The
+DB `loads.status` column is `text`; no migration is needed or added.
+
+### Rate Check → one `evaluated` load
+
+`rateCheckLoadDraft()` receives the **raw validated inputs** (offer, loaded
+miles, deadhead miles — not reconstructed from `RateCheckResult.totalMiles`)
+plus the optional user-typed trip:
+
+| LoadRecord field                              | Value                                                                                                                                                                    |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `loadNumber`                                  | `RR-DRAFT-YYYYMMDD-HHMMSS` (UTC, app-generated)                                                                                                                          |
+| `broker` / `fuelSurcharge`                    | `null` — never invented                                                                                                                                                  |
+| `origin` / `destination`                      | `City, ST` from user-entered trip details only; `null` otherwise                                                                                                         |
+| `grossRate` / `loadedMiles` / `deadheadMiles` | exact inputs                                                                                                                                                             |
+| `status`                                      | `evaluated`                                                                                                                                                              |
+| `bolRequired`                                 | store default (`true`)                                                                                                                                                   |
+| `note`                                        | states it came from the onboarding Rate Check, that no broker load number was supplied, that the number is RigReceipts-generated, and that it is not evidence of booking |
+
+### Rate Confirmation → one `booked` load
+
+`rateConLoadDraft()` uses only the reviewed, document-derived fields shown on
+the review card: `loadNumber` (or `RR-DRAFT-*` when absent — never a fabricated
+broker number), `broker`, route from parsed city/state, `grossRate =
+offerUsd`, `loadedMiles`, `deadheadMiles = null` (the document does not supply
+it), `fuelSurcharge = null` (not part of the reviewed card), `status = booked`
+(the user-reviewed rate confirmation is the evidence in this bounded flow).
+
+### Draft identifier
+
+`draftLoadNumber(now)` → `RR-DRAFT-YYYYMMDD-HHMMSS` in UTC; deterministic under
+an injected clock; `isDraftLoadNumber()` recognises it. It is visibly
+app-generated and never implies a broker reference. Second-level granularity is
+sufficient locally because the saver below prevents repeat saves.
+
+### Idempotency and ordering
+
+`createFirstLoadSaver(deps)` returns a function that, on first call, runs
+`addLoad` → `completeFirstAction` → `track('first_load_saved')` →
+`router.push('/(onboarding)/reveal')` in that order and remembers the id. Any
+later call returns the same id and performs no side effect. A throwing
+`addLoad` emits no analytics and does not navigate. Each onboarding screen holds
+one saver in a ref (`useFirstLoadSaver`), so double taps, repeated callbacks
+and slow navigation cannot create duplicates.
+
+Analytics props are limited to `verdict`, `source` (`rate_check` |
+`rate_con`) and `load_number_generated` (boolean). No rates, routes, brokers or
+document numbers are sent.
+
+### C2 documentation correction
+
+The `document_scans.storage_path` column comment in
+`20260902000012_storage_classification.sql` wrongly described the key as
+`{owner_id}/{scan_id}.{ext}`; the client keys objects by its local capture id
+(`{owner_id}/{capture_id}.{ext}`, `storagePathFor` in
+`src/data/captureSync.ts`). Comment corrected; storage behaviour unchanged.
+
 ## Evidence gaps (open)
 
 - Clean Supabase bootstrap of all migrations and two-user RLS verification
