@@ -40,6 +40,12 @@ describe('buildExportBundle', () => {
     expect(EXPORT_TABLES).toContain('document_versions');
   });
 
+  it('exports Quick Present custom-set metadata tables (Pass 2)', () => {
+    expect(EXPORT_TABLES).toContain('presentation_sets');
+    expect(EXPORT_TABLES).toContain('presentation_set_items');
+    expect(ACCOUNT_EXPORT_SCOPE.includes).toMatch(/Quick Present set metadata/);
+  });
+
   it('describes the export as metadata, explicitly excluding binary files and device-only documents', () => {
     expect(ACCOUNT_EXPORT_SCOPE.includes).toMatch(/Road Wallet document metadata/);
     expect(ACCOUNT_EXPORT_SCOPE.excludes).toMatch(/image\/PDF files/);

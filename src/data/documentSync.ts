@@ -1,15 +1,20 @@
 import {
   DocumentVersion,
+  emptyRecoveryResult,
   markError,
   OperationalDocument,
   remoteVersionMatches,
   remoteVersionPath,
   ROAD_WALLET_REMOTE_BUCKET,
+  RoadWalletRecoveryResult,
   sha256Hex,
   toRemoteDocumentRow,
   toRemoteVersionRow,
+  PresentationSetRecoveryResult,
+  writeSafeFromRecovery,
 } from '@/domain';
 import { getSupabaseClient } from '@/lib/supabase';
+import { usePresentationSetsStore } from '@/store/presentationSets';
 import { ROAD_WALLET_CLOUD_CAPABILITY, useRoadWalletStore } from '@/store/roadWallet';
 
 import {
@@ -20,6 +25,11 @@ import {
   subscribeCloudSyncContext,
 } from './cloudSyncAuth';
 import { DocumentFileStore, reverifyDocumentFile } from './documentFiles';
+import {
+  recoverPresentationSetsFromCloud,
+  PresentationSetSyncResult,
+  syncPendingPresentationSets,
+} from './presentationSetSync';
 import { roadWalletFileStore } from './roadWallet';
 import { recoverRoadWalletFromCloud } from './roadWalletRecovery';
 
@@ -225,40 +235,105 @@ export async function syncPendingRoadWallet(d: SyncDeps = deps()): Promise<RoadW
   }
 }
 
-let cycleInFlight: Promise<void> | null = null;
+export interface RoadWalletCloudCycleResult {
+  recovery: RoadWalletRecoveryResult;
+  writeSafe: boolean;
+  writes: RoadWalletSyncResult | null;
+  setRecovery: PresentationSetRecoveryResult | null;
+  setWrites: PresentationSetSyncResult | null;
+}
+
+export interface CloudCycleDeps {
+  recoverRoadWallet?: typeof recoverRoadWalletFromCloud;
+  syncPendingRoadWallet?: typeof syncPendingRoadWallet;
+  recoverPresentationSets?: typeof recoverPresentationSetsFromCloud;
+  syncPendingPresentationSets?: typeof syncPendingPresentationSets;
+}
+
+let cycleInFlight: Promise<RoadWalletCloudCycleResult> | null = null;
 let cycleRerunRequested = false;
 
+const emptyCycle = (recovery: RoadWalletRecoveryResult): RoadWalletCloudCycleResult => ({
+  recovery,
+  writeSafe: writeSafeFromRecovery(recovery),
+  writes: null,
+  setRecovery: null,
+  setWrites: null,
+});
+
 /**
- * One full cloud cycle in the canonical order (Pass 1B.1 R9):
+ * One full cloud cycle (Pass 2 H0 — READ BEFORE WRITE):
  *   1. current authenticated context;
- *   2. signed in + configured → RECOVER owner cloud metadata (data-rights
- *      operation, tier-independent) and safely merge it;
- *   3. auto-restore eligible `offlinePinned` current versions (inside recovery);
- *   4. reconcile local cloud states;
- *   5. pending WRITE sync only where `cloudDocumentBackup` authorizes it.
- * Recovery always precedes upload so a stale local copy never overwrites newer
- * remote metadata. Concurrent cycles coalesce; a request during a run schedules
- * exactly one follow-up. Recovery itself re-checks the active user at every
- * remote phase, so a mid-cycle account switch cannot leak another account's
- * state into the current session.
+ *   2. signed-out / not configured → local reconcile only, no remote I/O;
+ *   3. signed in + configured → recover Road Wallet owner metadata;
+ *   4. writeSafe = recovery.outcome === 'completed' && integrityConflicts === 0
+ *      (downloadFailures during optional file restore do NOT flip writeSafe);
+ *   5. recover custom presentation sets (failure does not mutate versions or
+ *      overwrite local unsynced sets);
+ *   6. reconcile local cloud states;
+ *   7. pending WRITE sync only when writeSafe AND the relevant capability
+ *      authorizes it (Road Wallet: cloudDocumentBackup; sets: that plus
+ *      savedPresentationSets).
+ * fetch_failed, cancelled, session change, or unresolved integrity conflicts
+ * skip remote writes. Concurrent cycles coalesce.
  */
-export function runRoadWalletCloudCycle(): Promise<void> {
+export function runRoadWalletCloudCycle(
+  extras: CloudCycleDeps = {},
+): Promise<RoadWalletCloudCycleResult> {
   if (cycleInFlight) {
     cycleRerunRequested = true;
     return cycleInFlight;
   }
+  const recoverRw = extras.recoverRoadWallet ?? recoverRoadWalletFromCloud;
+  const syncRw = extras.syncPendingRoadWallet ?? syncPendingRoadWallet;
+  const recoverSets = extras.recoverPresentationSets ?? recoverPresentationSetsFromCloud;
+  const syncSets = extras.syncPendingPresentationSets ?? syncPendingPresentationSets;
+
   cycleInFlight = (async () => {
     try {
       const ctx = currentCloudSyncContext();
-      if (ctx.userId && ctx.supabaseConfigured) {
-        await recoverRoadWalletFromCloud().catch(() => {});
+      if (!ctx.userId || !ctx.supabaseConfigured) {
+        await syncRw();
+        return emptyCycle(emptyRecoveryResult(ctx.userId ? 'not_configured' : 'signed_out'));
       }
-      await syncPendingRoadWallet();
+
+      let recovery: RoadWalletRecoveryResult;
+      try {
+        recovery = await recoverRw();
+      } catch {
+        recovery = emptyRecoveryResult('fetch_failed');
+      }
+      const writeSafe = writeSafeFromRecovery(recovery);
+
+      let setRecovery: PresentationSetRecoveryResult | null = null;
+      try {
+        setRecovery = await recoverSets();
+      } catch {
+        setRecovery = {
+          setsRecovered: 0,
+          itemsRecovered: 0,
+          integrityConflicts: 0,
+          skippedLocalChanges: 0,
+          outcome: 'fetch_failed',
+        };
+      }
+
+      useRoadWalletStore.getState().reconcileCloudStatuses(currentCloudSyncContext());
+      usePresentationSetsStore.getState().reconcileCloudStatuses(currentCloudSyncContext());
+
+      let writes: RoadWalletSyncResult | null = null;
+      let setWrites: PresentationSetSyncResult | null = null;
+      if (writeSafe) {
+        writes = await syncRw();
+        setWrites = await syncSets();
+      }
+
+      return { recovery, writeSafe, writes, setRecovery, setWrites };
     } finally {
       cycleInFlight = null;
       if (cycleRerunRequested) {
         cycleRerunRequested = false;
-        void runRoadWalletCloudCycle();
+        void runRoadWalletCloudCycle(extras);
       }
     }
   })();
@@ -276,11 +351,17 @@ let started = false;
 export function initDocumentSync(): void {
   if (started) return;
   started = true;
+  const bothHydrated = () =>
+    useRoadWalletStore.persist.hasHydrated() && usePresentationSetsStore.persist.hasHydrated();
   const run = () => {
     void runRoadWalletCloudCycle();
   };
-  if (useRoadWalletStore.persist.hasHydrated()) run();
-  useRoadWalletStore.persist.onFinishHydration(run);
+  const runWhenReady = () => {
+    if (bothHydrated()) run();
+  };
+  if (bothHydrated()) run();
+  useRoadWalletStore.persist.onFinishHydration(runWhenReady);
+  usePresentationSetsStore.persist.onFinishHydration(runWhenReady);
   subscribeCloudSyncContext(run);
 }
 

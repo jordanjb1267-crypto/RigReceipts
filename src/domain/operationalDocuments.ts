@@ -796,12 +796,27 @@ export function toRemoteVersionRow(
 // ---------------------------------------------------------------------------
 
 const isRec = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
-const optStr = (v: unknown): string | null => (typeof v === 'string' && v.length > 0 ? v : null);
+
+/**
+ * Optional remote scalar (Pass 2 H0B): accept a non-empty string or null/absent.
+ * A number, boolean or object is malformed — do not coerce it to null and
+ * accept the row.
+ */
+const optStrStrict = (v: unknown): string | null | undefined => {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'string') return v.length > 0 ? v : null;
+  return undefined;
+};
+
 const isoToMs = (v: unknown): number | null => {
   if (typeof v !== 'string') return null;
   const ms = Date.parse(v);
   return Number.isFinite(ms) ? ms : null;
 };
+
+/** Positive safe integer — rejects string/boolean/float `Number(...)` coercion. */
+const isSafePositiveInteger = (v: unknown): v is number =>
+  typeof v === 'number' && Number.isInteger(v) && Number.isSafeInteger(v) && v > 0;
 
 /**
  * Maps an `operational_documents` row fetched through the owner's own RLS
@@ -821,26 +836,47 @@ export function fromRemoteDocumentRow(
   if (!isEnum(SENSITIVITIES, row.sensitivity)) return null;
   if (!isEnum(DOCUMENT_LIFECYCLES, row.lifecycle)) return null;
   if (typeof row.title !== 'string' || !row.title.trim()) return null;
+  if (typeof row.offline_pinned !== 'boolean') return null;
   const createdAt = isoToMs(row.created_at);
   const updatedAt = isoToMs(row.updated_at);
   if (createdAt === null || updatedAt === null) return null;
+  const truckId = optStrStrict(row.truck_id);
+  const trailerNumber = optStrStrict(row.trailer_number);
+  const issuer = optStrStrict(row.issuer);
+  const jurisdiction = optStrStrict(row.jurisdiction);
+  const issuedAt = optStrStrict(row.issued_at);
+  const effectiveAt = optStrStrict(row.effective_at);
+  const expiresAt = optStrStrict(row.expires_at);
+  const maskedReference = optStrStrict(row.masked_reference);
+  if (
+    truckId === undefined ||
+    trailerNumber === undefined ||
+    issuer === undefined ||
+    jurisdiction === undefined ||
+    issuedAt === undefined ||
+    effectiveAt === undefined ||
+    expiresAt === undefined ||
+    maskedReference === undefined
+  ) {
+    return null;
+  }
   const doc: OperationalDocument = {
     id: row.id,
     accountOwnerId: sessionUserId,
     documentKind: row.document_kind,
     subjectKind: row.subject_kind,
-    truckId: optStr(row.truck_id),
-    trailerNumber: optStr(row.trailer_number),
+    truckId,
+    trailerNumber,
     title: row.title,
-    issuer: optStr(row.issuer),
-    jurisdiction: optStr(row.jurisdiction),
-    issuedAt: optStr(row.issued_at),
-    effectiveAt: optStr(row.effective_at),
-    expiresAt: optStr(row.expires_at),
-    maskedReference: optStr(row.masked_reference),
+    issuer,
+    jurisdiction,
+    issuedAt,
+    effectiveAt,
+    expiresAt,
+    maskedReference,
     sensitivity: row.sensitivity,
     lifecycle: row.lifecycle,
-    offlinePinned: row.offline_pinned === true,
+    offlinePinned: row.offline_pinned,
     cloudStatus: 'synced',
     createdAt,
     updatedAt,
@@ -873,8 +909,8 @@ export function fromRemoteVersionRow(
   if (row.owner_id !== sessionUserId) return null;
   if (row.operational_document_id !== parent.id) return null;
   if (parent.accountOwnerId !== sessionUserId) return null;
-  const versionNumber = Number(row.version_number);
-  if (!Number.isInteger(versionNumber) || versionNumber < 1) return null;
+  if (!isSafePositiveInteger(row.version_number)) return null;
+  const versionNumber = row.version_number;
   const supersedes =
     row.supersedes_version_id === null || row.supersedes_version_id === undefined
       ? null
@@ -886,8 +922,8 @@ export function fromRemoteVersionRow(
   if (fileKind !== 'IMAGE' && fileKind !== 'PDF' && fileKind !== 'OTHER') return null;
   if (typeof row.mime_type !== 'string' || !row.mime_type) return null;
   if (typeof row.extension !== 'string' || !REMOTE_EXTENSION_RE.test(row.extension)) return null;
-  const byteSize = Number(row.byte_size);
-  if (!Number.isFinite(byteSize) || byteSize <= 0) return null;
+  if (!isSafePositiveInteger(row.byte_size)) return null;
+  const byteSize = row.byte_size;
   if (typeof row.sha256 !== 'string' || !isSha256Hex(row.sha256)) return null;
   if (row.storage_bucket !== ROAD_WALLET_REMOTE_BUCKET) return null;
   const expectedPath = remoteVersionPath(sessionUserId, parent.id, row.id, row.extension);
@@ -1007,19 +1043,37 @@ export interface RoadWalletRecoveryResult {
   skippedLocalChanges: number;
   /** Set when the run was skipped or abandoned; nothing was mutated after this point. */
   outcome: 'completed' | 'signed_out' | 'not_configured' | 'cancelled' | 'fetch_failed';
+  /**
+   * Pass 2 H0 — READ BEFORE WRITE. True only when metadata recovery completed
+   * with zero integrity conflicts. Optional file `downloadFailures` do not
+   * by themselves make subsequent metadata writes unsafe.
+   */
+  writeSafe: boolean;
 }
+
+export function writeSafeFromRecovery(result: RoadWalletRecoveryResult): boolean {
+  return result.outcome === 'completed' && result.integrityConflicts === 0;
+}
+
+export const finalizeRecoveryResult = (
+  result: Omit<RoadWalletRecoveryResult, 'writeSafe'> & { writeSafe?: boolean },
+): RoadWalletRecoveryResult => ({
+  ...result,
+  writeSafe: writeSafeFromRecovery({ ...result, writeSafe: false }),
+});
 
 export const emptyRecoveryResult = (
   outcome: RoadWalletRecoveryResult['outcome'] = 'completed',
-): RoadWalletRecoveryResult => ({
-  documentsRecovered: 0,
-  versionsRecovered: 0,
-  filesRestored: 0,
-  integrityConflicts: 0,
-  downloadFailures: 0,
-  skippedLocalChanges: 0,
-  outcome,
-});
+): RoadWalletRecoveryResult =>
+  finalizeRecoveryResult({
+    documentsRecovered: 0,
+    versionsRecovered: 0,
+    filesRestored: 0,
+    integrityConflicts: 0,
+    downloadFailures: 0,
+    skippedLocalChanges: 0,
+    outcome,
+  });
 
 /**
  * Whether an already-existing remote version row carries exactly the immutable

@@ -15,6 +15,7 @@ const normalize = (sql: string) => stripComments(sql).replace(/\s+/g, ' ').toLow
 
 const core = normalize(read('20260902000013_road_wallet_core.sql'));
 const hardening = normalize(read('20260902000014_road_wallet_integrity_hardening.sql'));
+const sets = normalize(read('20260902000015_quick_present_sets.sql'));
 const deletion = normalize(read('20260719000008_account_deletion.sql'));
 
 /** Policies declared for a table across the given SQL: [name, command]. */
@@ -126,6 +127,40 @@ describe('H5 — fixed sensitivity for known kinds (DB CHECK mirrors the domain 
       );
     }
     expect(hardening).toMatch(/else true end/);
+  });
+});
+
+describe('Pass 2 — presentation_sets / items (00015)', () => {
+  it('stores CUSTOM sets only, opaque text PKs, name 1–80, ACTIVE|ARCHIVED', () => {
+    expect(sets).toMatch(/create table presentation_sets/);
+    expect(sets).toMatch(/set_kind text not null check \(set_kind = 'custom'\)/);
+    expect(sets).toMatch(/char_length\(name\) between 1 and 80/);
+    expect(sets).toMatch(/lifecycle text not null default 'active' check \(lifecycle in \('active', 'archived'\)\)/);
+    expect(sets).toMatch(/unique \(id, owner_id\)/);
+    expect(sets).toMatch(/id text primary key check \(id ~ '\^\[a-za-z0-9_-\]\{8,64\}\$'\)/);
+  });
+
+  it('items reference same-owner set and operational document; no client DELETE', () => {
+    expect(sets).toMatch(/unique \(presentation_set_id, operational_document_id\)/);
+    expect(sets).toMatch(
+      /foreign key \(presentation_set_id, owner_id\) references presentation_sets \(id, owner_id\) on delete cascade/,
+    );
+    expect(sets).toMatch(
+      /foreign key \(operational_document_id, owner_id\) references operational_documents \(id, owner_id\)/,
+    );
+    expect(policiesFor(sets, 'presentation_sets').map(([, cmd]) => cmd).sort()).toEqual([
+      'insert',
+      'select',
+      'update',
+    ]);
+    expect(policiesFor(sets, 'presentation_set_items').map(([, cmd]) => cmd).sort()).toEqual([
+      'insert',
+      'select',
+      'update',
+    ]);
+    expect(sets).not.toMatch(/on presentation_sets for delete/);
+    expect(sets).not.toMatch(/on presentation_set_items for delete/);
+    expect(sets).not.toMatch(/service_role|security definer/);
   });
 });
 

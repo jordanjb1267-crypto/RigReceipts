@@ -3,6 +3,7 @@ import {
   currentVersion,
   DocumentVersion,
   emptyRecoveryResult,
+  finalizeRecoveryResult,
   fromRemoteDocumentRow,
   fromRemoteVersionRow,
   isVisibleInSession,
@@ -243,7 +244,7 @@ export async function recoverRoadWalletFromCloud(
       result.integrityConflicts++;
       continue;
     }
-    if (!stillActive()) return { ...result, outcome: 'cancelled' };
+    if (!stillActive()) return finalizeRecoveryResult({ ...result, outcome: 'cancelled' });
     const store = useRoadWalletStore.getState();
     const local = store.documents.find((d) => d.id === remote.id);
     if (local && local.accountOwnerId !== userId) {
@@ -279,7 +280,7 @@ export async function recoverRoadWalletFromCloud(
 
   // ---- versions (per document, H0 chain rebuilt on the local+remote union) --
   for (const parent of recoveredDocs.values()) {
-    if (!stillActive()) return { ...result, outcome: 'cancelled' };
+    if (!stillActive()) return finalizeRecoveryResult({ ...result, outcome: 'cancelled' });
     const store = useRoadWalletStore.getState();
     const localVersions = versionsForDocument(store.versions, parent.id);
     const localById = new Map(localVersions.map((v) => [v.id, v]));
@@ -326,7 +327,7 @@ export async function recoverRoadWalletFromCloud(
     const chain = rebuildVersionChain(candidates);
     const retained = new Set(chain.map((v) => v.id));
     for (const item of toApply) {
-      if (!stillActive()) return { ...result, outcome: 'cancelled' };
+      if (!stillActive()) return finalizeRecoveryResult({ ...result, outcome: 'cancelled' });
       if (item.action === 'import' && !retained.has(item.version.id)) {
         result.integrityConflicts++;
         continue;
@@ -351,7 +352,7 @@ export async function recoverRoadWalletFromCloud(
 
   // ---- auto-restore: ACTIVE + offlinePinned + current version not on device --
   for (const parent of recoveredDocs.values()) {
-    if (!stillActive()) return { ...result, outcome: 'cancelled' };
+    if (!stillActive()) return finalizeRecoveryResult({ ...result, outcome: 'cancelled' });
     const s = useRoadWalletStore.getState();
     const doc = s.documents.find((d) => d.id === parent.id);
     if (!doc || doc.lifecycle !== 'ACTIVE' || !doc.offlinePinned) continue;
@@ -368,11 +369,11 @@ export async function recoverRoadWalletFromCloud(
       result.filesRestored++;
     } catch (err) {
       if (err instanceof RestoreError && err.reason === 'SESSION_CHANGED') {
-        return { ...result, outcome: 'cancelled' };
+        return finalizeRecoveryResult({ ...result, outcome: 'cancelled' });
       }
       result.downloadFailures++;
     }
   }
 
-  return result;
+  return finalizeRecoveryResult(result);
 }

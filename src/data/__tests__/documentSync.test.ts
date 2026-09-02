@@ -1,4 +1,4 @@
-import { CloudSyncContext, newOpaqueId, sha256Hex } from '@/domain';
+import { CloudSyncContext, emptyRecoveryResult, newOpaqueId, sha256Hex } from '@/domain';
 import * as supabaseMock from '@/lib/supabase';
 import { useAuthStore } from '@/store/auth';
 import { useRoadWalletStore } from '@/store/roadWallet';
@@ -6,6 +6,7 @@ import { useSubscriptionStore } from '@/store/subscription';
 
 import { CloudSyncDeniedError } from '../cloudSyncAuth';
 import { MemoryDocumentFileStore } from '../documentFiles';
+
 import {
   __resetDocumentSyncForTests,
   initDocumentSync,
@@ -632,6 +633,146 @@ describe('runRoadWalletCloudCycle (Pass 1B.1 R9)', () => {
     await Promise.all([p1, p2]);
     await flush();
     expect(remote.uploads).toHaveLength(1);
+  });
+});
+
+describe('Pass 2 H0 — writeSafe read-before-write', () => {
+  const recoverOk = async () => emptyRecoveryResult('completed');
+  const recoverFail = async () => emptyRecoveryResult('fetch_failed');
+  const recoverCancel = async () => emptyRecoveryResult('cancelled');
+  const recoverConflict = async () => ({
+    ...emptyRecoveryResult('completed'),
+    integrityConflicts: 1,
+    writeSafe: false,
+  });
+  const recoverDownloads = async () => ({
+    ...emptyRecoveryResult('completed'),
+    downloadFailures: 2,
+    writeSafe: true,
+  });
+
+  it('success → writes run', async () => {
+    signIn('user-a');
+    setTier('driver_pro');
+    let writes = 0;
+    const result = await runRoadWalletCloudCycle({
+      recoverRoadWallet: recoverOk,
+      syncPendingRoadWallet: async () => {
+        writes++;
+        return { documentsSynced: 0, versionsSynced: 0, integrityFailures: 0 };
+      },
+      recoverPresentationSets: async () => ({
+        setsRecovered: 0,
+        itemsRecovered: 0,
+        integrityConflicts: 0,
+        skippedLocalChanges: 0,
+        outcome: 'completed',
+      }),
+      syncPendingPresentationSets: async () => ({ setsSynced: 0, itemsSynced: 0 }),
+    });
+    expect(result.writeSafe).toBe(true);
+    expect(writes).toBe(1);
+  });
+
+  it('fetch_failed / cancelled / integrity conflict → no writes', async () => {
+    signIn('user-a');
+    setTier('driver_pro');
+    let writes = 0;
+    const sync = async () => {
+      writes++;
+      return { documentsSynced: 0, versionsSynced: 0, integrityFailures: 0 };
+    };
+    const sets = {
+      recoverPresentationSets: async () => ({
+        setsRecovered: 0,
+        itemsRecovered: 0,
+        integrityConflicts: 0,
+        skippedLocalChanges: 0,
+        outcome: 'completed' as const,
+      }),
+      syncPendingPresentationSets: async () => {
+        writes++;
+        return { setsSynced: 0, itemsSynced: 0 };
+      },
+    };
+    expect((await runRoadWalletCloudCycle({ recoverRoadWallet: recoverFail, syncPendingRoadWallet: sync, ...sets })).writeSafe).toBe(
+      false,
+    );
+    expect((await runRoadWalletCloudCycle({ recoverRoadWallet: recoverCancel, syncPendingRoadWallet: sync, ...sets })).writeSafe).toBe(
+      false,
+    );
+    expect(
+      (await runRoadWalletCloudCycle({ recoverRoadWallet: recoverConflict, syncPendingRoadWallet: sync, ...sets })).writeSafe,
+    ).toBe(false);
+    expect(writes).toBe(0);
+  });
+
+  it('downloadFailures after sound metadata recovery stay write-safe', async () => {
+    signIn('user-a');
+    setTier('driver_pro');
+    let writes = 0;
+    const result = await runRoadWalletCloudCycle({
+      recoverRoadWallet: recoverDownloads,
+      syncPendingRoadWallet: async () => {
+        writes++;
+        return { documentsSynced: 0, versionsSynced: 0, integrityFailures: 0 };
+      },
+      recoverPresentationSets: async () => ({
+        setsRecovered: 0,
+        itemsRecovered: 0,
+        integrityConflicts: 0,
+        skippedLocalChanges: 0,
+        outcome: 'completed',
+      }),
+      syncPendingPresentationSets: async () => ({ setsSynced: 0, itemsSynced: 0 }),
+    });
+    expect(result.writeSafe).toBe(true);
+    expect(writes).toBe(1);
+  });
+
+  it('later clean recovery allows writes after a failed pass', async () => {
+    signIn('user-a');
+    setTier('driver_pro');
+    let writes = 0;
+    const sync = async () => {
+      writes++;
+      return { documentsSynced: 0, versionsSynced: 0, integrityFailures: 0 };
+    };
+    const sets = {
+      recoverPresentationSets: async () => ({
+        setsRecovered: 0,
+        itemsRecovered: 0,
+        integrityConflicts: 0,
+        skippedLocalChanges: 0,
+        outcome: 'completed' as const,
+      }),
+      syncPendingPresentationSets: async () => ({ setsSynced: 0, itemsSynced: 0 }),
+    };
+    await runRoadWalletCloudCycle({ recoverRoadWallet: recoverFail, syncPendingRoadWallet: sync, ...sets });
+    expect(writes).toBe(0);
+    await runRoadWalletCloudCycle({ recoverRoadWallet: recoverOk, syncPendingRoadWallet: sync, ...sets });
+    expect(writes).toBe(1);
+  });
+
+  it('Free recovery does not grant writes', async () => {
+    signIn('user-a');
+    setTier('free');
+    const { document } = await create();
+    expect(document.cloudStatus).toBe('local_only');
+    const result = await runRoadWalletCloudCycle({
+      recoverRoadWallet: recoverOk,
+      recoverPresentationSets: async () => ({
+        setsRecovered: 0,
+        itemsRecovered: 0,
+        integrityConflicts: 0,
+        skippedLocalChanges: 0,
+        outcome: 'completed',
+      }),
+    });
+    expect(result.writeSafe).toBe(true);
+    expect(remote.uploads).toHaveLength(0);
+    expect(remote.upserts).toHaveLength(0);
+    expect(doc(document.id).cloudStatus).toBe('local_only');
   });
 });
 

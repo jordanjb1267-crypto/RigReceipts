@@ -27,7 +27,13 @@ const count = (s: string, re: RegExp) => (s.match(re) ?? []).length;
 
 describe('root stack + sync bootstrap', () => {
   it('registers the three Road Wallet routes and keeps every existing stack route', () => {
-    for (const name of ['road-wallet', 'add-road-document', 'document-detail']) {
+    for (const name of [
+      'road-wallet',
+      'add-road-document',
+      'document-detail',
+      'quick-present',
+      'presentation-set-edit',
+    ]) {
       expect(count(layout, new RegExp(`<Stack\\.Screen name="${name}"`, 'g'))).toBe(1);
     }
     for (const existing of [
@@ -81,7 +87,8 @@ describe('feature flag gating', () => {
 
   it('Board, Reports and Scan entries are gated by road_wallet_enabled', () => {
     expect(board).toMatch(/const roadWalletEnabled = isFeatureEnabled\('road_wallet_enabled'\);/);
-    expect(board).toMatch(/\{roadWalletEnabled && <RoadWalletWidget/);
+    expect(board).toMatch(/roadWalletEnabled && \(/);
+    expect(board).toMatch(/<RoadWalletWidget/);
     expect(reports).toMatch(/roadWalletEnabled && \([\s\S]{0,600}router\.push\('\/road-wallet'\)/);
     expect(scan).toMatch(
       /isFeatureEnabled\('road_wallet_enabled'\) && \([\s\S]{0,400}onAddRoadDocument/,
@@ -113,13 +120,16 @@ describe('Pass 1B.1 — Board readiness truth, restore UX, recovery ordering', (
   });
 
   it('the cloud cycle recovers before it writes, coalesces, and is what initDocumentSync runs', () => {
-    const recoverIdx = sync.indexOf('await recoverRoadWalletFromCloud()');
-    const writeIdx = sync.indexOf('await syncPendingRoadWallet()', recoverIdx);
+    const recoverIdx = sync.indexOf('recovery = await recoverRw()');
+    const writeSafeIdx = sync.indexOf('if (writeSafe)');
+    const writeIdx = sync.indexOf('writes = await syncRw()', writeSafeIdx);
     expect(recoverIdx).toBeGreaterThan(-1);
-    expect(writeIdx).toBeGreaterThan(recoverIdx);
-    expect(sync).toMatch(
-      /void runRoadWalletCloudCycle\(\);\s*\};\s*if \(useRoadWalletStore\.persist\.hasHydrated\(\)\) run\(\);/,
-    );
+    expect(writeSafeIdx).toBeGreaterThan(recoverIdx);
+    expect(writeIdx).toBeGreaterThan(writeSafeIdx);
+    expect(sync).toMatch(/writeSafeFromRecovery/);
+    expect(sync).toMatch(/void runRoadWalletCloudCycle\(\);/);
+    expect(sync).toMatch(/useRoadWalletStore\.persist\.hasHydrated\(\)/);
+    expect(sync).toMatch(/usePresentationSetsStore\.persist\.hasHydrated\(\)/);
     expect(sync).toMatch(/cycleInFlight/);
     expect(sync).not.toMatch(/setInterval/);
   });
@@ -146,7 +156,8 @@ describe('Board / Reports / Scan integration', () => {
     expect(board).toMatch(/type TabPath = Extract<Href, string>;/);
     expect(board).not.toMatch(/mock\/board[^\n]*[Rr]oadWallet/);
     expect(board).not.toMatch(/roadWallet[^\n]*mock\/board/);
-    expect(board).not.toMatch(/Quick Present/i);
+    expect(board).toMatch(/quick_present_enabled/);
+    expect(board).toMatch(/Quick Present/);
     expect(board).toMatch(/onNavigate\('\/rate-board'\)/); // existing behaviour preserved
   });
 
@@ -264,5 +275,51 @@ describe('copy safety', () => {
     expect(add).toMatch(/maskReference\(lastFour\)/);
     expect(add).not.toMatch(/maskedReference: lastFour/);
     expect(add).not.toMatch(/track\(/); // no analytics carrying document details
+  });
+});
+
+describe('Pass 2 — Quick Present surface', () => {
+  const present = read('src/app/quick-present.tsx');
+  const editor = read('src/app/presentation-set-edit.tsx');
+  const qpGate = read('src/components/roadWallet/QuickPresentGate.tsx');
+  const FORBIDDEN_PHRASES = [
+    'Roadside compliant',
+    'DOT approved',
+    'Accepted everywhere',
+    'Legally valid',
+    'All documents ready',
+    'Required documents',
+  ];
+
+  it('gates Quick Present on both flags and registers no sixth tab', () => {
+    expect(qpGate).toMatch(/road_wallet_enabled/);
+    expect(qpGate).toMatch(/quick_present_enabled/);
+    expect(present).toMatch(/<QuickPresentGate>/);
+    expect(editor).toMatch(/<QuickPresentGate>/);
+    expect(count(tabsLayout, /<Tabs\.Screen/g)).toBe(5);
+  });
+
+  it('Road Wallet and Board expose Quick Present only behind quick_present_enabled', () => {
+    expect(wallet).toMatch(/isFeatureEnabled\('quick_present_enabled'\)/);
+    expect(wallet).toMatch(/Quick Present/);
+    expect(board).toMatch(/isFeatureEnabled\('quick_present_enabled'\)/);
+    expect(board).toMatch(/Quick Present/);
+  });
+
+  it('copy rejects compliance marketing and names the real disclaimer', () => {
+    for (const src of [present, editor]) {
+      for (const phrase of FORBIDDEN_PHRASES) {
+        expect(src).not.toContain(phrase);
+      }
+      expect(src).toMatch(/QUICK_PRESENT_DISCLAIMER/);
+      expect(src).not.toMatch(/required documents/i);
+      expect(src).not.toMatch(/Open in system viewer/i);
+      expect(src).not.toMatch(/react-native-pdf/);
+      expect(src).not.toMatch(/track\(/);
+    }
+    expect(present).toMatch(/AppState/);
+    expect(present).toMatch(/destroyPresentationSession/);
+    expect(present).toMatch(/saved_presentation_sets/);
+    expect(present).not.toMatch(/Share \/ Export this PDF[\s\S]{0,80}FINANCIAL/);
   });
 });

@@ -311,6 +311,30 @@ describe('remote mapping (R2)', () => {
         ?.relativePath,
     ).toBe(`road-wallet/${doc.id}/${version.id}.jpg`);
   });
+
+  it('H0B: byte_size and version_number must be safe positive integers (no Number coercion)', () => {
+    const parent = fromRemoteDocumentRow(remote.documents[0], 'user-a')!;
+    const row = remote.versions[0];
+    expect(fromRemoteVersionRow({ ...row, version_number: '1' }, 'user-a', parent)).toBeNull();
+    expect(fromRemoteVersionRow({ ...row, version_number: true }, 'user-a', parent)).toBeNull();
+    expect(fromRemoteVersionRow({ ...row, version_number: 1.5 }, 'user-a', parent)).toBeNull();
+    expect(fromRemoteVersionRow({ ...row, byte_size: String(JPEG.length) }, 'user-a', parent)).toBeNull();
+    expect(fromRemoteVersionRow({ ...row, byte_size: JPEG.length + 0.5 }, 'user-a', parent)).toBeNull();
+    expect(fromRemoteVersionRow({ ...row, byte_size: true }, 'user-a', parent)).toBeNull();
+  });
+
+  it('H0B: offline_pinned must be a real boolean; optional scalars reject objects/numbers', () => {
+    const row = remote.documents[0];
+    expect(fromRemoteDocumentRow({ ...row, offline_pinned: 1 }, 'user-a')).toBeNull();
+    expect(fromRemoteDocumentRow({ ...row, offline_pinned: 'true' }, 'user-a')).toBeNull();
+    expect(fromRemoteDocumentRow({ ...row, issuer: 123 }, 'user-a')).toBeNull();
+    expect(fromRemoteDocumentRow({ ...row, jurisdiction: { code: 'TX' } }, 'user-a')).toBeNull();
+    expect(fromRemoteDocumentRow({ ...row, trailer_number: 88 }, 'user-a')).toBeNull();
+    expect(fromRemoteDocumentRow({ ...row, issuer: null }, 'user-a')).not.toBeNull();
+    expect(fromRemoteDocumentRow({ ...row, offline_pinned: false }, 'user-a')?.offlinePinned).toBe(
+      false,
+    );
+  });
 });
 
 describe('safe merge (R3)', () => {

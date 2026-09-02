@@ -90,11 +90,15 @@ presentation authority, and no access to another owner.
 ### How recovery works (`src/data/roadWalletRecovery.ts`)
 
 - On hydration and on every account change, `initDocumentSync` runs one
-  coalesced cloud cycle in this order: recover owner cloud metadata → safe
-  merge → auto-restore eligible files → reconcile local cloud states →
-  pending **write** sync only where `cloudDocumentBackup` authorizes it.
-  Recovery always precedes upload so a stale local copy never overwrites newer
-  remote metadata.
+  coalesced cloud cycle in this order (Pass 2 H0 — **READ BEFORE WRITE**):
+  recover owner Road Wallet metadata → compute `writeSafe` (`outcome ===
+  completed` and `integrityConflicts === 0`) → recover custom presentation
+  sets → reconcile local cloud states → pending **write** sync only when
+  `writeSafe` and the relevant capability authorizes it. Optional file
+  `downloadFailures` during auto-restore do **not** by themselves make
+  metadata writes unsafe. `fetch_failed`, cancelled, session change or an
+  unresolved integrity conflict skip remote writes. Recovery always precedes
+  upload so a stale local copy never overwrites newer remote metadata.
 - Rows are read through the owner's own RLS session (no service role, no
   SECURITY DEFINER) and every row is re-checked to belong to the signed-in user.
   Explicit mappers validate every field; the local path is reconstructed as
@@ -143,8 +147,7 @@ persisted-state normalization and by a database CHECK:
 | W9, FACTORING_NOA, BANKING_DOCUMENT, LEASE_AGREEMENT | FINANCIAL_SENSITIVE             |
 | everything else incl. CUSTOM                         | configurable (default STANDARD) |
 
-The UI never offers a control implying these can be downgraded. Later system
-Quick Present sets (Pass 2) use sensitivity as an exclusion boundary.
+The UI never offers a control implying these can be downgraded. Quick Present uses sensitivity as an exclusion boundary.
 
 Only a masked reference is ever collected ("Last 4 of document number") and
 stored as `****1234` via `maskReference()`. Full CDL/EIN/policy/account numbers
@@ -234,9 +237,80 @@ says so.
 `document_expiry_alerts_enabled`, `carrier_profile_enabled`,
 `carrier_packet_builder_enabled`, `carrier_packet_history_enabled`,
 `multi_unit_documents_enabled`. Direct navigation to a Road Wallet route with
-the flag off redirects to Reports. All tiers can see expiry status;
+the flag off redirects to Reports. Quick Present additionally requires
+`quick_present_enabled`. All tiers can see expiry status;
 `documentExpiryAlerts` (Driver Pro+) is reserved for a later alert workflow
 and is not implemented here.
+
+## Quick Present (Pass 2)
+
+Quick Present is **in-person presentation** of Road Wallet documents. It does
+not create legal authority, send files, email, portal-submit or sign. Share /
+Export remains a separate Driver Pro convenience (`documentShareExport`).
+
+Flow: SELECT SET → REVIEW → PREFLIGHT → READY / PARTIAL / EMPTY → explicit
+Present → privacy-bounded IMAGE session → EXIT.
+
+- **Software:** `quickPresent` (all tiers, including Free). Built-in Roadside
+  and Shipper sets are Free.
+- **Saved custom sets:** `savedPresentationSets` (Driver Pro+ / Lifetime).
+  Free sees a soft `saved_presentation_sets` paywall. Downgrade does not
+  delete recovered sets; they stay locked until the owner is re-entitled.
+- **Flags:** `road_wallet_enabled` **and** `quick_present_enabled` (both
+  default OFF).
+- **FINANCIAL_SENSITIVE is prohibited** (W-9, factoring NOA, banking, lease,
+  and CUSTOM classified financial). Preflight state `FINANCIAL_BLOCKED`.
+  Individual Share/Export is still allowed separately.
+- **PERSONAL_SENSITIVE** may be selected; the session builder requires an
+  acknowledgement (not UI-only).
+- **PDF** that verifies is `PDF_EXTERNAL_ONLY` — never a swipe session.
+  Entitled users may Share/Export via the existing boundary. Free can still
+  present other ready images (no forced paywall).
+- **READY** means every selected item is a **freshly verified IMAGE**. Cached
+  READY is never trusted. Sets store logical document ids, so a replacement
+  v1→v2 automatically preflights v2.
+- **PARTIAL** shows N ready / M not ready with reasons; Present N only after
+  an explicit continue. 0 ready images → no session.
+- Missing + synced remote: "Restore to this device" / "Prepare offline" via
+  `restoreDocumentVersionToDevice` (tier-independent). No silent FINANCIAL or
+  PDF auto-download.
+- Presentation is full-screen horizontal paging, one image, swipe, page
+  indicator, title/kind/expiry, obvious EXIT. Leaving `AppState` `active`
+  while presenting **destroys** the session. Resume requires a rebuild. This
+  candidate does **not** claim screenshot, recording or biometric protection.
+- Custom-set cloud write requires **both** `savedPresentationSets` and
+  `cloudDocumentBackup`. Recovery of already-backed-up set metadata is
+  tier-independent (same data-rights rule as Road Wallet).
+- Account export includes `presentation_sets` and `presentation_set_items`
+  metadata only — never binaries, never a PresentationSession, never a
+  system-set code.
+
+Copy: "Suggested from the documents in your wallet…" — never "required
+documents". Disclaimer: "Digital copies may not satisfy every roadside,
+regulatory, customer or facility requirement. Carry originals where
+required."
+
+### §37 Airplane-mode device procedure (owner / QA)
+
+On a real device with both flags enabled for a test build:
+
+1. Add at least two IMAGE documents to Road Wallet (one STANDARD, one
+   PERSONAL_SENSITIVE). Confirm they show Ready offline.
+2. Open Quick Present → Roadside → review (deselect/add) → Check these
+   copies. Confirm a fresh preflight, not a cached READY.
+3. Enable airplane mode. Confirm the same images still preflight READY and
+   the swipe session pages locally. Confirm EXIT.
+4. Background the app during a session (home / app switcher). Confirm the
+   session is destroyed and a new Present requires a fresh preflight.
+5. For a PDF: confirm `PDF_EXTERNAL_ONLY`, no swipe page, and Share/Export
+   only when `documentShareExport` is entitled.
+6. For a FINANCIAL document: confirm it cannot be added to a set or session.
+7. Signed-in Free: recover a previously backed-up custom set (if any) and
+   confirm it cannot be edited or presented until Driver Pro is restored;
+   built-in Roadside/Shipper still work.
+
+**REAL_DEVICE_QUICK_PRESENT = EVIDENCE GAP.** This VM has no iOS/Android
+runtime; the procedure above is specified, not executed here.
 
 ## Analytics
 
@@ -250,9 +324,10 @@ paths, filenames, hashes, dates or contents.
   digest and CSPRNG, camera, document picker, cloud download and the share
   sheet have been validated against the SDK 57 type surface and by tests — not
   on hardware.
-- **Database:** clean Supabase bootstrap of migrations 00011–00014 and
+- **Database:** clean Supabase bootstrap of migrations 00011–00015 and
   two-user RLS verification are not runnable in the implementation
   environment (statically parsed only).
+- **REAL_DEVICE_QUICK_PRESENT = EVIDENCE GAP.** See §37.
 - **Release gate (privacy/legal/store):** before enabling the flag —
   - Privacy Policy must describe operational-document storage, including
     potentially personal/medical and financial-sensitive documents;

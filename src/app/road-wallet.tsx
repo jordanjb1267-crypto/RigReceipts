@@ -3,6 +3,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Button, Card, MetricTile, Pill, RouteBand, Screen } from '@/components';
+import { isFeatureEnabled } from '@/config/flags';
 import { RoadWalletGate } from '@/components/roadWallet/RoadWalletGate';
 import { refreshRoadWalletReadinessForSession } from '@/data/roadWallet';
 import { useRoadWalletSummary } from '@/data/useRoadWalletSummary';
@@ -102,6 +103,13 @@ function RoadWalletScreen() {
 
       <View style={styles.addRow}>
         <Button label="Add document" onPress={() => router.push('/add-road-document')} />
+        {isFeatureEnabled('quick_present_enabled') && (
+          <Button
+            label="Quick Present"
+            variant="secondary"
+            onPress={() => router.push('/quick-present')}
+          />
+        )}
       </View>
 
       {active.length === 0 ? (
@@ -207,7 +215,7 @@ function DocumentRow({
 const styles = StyleSheet.create({
   metricRow: { flexDirection: 'row', gap: spacing.sm + 2, marginTop: spacing.sm },
   disclaimer: { ...type.bodySmall, color: colors.textFaint, marginTop: spacing.md },
-  addRow: { marginTop: spacing.lg },
+  addRow: { marginTop: spacing.lg, gap: spacing.sm },
   emptyCard: { marginTop: spacing.md },
   emptyTitle: { ...type.h2, color: colors.text },
   emptyCopy: { ...type.body, color: colors.textMuted, marginTop: spacing.sm },

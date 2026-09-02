@@ -34,6 +34,11 @@ export const EXPORT_TABLES = [
   // device-only documents that were never cloud-synced.
   'operational_documents',
   'document_versions',
+  // Quick Present (Pass 2): custom-set metadata only. Never binaries, never
+  // a PresentationSession, never a system-set code (Roadside/Shipper are
+  // product defaults, not stored rows).
+  'presentation_sets',
+  'presentation_set_items',
 ] as const;
 
 /**
@@ -42,7 +47,7 @@ export const EXPORT_TABLES = [
  */
 export const ACCOUNT_EXPORT_SCOPE = {
   includes:
-    'Database records available in your signed-in cloud account: loads, receipts, miles, rate checks, posts, and Road Wallet document metadata.',
+    'Database records available in your signed-in cloud account: loads, receipts, miles, rate checks, posts, Road Wallet document metadata, and saved Quick Present set metadata.',
   excludes:
     'Not included: the actual Road Wallet image/PDF files, a portable archive of files stored on this device, or device-only documents that were never backed up.',
 } as const;

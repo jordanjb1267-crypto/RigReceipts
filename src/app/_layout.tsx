@@ -114,6 +114,8 @@ export default function RootLayout() {
           <Stack.Screen name="road-wallet" />
           <Stack.Screen name="add-road-document" options={{ presentation: 'modal' }} />
           <Stack.Screen name="document-detail" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="quick-present" />
+          <Stack.Screen name="presentation-set-edit" options={{ presentation: 'modal' }} />
         </Stack>
       </SafeAreaProvider>
     </QueryClientProvider>

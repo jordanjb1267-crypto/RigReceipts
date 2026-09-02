@@ -151,7 +151,16 @@ export default function DashboardScreen() {
           <LiveMileageWidget onOpen={(p) => router.push(p)} />
         )}
 
-        {roadWalletEnabled && <RoadWalletWidget onOpen={() => router.push('/road-wallet')} />}
+        {roadWalletEnabled && (
+          <RoadWalletWidget
+            onOpen={() => router.push('/road-wallet')}
+            onQuickPresent={
+              isFeatureEnabled('quick_present_enabled')
+                ? () => router.push('/quick-present')
+                : undefined
+            }
+          />
+        )}
 
         {isPending ? (
           <LoadingState />
@@ -573,11 +582,18 @@ function LiveMileageWidget({ onOpen }: { onOpen: (path: string) => void }) {
 }
 
 /**
- * Road Wallet widget (Pass 1B §20) — REAL summary from the Road Wallet store,
- * never from `@/mock/board`. "Ready" counts only versions verified READY in
- * this process. No presentation-mode action until Pass 2.
+ * Road Wallet widget (Pass 1B §20 / Pass 2) — REAL summary from the Road
+ * Wallet store, never from `@/mock/board`. "Ready" counts only versions
+ * verified READY in this process. Quick Present appears only when
+ * `quick_present_enabled` is on.
  */
-function RoadWalletWidget({ onOpen }: { onOpen: () => void }) {
+function RoadWalletWidget({
+  onOpen,
+  onQuickPresent,
+}: {
+  onOpen: () => void;
+  onQuickPresent?: () => void;
+}) {
   const summary: RoadWalletSummary = useRoadWalletSummary();
   const attention = summary.expired + summary.expiringSoon;
   const tone: Tone =
@@ -620,6 +636,19 @@ function RoadWalletWidget({ onOpen }: { onOpen: () => void }) {
         <View style={styles.fiChip}>
           <Text style={styles.fiChipText}>Open Wallet</Text>
         </View>
+        {onQuickPresent && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Quick Present"
+            onPress={(e) => {
+              e.stopPropagation?.();
+              onQuickPresent();
+            }}
+            style={styles.fiChip}
+          >
+            <Text style={styles.fiChipText}>Quick Present</Text>
+          </Pressable>
+        )}
       </View>
     </WidgetCard>
   );

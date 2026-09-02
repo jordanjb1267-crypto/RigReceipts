@@ -791,6 +791,41 @@ Inline PDF presentation (rendering pages inside the app) and any
 native rebuild plus real-device validation on both platforms, which this
 candidate cannot provide; owner adjudication needed.
 
+## Pass 2 — Quick Present (commit pending this checkpoint)
+
+No production flag enablement. `react-native-pdf` still absent. No new npm
+packages. Migrations 00011–00014 unchanged; additive `20260902000015`.
+
+- **H0 READ BEFORE WRITE:** `runRoadWalletCloudCycle` recovers Road Wallet
+  metadata, sets `writeSafe` only when `outcome === 'completed'` and
+  `integrityConflicts === 0`, then recovers custom sets, reconciles, and
+  writes only when `writeSafe`. `downloadFailures` do not flip writeSafe.
+  `fetch_failed` / cancelled / session change / unresolved integrity
+  conflict skip remote writes. Signed-out: local reconcile only.
+- **H0B:** `fromRemoteDocumentRow` requires a real boolean `offline_pinned`
+  and rejects non-string optional scalars; `fromRemoteVersionRow` requires
+  safe positive integers for `version_number` and `byte_size` (no
+  `Number(...)` coercion).
+- **Product:** in-person presentation only. Built-in Roadside / Shipper
+  (Free). Custom saved sets (`savedPresentationSets`, Driver Pro+).
+  FINANCIAL_SENSITIVE prohibited. PERSONAL acknowledgement required in the
+  session builder. PDF = `PDF_EXTERNAL_ONLY`. Ephemeral
+  `PresentationSession` after a fresh preflight; destroyed when `AppState`
+  leaves `active`.
+- **Persistence:** `rigreceipts.presentationSets` (account-scoped). Cloud
+  write of custom-set metadata requires both `savedPresentationSets` and
+  `cloudDocumentBackup`. Recovery is tier-independent for already-backed-up
+  owner metadata.
+- **Migration 00015:** `presentation_sets` + `presentation_set_items`,
+  owner RLS SELECT/INSERT/UPDATE, no client DELETE, same-owner composite
+  FKs, opaque text PKs.
+- **UI:** `quick-present.tsx`, `presentation-set-edit.tsx`,
+  `QuickPresentGate` (both flags). Road Wallet + Board entries only when
+  `quick_present_enabled`. Five tabs unchanged.
+- **Evidence:** CLEAN_BOOTSTRAP, TWO_USER_RLS, REAL_DEVICE_FILE/SHARE/
+  RECOVERY and **REAL_DEVICE_QUICK_PRESENT** remain gaps. Airplane-mode
+  procedure is recorded in `docs/ROAD_WALLET.md` §37.
+
 ## Evidence gaps (open)
 
 - Clean Supabase bootstrap of all migrations and two-user RLS verification
