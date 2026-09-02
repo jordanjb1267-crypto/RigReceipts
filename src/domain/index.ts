@@ -51,6 +51,34 @@ export {
   bucketForScanType,
 } from './storageClass';
 export type { StorageClass, StorageBucket } from './storageClass';
+export { sha256Bytes, sha256Hex, bytesToHex, isSha256Hex } from './sha256';
+export {
+  FILE_READINESS,
+  notCached,
+  markCaching,
+  markReady,
+  markError,
+  markEvicted,
+  isFileReady,
+  UNKNOWN_FILE_TYPE,
+  extensionFromName,
+  resolveFileType,
+  sniffFileKind,
+  contentMatchesKind,
+  DOCUMENT_FILES_ROOT,
+  isOpaqueId,
+  documentFileRelativePath,
+  parseDocumentFileRelativePath,
+  newOpaqueId,
+} from './documentFiles';
+export type {
+  FileReadiness,
+  FileVerificationFailure,
+  FileVerification,
+  FileCacheEntry,
+  DocumentFileKind,
+  ResolvedFileType,
+} from './documentFiles';
 export { EQUIPMENT_TYPES, equipmentLabel } from './equipment';
 export type { EquipmentType } from './equipment';
 export {

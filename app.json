@@ -64,7 +64,8 @@
           "organization": "rigreceipts",
           "project": "rigreceipts-app"
         }
-      ]
+      ],
+      "expo-sharing"
     ],
     "experiments": {
       "typedRoutes": true,

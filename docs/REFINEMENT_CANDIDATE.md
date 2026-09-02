@@ -210,6 +210,106 @@ The `document_scans.storage_path` column comment in
 (`{owner_id}/{capture_id}.{ext}`, `storagePathFor` in
 `src/data/captureSync.ts`). Comment corrected; storage behaviour unchanged.
 
+## C4 — durable document-file substrate
+
+### Dependencies (resolved by `npx expo install`, SDK 57)
+
+| Package                | Version    | Purpose                                                              |
+| ---------------------- | ---------- | -------------------------------------------------------------------- |
+| `expo-file-system`     | `~57.0.6`  | app-private durable storage (`Paths.document`, `File`, `Directory`)  |
+| `expo-document-picker` | `~57.0.1`  | file/PDF import (used in Pass 1 UI)                                  |
+| `expo-sharing`         | `~57.0.17` | explicit Share/Export sheet (config plugin auto-added to `app.json`) |
+| `expo-crypto`          | `~57.0.2`  | native SHA-256 (`digest(SHA256, bytes)`)                             |
+
+`npx expo install --check` for these four reports "Dependencies are up to
+date". The same check also lists pre-existing baseline drift (e.g.
+`expo-router 57.0.6` vs expected `~57.0.18`, `react-native 0.86.0` vs
+`0.86.3`); those are untouched — outside this candidate's scope.
+
+### Storage API (validated against the installed package, not legacy docs)
+
+SDK 57 `expo-file-system` exposes the class API: `Paths.document` (persistent,
+app-private, not shared), `new Directory(Paths.document, 'road-wallet', id)`
+with `create({ intermediates: true, idempotent: true })`, `new File(dir,
+name)`, `file.exists` / `file.size` / `file.type` / `await file.bytes()` /
+`await src.copy(dest, { overwrite: true })` / `file.delete()`. The legacy
+`expo-file-system/legacy` API is not used.
+
+### Contract — `DocumentFileStore` (`src/data/documentFiles.ts`)
+
+`importFile(source, target) → StoredDocumentFile` · `exists` · `byteSize` ·
+`verify(path, { expectedKind?, expectedSha256? }) → FileVerification` ·
+`sha256` · `remove` · `uriFor` · `shareCapability()` · `share(path, {
+mimeType, dialogTitle? })`. Two implementations with identical contract:
+`ExpoDocumentFileStore` (native modules lazily required, repo convention) and
+`MemoryDocumentFileStore` (deterministic, Jest). No dependency on the future
+`OperationalDocument` domain.
+
+### Private path scheme
+
+`road-wallet/{logicalDocumentId}/{versionId}.{ext}` relative to
+`Paths.document`. Ids must match `^[A-Za-z0-9_-]{8,64}$` (`isOpaqueId`) —
+anything with whitespace/punctuation (names, CDL/EIN/VIN/policy numbers) is
+rejected at path construction. Extension is an allowlisted lowercase token
+(`jpg`, `png`, `heic`, `webp`, `pdf`; unknown → `bin`, never coerced to an
+image). Original filenames are used only to derive an extension and are never
+stored. `newOpaqueId()` produces 22-char ids from `crypto.getRandomValues`.
+
+### Readiness semantics (`src/domain/documentFiles.ts`)
+
+`NOT_CACHED → CACHING → READY | ERROR`. `READY` is produced only by
+`markReady(entry, verification)` from a **successful** `FileVerification`,
+which requires: file exists, byte size > 0, bytes readable, content sniff
+matches the declared kind (JPEG/PNG/WebP/HEIC magic bytes for images,
+`%PDF-` for PDFs), SHA-256 computed (and equal to the expected hash when one
+is given). A URI string alone never yields READY. `ERROR` keeps the entry's
+known path/MIME/size/hash so it can be diagnosed and retried;
+`reverifyDocumentFile` drops a READY entry to ERROR (`MISSING`,
+`HASH_MISMATCH`, …) if the file disappears or changes — nothing is deleted.
+
+### SHA-256
+
+`ExpoDocumentFileStore` hashes the actual bytes with `expo-crypto`
+`digest(CryptoDigestAlgorithm.SHA256, bytes)` → lowercase hex; falls back to
+the pure-JS `sha256Hex` (`src/domain/sha256.ts`, FIPS 180-4) if the native
+module is unavailable. The pure implementation is verified in tests against
+the standard vectors and against Node's `crypto` on padding-boundary and
+multi-block inputs, so both paths produce identical digests.
+
+### Sharing
+
+Only **Share/Export** via the platform share sheet (`expo-sharing`
+`isAvailableAsync` → `shareAsync(uri, { mimeType, UTI, dialogTitle })`) is
+exposed, and only after `shareCapability()` reports availability. There is
+deliberately no "Open in system viewer" action: a genuine iOS + Android
+external-open behaviour has not been validated (see C5).
+
+## C5 — PDF feasibility (probe only; nothing added to the branch)
+
+Probe performed in `/tmp/pdfprobe` (a copy of this candidate's manifest),
+then deleted. `react-native-pdf` and its plugins are **not** in
+`package.json`, `package-lock.json` or `app.json` (verified: 0 references).
+
+| Item                           | Evidence                                                                                                                                                                                                                                                                                                           |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Packages investigated          | `react-native-pdf 7.0.5` (published 2026-08-13), `react-native-blob-util 0.24.10`, `@config-plugins/react-native-pdf 14.0.2`, `@config-plugins/react-native-blob-util 14.0.2`                                                                                                                                      |
+| Expo SDK compatibility         | Config plugins declare `peerDependencies: { expo: ">=56" }` only. `react-native-pdf` is **not** in SDK 57's `bundledNativeModules.json`, so `npx expo install` resolves npm latest and `--check` cannot vouch for a tested pairing. The plugin README's compatibility table stops at Expo 56 (`7.0.4` / `14.0.0`). |
+| Native rebuild required        | Yes — the package ships `ios/`, `android/`, `fabric/` native code and both config plugins modify `app.json`; it needs `npx expo prebuild` + a development build / EAS build. Not usable in Expo Go.                                                                                                                |
+| Device behaviour provable here | **No.** This VM has no iOS/Android runtime or simulator; rendering, zoom, page navigation and file-URI handling cannot be exercised.                                                                                                                                                                               |
+
+### Explicitly supported PDF behaviour (this candidate)
+
+PDF import via picker URI → durable private copy → exact metadata (`ext`,
+MIME, kind `PDF`) → byte-size verification → content sniff (`%PDF-`) →
+SHA-256 → later explicit Share/Export. PDFs are never coerced to images.
+
+### Explicitly BLOCKED / DEFERRED
+
+Inline PDF presentation (rendering pages inside the app) and any
+"Open in system viewer" action. Neither is faked. Unblocking requires a
+native rebuild plus real-device validation on both platforms, which this
+candidate cannot provide; owner adjudication needed.
+
 ## Evidence gaps (open)
 
 - Clean Supabase bootstrap of all migrations and two-user RLS verification
