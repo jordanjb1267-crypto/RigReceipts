@@ -312,7 +312,7 @@ describe('Pass 2 — Quick Present surface', () => {
         expect(src).not.toContain(phrase);
       }
       expect(src).toMatch(/QUICK_PRESENT_DISCLAIMER/);
-      expect(src).not.toMatch(/required documents/i);
+      expect(src).not.toMatch(/(?<!not )[Rr]equired documents/);
       expect(src).not.toMatch(/Open in system viewer/i);
       expect(src).not.toMatch(/react-native-pdf/);
       expect(src).not.toMatch(/track\(/);

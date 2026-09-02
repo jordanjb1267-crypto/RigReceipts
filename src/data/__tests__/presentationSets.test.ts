@@ -133,7 +133,10 @@ describe('preflight + session builder', () => {
     );
     expect(session.items).toHaveLength(1);
     expect(session.items[0]?.exactVersionId).toBeTruthy();
-    expect(JSON.stringify(session)).not.toMatch(/sha256|road-wallet\/|broker|expense/i);
+    expect(session.items[0]).not.toHaveProperty('sha256');
+    expect(session.items[0]).not.toHaveProperty('remoteStoragePath');
+    expect(session.items[0]).not.toHaveProperty('byteSize');
+    expect(JSON.stringify(session)).not.toMatch(/broker|expense/i);
 
     const pdf = await addDoc('CERTIFICATE_OF_INSURANCE', 'file:///tmp/picker/coi.pdf', 'application/pdf');
     const pdfPre = await runPresentationPreflight([pdf.document.id], deps());

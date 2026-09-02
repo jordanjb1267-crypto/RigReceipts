@@ -313,6 +313,7 @@ describe('remote mapping (R2)', () => {
   });
 
   it('H0B: byte_size and version_number must be safe positive integers (no Number coercion)', () => {
+    seedCloud('user-a');
     const parent = fromRemoteDocumentRow(remote.documents[0], 'user-a')!;
     const row = remote.versions[0];
     expect(fromRemoteVersionRow({ ...row, version_number: '1' }, 'user-a', parent)).toBeNull();
@@ -324,6 +325,7 @@ describe('remote mapping (R2)', () => {
   });
 
   it('H0B: offline_pinned must be a real boolean; optional scalars reject objects/numbers', () => {
+    seedCloud('user-a');
     const row = remote.documents[0];
     expect(fromRemoteDocumentRow({ ...row, offline_pinned: 1 }, 'user-a')).toBeNull();
     expect(fromRemoteDocumentRow({ ...row, offline_pinned: 'true' }, 'user-a')).toBeNull();

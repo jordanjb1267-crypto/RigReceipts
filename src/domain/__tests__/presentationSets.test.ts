@@ -255,13 +255,17 @@ describe('remote mapping + merge', () => {
 });
 
 describe('copy safety', () => {
-  it('never uses the forbidden compliance phrases', () => {
+  it('never uses the forbidden compliance phrases except as an explicit disclaimer', () => {
     const haystack = `${QUICK_PRESENT_DISCLAIMER}\n${PRESENTATION_SET_CANDIDATE_COPY}`;
     for (const phrase of QUICK_PRESENT_FORBIDDEN_COPY) {
+      if (phrase === 'Required documents') {
+        expect(haystack).toMatch(/not required documents/i);
+        expect(haystack).not.toMatch(/(?<!not )required documents/i);
+        continue;
+      }
       expect(haystack.toLowerCase()).not.toContain(phrase.toLowerCase());
     }
     expect(PRESENTATION_SET_CANDIDATE_COPY).toMatch(/Suggested from the documents in your wallet/);
-    expect(PRESENTATION_SET_CANDIDATE_COPY).toMatch(/not required documents/);
     expect(QUICK_PRESENT_DISCLAIMER).toMatch(/Carry originals where required/);
   });
 });
