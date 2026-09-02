@@ -117,18 +117,312 @@ describe('persistence normalization', () => {
       [DOC_B, 'synced'],
     ]);
     expect(out.versions.map((v) => v.id)).toEqual([V1]);
-    expect(out.versions[0].fileCache.state).toBe('READY');
   });
 
-  it('does not trust a persisted READY claim without a matching relative path', () => {
+  it('H2: a persisted READY claim is never authoritative — every version rehydrates NOT_CACHED with canonical evidence', () => {
     const out = normalizeRoadWalletState({
       documents: [doc()],
       versions: [
-        version({ fileCache: { state: 'CACHING' } as unknown as DocumentVersion['fileCache'] }),
+        version({
+          fileCache: {
+            state: 'READY',
+            relativePath: 'road-wallet/attacker/path.jpg',
+            mimeType: 'text/plain',
+            byteSize: 1,
+            sha256: SHA_B,
+            error: null,
+            verifiedAt: 123,
+          },
+        }),
       ],
     });
-    expect(out.versions[0].fileCache.state).toBe('NOT_CACHED');
-    expect(out.versions[0].fileCache.sha256).toBe(SHA_A);
+    const cache = out.versions[0].fileCache;
+    expect(cache.state).toBe('NOT_CACHED');
+    expect(cache.verifiedAt).toBeNull();
+    expect(cache.error).toBeNull();
+    // Expectations come from the immutable version, not from arbitrary persisted cache text.
+    expect(cache.relativePath).toBe(`road-wallet/${DOC_A}/${V1}.jpg`);
+    expect(cache.sha256).toBe(SHA_A);
+    expect(cache.byteSize).toBe(10);
+    expect(cache.mimeType).toBe('image/jpeg');
+  });
+
+  it('H5: a known-sensitive kind persisted with a downgraded class is repaired, not kept downgraded', () => {
+    const out = normalizeRoadWalletState({
+      documents: [
+        doc({ id: DOC_A, documentKind: 'W9', subjectKind: 'CARRIER', sensitivity: 'STANDARD' }),
+        doc({
+          id: DOC_B,
+          documentKind: 'CDL',
+          subjectKind: 'DRIVER',
+          sensitivity: 'FINANCIAL_SENSITIVE',
+        }),
+        doc({
+          id: DOC_ANON,
+          documentKind: 'CUSTOM',
+          subjectKind: 'GENERAL',
+          sensitivity: 'STANDARD',
+        }),
+      ],
+      versions: [],
+    });
+    expect(out.documents.map((d) => [d.documentKind, d.sensitivity])).toEqual([
+      ['W9', 'FINANCIAL_SENSITIVE'],
+      ['CDL', 'PERSONAL_SENSITIVE'],
+      ['CUSTOM', 'STANDARD'],
+    ]);
+  });
+
+  it('unowned documents never carry a synced claim', () => {
+    const out = normalizeRoadWalletState({
+      documents: [doc({ accountOwnerId: null, cloudStatus: 'synced' })],
+      versions: [],
+    });
+    expect(out.documents[0].cloudStatus).toBe('local_only');
+  });
+});
+
+describe('H3 — persisted version normalization rejects corruption deterministically', () => {
+  const persisted = (versions: unknown[], documents: unknown[] = [doc()]) =>
+    normalizeRoadWalletState({ documents, versions });
+  const V3 = fixedId(6);
+  const V4 = fixedId(7);
+  const at = (id: string, docId = DOC_A, ext = 'jpg') => `road-wallet/${docId}/${id}.${ext}`;
+  const v2 = () =>
+    version({
+      id: V2,
+      versionNumber: 2,
+      supersedesVersionId: V1,
+      sha256: SHA_B,
+      relativePath: at(V2),
+    });
+
+  it('keeps a consistent chain intact', () => {
+    const out = persisted([v2(), version()]);
+    expect(out.versions.map((v) => v.versionNumber)).toEqual([1, 2]);
+    expect(out.versions.every((v) => v.fileCache.state === 'NOT_CACHED')).toBe(true);
+  });
+
+  it('drops a version whose owner differs from its parent document', () => {
+    expect(persisted([version({ accountOwnerId: 'user-b' })]).versions).toEqual([]);
+    expect(persisted([version({ accountOwnerId: null })]).versions).toEqual([]);
+    const anonDoc = doc({ accountOwnerId: null });
+    expect(persisted([version({ accountOwnerId: 'user-a' })], [anonDoc]).versions).toEqual([]);
+    expect(persisted([version({ accountOwnerId: null })], [anonDoc]).versions).toHaveLength(1);
+  });
+
+  it('drops a version whose relativePath is not the canonical local path', () => {
+    expect(persisted([version({ relativePath: 'road-wallet/x/y.jpg' })]).versions).toEqual([]);
+    expect(persisted([version({ relativePath: at(V1, DOC_A, 'pdf') })]).versions).toEqual([]);
+    expect(persisted([version({ relativePath: `/etc/${DOC_A}/${V1}.jpg` })]).versions).toEqual([]);
+  });
+
+  it('drops malformed evidence: bad hash, zero size, bad version number, bad extension, bad kind, bad id', () => {
+    expect(persisted([version({ sha256: 'ABC' })]).versions).toEqual([]);
+    expect(persisted([version({ sha256: SHA_A.toUpperCase() })]).versions).toEqual([]);
+    expect(persisted([version({ byteSize: 0 })]).versions).toEqual([]);
+    expect(persisted([version({ versionNumber: 0 })]).versions).toEqual([]);
+    expect(persisted([version({ versionNumber: 1.5 })]).versions).toEqual([]);
+    expect(persisted([version({ extension: 'JPG' })]).versions).toEqual([]);
+    expect(persisted([version({ fileKind: 'VIDEO' as unknown as 'IMAGE' })]).versions).toEqual([]);
+    expect(persisted([version({ id: 'John Smith' })]).versions).toEqual([]);
+  });
+
+  it('drops every entry sharing a duplicated version id', () => {
+    expect(persisted([version(), version({ sha256: SHA_B })]).versions).toEqual([]);
+  });
+
+  it('drops every entry sharing a duplicated version number', () => {
+    const dup = version({
+      id: V3,
+      versionNumber: 2,
+      supersedesVersionId: V1,
+      relativePath: at(V3),
+    });
+    const out = persisted([version(), v2(), dup]);
+    expect(out.versions.map((v) => v.id)).toEqual([V1]);
+  });
+
+  it('rejects cross-document supersession', () => {
+    const other = doc({ id: DOC_B });
+    const foreignV1 = version({
+      id: V3,
+      operationalDocumentId: DOC_B,
+      relativePath: at(V3, DOC_B),
+    });
+    const bad = version({
+      id: V2,
+      versionNumber: 2,
+      supersedesVersionId: V3,
+      relativePath: at(V2),
+    });
+    const out = persisted([version(), bad, foreignV1], [doc(), other]);
+    expect(out.versions.map((v) => v.id).sort()).toEqual([V1, V3].sort());
+  });
+
+  it('rejects forward supersession and self-supersession', () => {
+    const v3 = version({ id: V3, versionNumber: 3, supersedesVersionId: V2, relativePath: at(V3) });
+    const forward = version({
+      id: V2,
+      versionNumber: 2,
+      supersedesVersionId: V3,
+      relativePath: at(V2),
+    });
+    expect(persisted([version(), forward, v3]).versions.map((v) => v.versionNumber)).toEqual([1]);
+    expect(persisted([version({ supersedesVersionId: V1 })]).versions).toEqual([]);
+  });
+
+  it('a fake high-version-number entry never becomes the current version', () => {
+    const fake = version({
+      id: V4,
+      versionNumber: 999,
+      supersedesVersionId: V3,
+      relativePath: at(V4),
+    });
+    const out = persisted([version(), v2(), fake]);
+    expect(out.versions.map((v) => v.versionNumber)).toEqual([1, 2]);
+    expect(selectCurrentVersion(out, DOC_A)?.id).toBe(V2);
+  });
+
+  it('downgrades a synced claim whose remote identity is not the canonical owned path', () => {
+    const canonical = `user-a/road-wallet/${DOC_A}/${V1}.jpg`;
+    const good = version({
+      cloudStatus: 'synced',
+      remoteStorageBucket: 'documents',
+      remoteStoragePath: canonical,
+    });
+    expect(persisted([good]).versions[0]).toMatchObject({
+      cloudStatus: 'synced',
+      remoteStorageBucket: 'documents',
+      remoteStoragePath: canonical,
+    });
+
+    const bads = [
+      version({
+        cloudStatus: 'synced',
+        remoteStorageBucket: 'documents',
+        remoteStoragePath: `user-b/road-wallet/${DOC_A}/${V1}.jpg`,
+      }),
+      version({
+        cloudStatus: 'synced',
+        remoteStorageBucket: 'receipts' as unknown as 'documents',
+        remoteStoragePath: canonical,
+      }),
+      version({ cloudStatus: 'synced', remoteStorageBucket: 'documents', remoteStoragePath: null }),
+      version({ cloudStatus: 'synced', remoteStorageBucket: null, remoteStoragePath: null }),
+    ];
+    for (const bad of bads) {
+      const out = persisted([bad]).versions[0];
+      expect(out.cloudStatus).toBe('local_only');
+      expect(out.remoteStorageBucket).toBeNull();
+      expect(out.remoteStoragePath).toBeNull();
+    }
+  });
+
+  it('never invents a remote path for an unowned document', () => {
+    const anonDoc = doc({ accountOwnerId: null });
+    const claimed = version({
+      accountOwnerId: null,
+      cloudStatus: 'synced',
+      remoteStorageBucket: 'documents',
+      remoteStoragePath: `null/road-wallet/${DOC_A}/${V1}.jpg`,
+    });
+    expect(persisted([claimed], [anonDoc]).versions[0]).toMatchObject({
+      cloudStatus: 'local_only',
+      remoteStorageBucket: null,
+      remoteStoragePath: null,
+    });
+  });
+
+  it('hydration never crashes on malformed entries', () => {
+    const junk = [
+      null,
+      1,
+      'x',
+      {},
+      { id: V1 },
+      { id: V1, operationalDocumentId: DOC_A, versionNumber: 'one' },
+      version({ fileCache: null as unknown as DocumentVersion['fileCache'] }),
+    ];
+    expect(() => persisted(junk)).not.toThrow();
+    expect(() =>
+      normalizeRoadWalletState({
+        documents: [doc()],
+        versions: [{ operationalDocumentId: DOC_A, id: 12 }],
+      }),
+    ).not.toThrow();
+  });
+});
+
+describe('H6 — version deletion API', () => {
+  it('exposes no ordinary version-delete action', () => {
+    const s = useRoadWalletStore.getState() as unknown as Record<string, unknown>;
+    expect(s.removeVersion).toBeUndefined();
+    expect(s.deleteVersion).toBeUndefined();
+    expect(Object.keys(s).filter((k) => /remove|delete/i.test(k))).toEqual([]);
+    expect(typeof s.clear).toBe('function');
+  });
+
+  it('previous versions remain discoverable after replacement', () => {
+    useRoadWalletStore.getState().addDocument(doc());
+    useRoadWalletStore.getState().addVersion(version());
+    useRoadWalletStore.getState().addVersion(
+      version({
+        id: V2,
+        versionNumber: 2,
+        supersedesVersionId: V1,
+        sha256: SHA_B,
+        relativePath: `road-wallet/${DOC_A}/${V2}.jpg`,
+      }),
+    );
+    const s = useRoadWalletStore.getState();
+    expect(selectVersionsForDocument(s, DOC_A).map((v) => v.id)).toEqual([V1, V2]);
+    expect(selectCurrentVersion(s, DOC_A)?.id).toBe(V2);
+  });
+});
+
+describe('H5 — metadata patches cannot downgrade a known-sensitive kind', () => {
+  it('rejects a sensitivity downgrade and a kind change that would invalidate the class', () => {
+    useRoadWalletStore
+      .getState()
+      .addDocument(
+        doc({ documentKind: 'CDL', subjectKind: 'DRIVER', sensitivity: 'PERSONAL_SENSITIVE' }),
+      );
+    expect(() =>
+      useRoadWalletStore
+        .getState()
+        .updateDocumentMetadata(DOC_A, { sensitivity: 'STANDARD' }, ctx()),
+    ).toThrow(/must be PERSONAL_SENSITIVE/);
+    expect(() =>
+      useRoadWalletStore.getState().updateDocumentMetadata(DOC_A, { documentKind: 'W9' }, ctx()),
+    ).toThrow(/must be FINANCIAL_SENSITIVE/);
+    expect(() =>
+      useRoadWalletStore
+        .getState()
+        .addDocument(doc({ id: DOC_B, documentKind: 'W9', sensitivity: 'STANDARD' })),
+    ).toThrow(/must be FINANCIAL_SENSITIVE/);
+    const d = useRoadWalletStore.getState().documents[0];
+    expect(d.sensitivity).toBe('PERSONAL_SENSITIVE');
+    expect(d.documentKind).toBe('CDL');
+  });
+
+  it('still allows raising a configurable kind and any class on CUSTOM', () => {
+    useRoadWalletStore.getState().addDocument(doc());
+    useRoadWalletStore
+      .getState()
+      .updateDocumentMetadata(DOC_A, { sensitivity: 'PERSONAL_SENSITIVE' }, ctx());
+    expect(useRoadWalletStore.getState().documents[0].sensitivity).toBe('PERSONAL_SENSITIVE');
+    useRoadWalletStore.getState().addDocument(
+      doc({
+        id: DOC_B,
+        documentKind: 'CUSTOM',
+        subjectKind: 'GENERAL',
+        sensitivity: 'FINANCIAL_SENSITIVE',
+      }),
+    );
+    expect(useRoadWalletStore.getState().documents.find((d) => d.id === DOC_B)?.sensitivity).toBe(
+      'FINANCIAL_SENSITIVE',
+    );
   });
 });
 

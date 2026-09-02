@@ -131,6 +131,59 @@ export const defaultSensitivityForKind = (kind: DocumentKind): Sensitivity =>
   DOCUMENT_KIND_INFO[kind].defaultSensitivity;
 
 /**
+ * Known-sensitive kinds are safety semantics, not UI defaults (Pass 1A.1 H5):
+ * they may never be saved or edited as anything else. Later system Quick
+ * Present sets use sensitivity as an exclusion boundary. Mirrored by a DB CHECK
+ * in 20260902000014_road_wallet_integrity_hardening.sql.
+ */
+export const REQUIRED_SENSITIVITY_FOR_KIND: Partial<Record<DocumentKind, Sensitivity>> = {
+  CDL: 'PERSONAL_SENSITIVE',
+  MEDICAL_DOCUMENT: 'PERSONAL_SENSITIVE',
+  TWIC: 'PERSONAL_SENSITIVE',
+  W9: 'FINANCIAL_SENSITIVE',
+  FACTORING_NOA: 'FINANCIAL_SENSITIVE',
+  BANKING_DOCUMENT: 'FINANCIAL_SENSITIVE',
+  LEASE_AGREEMENT: 'FINANCIAL_SENSITIVE',
+};
+
+/** The fixed class for a known-sensitive kind, or null when the kind is configurable. */
+export const requiredSensitivityForKind = (kind: DocumentKind): Sensitivity | null =>
+  REQUIRED_SENSITIVITY_FOR_KIND[kind] ?? null;
+
+export const isSensitivityAllowedForKind = (
+  kind: DocumentKind,
+  sensitivity: Sensitivity,
+): boolean => {
+  const required = requiredSensitivityForKind(kind);
+  return required === null || required === sensitivity;
+};
+
+/** Throws when a known-sensitive kind carries any other sensitivity. */
+export function validateSensitivityForKind(kind: DocumentKind, sensitivity: Sensitivity): void {
+  if (!isSensitivityAllowedForKind(kind, sensitivity)) {
+    throw new Error(
+      `${kind} must be ${requiredSensitivityForKind(kind)}; ${sensitivity} is not allowed`,
+    );
+  }
+}
+
+/**
+ * Application-side same-owner truck check (H4). The database guarantee is the
+ * composite FK `(truck_id, owner_id) → trucks (id, owner_id)`; this helper only
+ * gives the data layer an early, explicit failure when it knows the truck's
+ * owner. It is not a substitute for the DB constraint.
+ */
+export function validateTruckAssociation(
+  documentOwnerId: string | null,
+  truck: { id: string; ownerId: string | null } | null,
+): void {
+  if (truck === null) return;
+  if (truck.ownerId === null || truck.ownerId !== documentOwnerId) {
+    throw new Error('truck must belong to the same account as the document');
+  }
+}
+
+/**
  * Offline pin default. FINANCIAL_SENSITIVE defaults off. This is a future
  * presentation/cache preference only — it never deletes or evicts a file, and
  * an imported local-only document always keeps its durable copy.
@@ -337,6 +390,7 @@ export function validateOperationalDocument(doc: OperationalDocument): void {
   if (!isEnum(DOCUMENT_KINDS, doc.documentKind)) throw new Error('unknown document kind');
   if (!isEnum(SUBJECT_KINDS, doc.subjectKind)) throw new Error('unknown subject kind');
   if (!isEnum(SENSITIVITIES, doc.sensitivity)) throw new Error('unknown sensitivity');
+  validateSensitivityForKind(doc.documentKind, doc.sensitivity);
   if (!isEnum(DOCUMENT_LIFECYCLES, doc.lifecycle)) throw new Error('unknown lifecycle');
   if (!doc.title.trim()) throw new Error('title is required');
   for (const k of ['issuedAt', 'effectiveAt', 'expiresAt'] as const) {
@@ -379,6 +433,38 @@ export function validateNewVersion(
   } else if (siblings.length > 0) {
     throw new Error('a replacement version must supersede the current version');
   }
+}
+
+/**
+ * Deterministic rebuild of one document's persisted version chain (Pass 1A.1
+ * H3). Input versions must already be structurally sound and belong to this
+ * document. Rules, in order:
+ *   - duplicate version numbers: every entry sharing the number is dropped;
+ *   - ascending walk: the lowest retained version must have no supersession;
+ *     each later version must supersede an already-retained sibling with a
+ *     lower number. The first version that breaks the chain is dropped along
+ *     with everything above it, so a corrupt high-numbered entry can never
+ *     become "current".
+ */
+export function rebuildVersionChain(versions: readonly DocumentVersion[]): DocumentVersion[] {
+  const counts = new Map<number, number>();
+  for (const v of versions) counts.set(v.versionNumber, (counts.get(v.versionNumber) ?? 0) + 1);
+  const unique = versions
+    .filter((v) => counts.get(v.versionNumber) === 1)
+    .sort((a, b) => a.versionNumber - b.versionNumber);
+
+  const retained: DocumentVersion[] = [];
+  for (const v of unique) {
+    if (retained.length === 0) {
+      if (v.supersedesVersionId !== null) break;
+      retained.push(v);
+      continue;
+    }
+    const prior = retained.find((r) => r.id === v.supersedesVersionId);
+    if (!prior || prior.versionNumber >= v.versionNumber) break;
+    retained.push(v);
+  }
+  return retained;
 }
 
 // ---------------------------------------------------------------------------

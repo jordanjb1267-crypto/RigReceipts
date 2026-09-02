@@ -9,12 +9,17 @@ import {
   currentVersion,
   DOCUMENT_KINDS,
   DOCUMENT_LIFECYCLES,
+  documentFileRelativePath,
   DocumentVersion,
   FileCacheEntry,
   isOpaqueId,
+  isSha256Hex,
   OperationalDocument,
   OperationalDocumentPatch,
+  rebuildVersionChain,
   reconcileCloudStatus,
+  remoteVersionPath,
+  requiredSensitivityForKind,
   SENSITIVITIES,
   statusAfterLocalMutation,
   SUBJECT_KINDS,
@@ -69,8 +74,11 @@ interface RoadWalletState {
   ) => void;
   /** Re-derives every unsynced cloud status from the current context. */
   reconcileCloudStatuses: (ctx: CloudSyncContext) => number;
-  /** Removes a version's local file evidence only when the import failed (no READY record). */
-  removeVersion: (id: string) => void;
+  /**
+   * Whole-store maintenance primitive (tests / explicit account cleanup only).
+   * Never wired to sign-out, account switch or tier changes. There is
+   * deliberately no per-version delete: versions are historical evidence.
+   */
   clear: () => void;
 }
 
@@ -79,7 +87,12 @@ const isEnum = (values: readonly string[], v: unknown): boolean =>
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
 
-/** Keeps only structurally sound documents; malformed entries are dropped, never thrown. */
+/**
+ * Keeps only structurally sound documents; malformed entries are dropped, never
+ * thrown. A known-sensitive kind persisted with a downgraded sensitivity is
+ * repaired to its required class (the downgrade is rejected, the record kept).
+ * A `synced` claim is retained only for owned documents.
+ */
 function sanitizeDocument(raw: unknown): OperationalDocument | null {
   if (!isRecord(raw)) return null;
   if (typeof raw.id !== 'string' || !isOpaqueId(raw.id)) return null;
@@ -89,11 +102,14 @@ function sanitizeDocument(raw: unknown): OperationalDocument | null {
   if (typeof raw.title !== 'string') return null;
   const str = (v: unknown) => (typeof v === 'string' ? v : null);
   const num = (v: unknown, fallback: number) => (typeof v === 'number' ? v : fallback);
-  const status: CloudSyncStatus = raw.cloudStatus === 'synced' ? 'synced' : 'local_only';
+  const documentKind = raw.documentKind as OperationalDocument['documentKind'];
+  const accountOwnerId = str(raw.accountOwnerId);
+  const status: CloudSyncStatus =
+    raw.cloudStatus === 'synced' && accountOwnerId !== null ? 'synced' : 'local_only';
   const doc: OperationalDocument = {
     id: raw.id,
-    accountOwnerId: str(raw.accountOwnerId),
-    documentKind: raw.documentKind as OperationalDocument['documentKind'],
+    accountOwnerId,
+    documentKind,
     subjectKind: raw.subjectKind as OperationalDocument['subjectKind'],
     truckId: str(raw.truckId),
     trailerNumber: str(raw.trailerNumber),
@@ -104,7 +120,9 @@ function sanitizeDocument(raw: unknown): OperationalDocument | null {
     effectiveAt: str(raw.effectiveAt),
     expiresAt: str(raw.expiresAt),
     maskedReference: str(raw.maskedReference),
-    sensitivity: raw.sensitivity as OperationalDocument['sensitivity'],
+    sensitivity:
+      requiredSensitivityForKind(documentKind) ??
+      (raw.sensitivity as OperationalDocument['sensitivity']),
     lifecycle: isEnum(DOCUMENT_LIFECYCLES, raw.lifecycle)
       ? (raw.lifecycle as OperationalDocument['lifecycle'])
       : 'ACTIVE',
@@ -121,51 +139,98 @@ function sanitizeDocument(raw: unknown): OperationalDocument | null {
   return doc;
 }
 
-function sanitizeVersion(raw: unknown): DocumentVersion | null {
+const EXTENSION_RE = /^[a-z0-9]{1,8}$/;
+
+/**
+ * Structural + canonical-identity sanitization of one persisted version against
+ * its (already sanitized) parent. Returns null for anything that cannot be
+ * proven consistent. Nothing about physical file readiness is trusted: the
+ * rebuilt cache entry starts NOT_CACHED with the immutable evidence as its
+ * expectations, and only a fresh `reverifyDocumentFile` can make it READY.
+ */
+function sanitizeVersion(raw: unknown, parent: OperationalDocument): DocumentVersion | null {
   if (!isRecord(raw)) return null;
   if (typeof raw.id !== 'string' || !isOpaqueId(raw.id)) return null;
-  if (typeof raw.operationalDocumentId !== 'string' || !isOpaqueId(raw.operationalDocumentId)) {
-    return null;
-  }
-  if (typeof raw.versionNumber !== 'number' || typeof raw.sha256 !== 'string') return null;
-  if (typeof raw.byteSize !== 'number' || typeof raw.relativePath !== 'string') return null;
-  if (typeof raw.mimeType !== 'string' || typeof raw.extension !== 'string') return null;
+  if (raw.operationalDocumentId !== parent.id) return null;
+  const accountOwnerId = typeof raw.accountOwnerId === 'string' ? raw.accountOwnerId : null;
+  if (accountOwnerId !== parent.accountOwnerId) return null;
+  if (!Number.isInteger(raw.versionNumber) || (raw.versionNumber as number) < 1) return null;
+  if (typeof raw.sha256 !== 'string' || !isSha256Hex(raw.sha256)) return null;
+  if (typeof raw.byteSize !== 'number' || !(raw.byteSize > 0)) return null;
+  if (typeof raw.mimeType !== 'string' || !raw.mimeType) return null;
+  if (typeof raw.extension !== 'string' || !EXTENSION_RE.test(raw.extension)) return null;
   const fileKind = raw.fileKind;
   if (fileKind !== 'IMAGE' && fileKind !== 'PDF' && fileKind !== 'OTHER') return null;
-  const cache = isRecord(raw.fileCache) ? raw.fileCache : {};
-  const cacheState = cache.state;
+
+  let canonicalPath: string;
+  try {
+    canonicalPath = documentFileRelativePath(parent.id, raw.id, raw.extension);
+  } catch {
+    return null;
+  }
+  if (raw.relativePath !== canonicalPath) return null;
+
+  const supersedesVersionId =
+    typeof raw.supersedesVersionId === 'string' && isOpaqueId(raw.supersedesVersionId)
+      ? raw.supersedesVersionId
+      : raw.supersedesVersionId === null || raw.supersedesVersionId === undefined
+        ? null
+        : undefined;
+  if (supersedesVersionId === undefined || supersedesVersionId === raw.id) return null;
+
+  // Remote identity: a synced claim survives only when the recorded remote
+  // location is exactly the canonical one for this owned version.
+  const expectedRemote =
+    accountOwnerId === null
+      ? null
+      : remoteVersionPath(accountOwnerId, parent.id, raw.id, raw.extension);
+  const syncedClaimValid =
+    raw.cloudStatus === 'synced' &&
+    expectedRemote !== null &&
+    raw.remoteStorageBucket === 'documents' &&
+    raw.remoteStoragePath === expectedRemote;
+
   const fileCache: FileCacheEntry = {
-    // A persisted READY claim is not trusted blindly; re-verification restores it.
-    state: cacheState === 'READY' ? 'READY' : 'NOT_CACHED',
-    relativePath: typeof cache.relativePath === 'string' ? cache.relativePath : raw.relativePath,
-    mimeType: typeof cache.mimeType === 'string' ? cache.mimeType : raw.mimeType,
-    byteSize: typeof cache.byteSize === 'number' ? cache.byteSize : raw.byteSize,
-    sha256: typeof cache.sha256 === 'string' ? cache.sha256 : raw.sha256,
+    state: 'NOT_CACHED',
+    relativePath: canonicalPath,
+    mimeType: raw.mimeType,
+    byteSize: raw.byteSize,
+    sha256: raw.sha256,
     error: null,
-    verifiedAt: typeof cache.verifiedAt === 'number' ? cache.verifiedAt : null,
+    verifiedAt: null,
   };
+
   return {
     id: raw.id,
-    operationalDocumentId: raw.operationalDocumentId,
-    accountOwnerId: typeof raw.accountOwnerId === 'string' ? raw.accountOwnerId : null,
-    versionNumber: raw.versionNumber,
-    supersedesVersionId:
-      typeof raw.supersedesVersionId === 'string' ? raw.supersedesVersionId : null,
+    operationalDocumentId: parent.id,
+    accountOwnerId,
+    versionNumber: raw.versionNumber as number,
+    supersedesVersionId,
     fileKind,
     mimeType: raw.mimeType,
     extension: raw.extension,
     byteSize: raw.byteSize,
     sha256: raw.sha256,
-    relativePath: raw.relativePath,
+    relativePath: canonicalPath,
     fileCache,
-    cloudStatus: raw.cloudStatus === 'synced' ? 'synced' : 'local_only',
-    remoteStorageBucket: raw.remoteStorageBucket === 'documents' ? 'documents' : null,
-    remoteStoragePath: typeof raw.remoteStoragePath === 'string' ? raw.remoteStoragePath : null,
+    cloudStatus: syncedClaimValid ? 'synced' : 'local_only',
+    remoteStorageBucket: syncedClaimValid ? 'documents' : null,
+    remoteStoragePath: syncedClaimValid ? expectedRemote : null,
     createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : 0,
   };
 }
 
-/** Normalizes any persisted shape; never throws. Versions without a document are dropped. */
+/**
+ * Normalizes any persisted shape deterministically; never throws.
+ *   1. documents are sanitized (malformed dropped, sensitivity repaired);
+ *   2. versions are sanitized against their parent (owner, canonical path,
+ *      evidence shape, remote identity); orphans and duplicates by id are
+ *      dropped entirely;
+ *   3. each document's chain is rebuilt with `rebuildVersionChain` so
+ *      duplicate numbers and malformed supersession can never yield a
+ *      "current" version;
+ *   4. every retained version starts NOT_CACHED pending physical re-verification.
+ */
 export function normalizeRoadWalletState(persisted: unknown): {
   documents: OperationalDocument[];
   versions: DocumentVersion[];
@@ -174,10 +239,32 @@ export function normalizeRoadWalletState(persisted: unknown): {
   const documents = (Array.isArray(state.documents) ? state.documents : [])
     .map(sanitizeDocument)
     .filter((d): d is OperationalDocument => d !== null);
-  const docIds = new Set(documents.map((d) => d.id));
-  const versions = (Array.isArray(state.versions) ? state.versions : [])
-    .map(sanitizeVersion)
-    .filter((v): v is DocumentVersion => v !== null && docIds.has(v.operationalDocumentId));
+  const byId = new Map(documents.map((d) => [d.id, d]));
+
+  const rawVersions = Array.isArray(state.versions) ? state.versions : [];
+  const idCounts = new Map<string, number>();
+  for (const raw of rawVersions) {
+    if (isRecord(raw) && typeof raw.id === 'string') {
+      idCounts.set(raw.id, (idCounts.get(raw.id) ?? 0) + 1);
+    }
+  }
+
+  const sanitized: DocumentVersion[] = [];
+  for (const raw of rawVersions) {
+    if (!isRecord(raw) || typeof raw.operationalDocumentId !== 'string') continue;
+    if (typeof raw.id === 'string' && (idCounts.get(raw.id) ?? 0) > 1) continue;
+    const parent = byId.get(raw.operationalDocumentId);
+    if (!parent) continue;
+    const v = sanitizeVersion(raw, parent);
+    if (v) sanitized.push(v);
+  }
+
+  const versions: DocumentVersion[] = [];
+  for (const d of documents) {
+    versions.push(
+      ...rebuildVersionChain(sanitized.filter((v) => v.operationalDocumentId === d.id)),
+    );
+  }
   return { documents, versions };
 }
 
@@ -302,8 +389,6 @@ export const useRoadWalletStore = create<RoadWalletState>()(
         if (changed > 0) set({ documents, versions });
         return changed;
       },
-
-      removeVersion: (id) => set((s) => ({ versions: s.versions.filter((v) => v.id !== id) })),
 
       clear: () => set({ documents: [], versions: [] }),
     }),

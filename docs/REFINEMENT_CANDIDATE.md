@@ -524,6 +524,83 @@ ordering is client-enforced);`CHECK supersedes_version_id <> id`. RLS:
   document-version workflow (C4.1 H3), OCR seam (raw OCR never persisted for
   PERSONAL/FINANCIAL_SENSITIVE).
 
+## Pass 1A.1 — Road Wallet integrity hardening (pre-Pass 1B)
+
+Migration `supabase/migrations/20260902000014_road_wallet_integrity_hardening.sql`
+(additive; 00013 is not rewritten). Static parse: 8 statements OK.
+**CLEAN_BOOTSTRAP = EVIDENCE GAP. TWO_USER_RLS = EVIDENCE GAP.**
+
+### H1 — no client DELETE on `operational_documents`
+
+00013's `"own rows" FOR ALL` policy is dropped and replaced by
+`"select own documents" FOR SELECT`, `"insert own documents" FOR INSERT`,
+`"update own documents" FOR UPDATE` (all `owner_id = auth.uid()`). There is
+deliberately no `FOR DELETE` policy: a client delete would have
+cascade-deleted immutable `document_versions` evidence. Ordinary product
+deletion is `lifecycle = 'ARCHIVED'`. Account deletion is unchanged:
+`delete_current_account()` (SECURITY DEFINER) removes the user's storage
+objects and deletes the `auth.users` row, and every `owner_id` FK cascades.
+`document_versions` remains SELECT own + INSERT own only.
+
+### H2 — persisted file readiness is never authoritative
+
+After rehydration every `DocumentVersion.fileCache` starts `NOT_CACHED` with
+its expectations taken from the immutable version (`relativePath`, `sha256`,
+`byteSize`, `mimeType`); `verifiedAt`/`error` are cleared. Only a fresh
+`reverifyDocumentFile()` in the current process (exists, non-zero, readable,
+kind matches, SHA-256 matches) can make it `READY`. This precedes any
+offline-ready UI claim, Quick Present display, or Pass 1B share/export.
+
+### H3 — deterministic persisted-version normalization
+
+`normalizeRoadWalletState` now: sanitizes documents; drops any version whose
+id is duplicated anywhere; sanitizes each remaining version against its parent
+(parent exists; `accountOwnerId` equals the parent's; opaque id; positive
+integer version number; lowercase 64-hex SHA-256; `byteSize > 0`; canonical
+`fileKind`; bounded extension; `relativePath` exactly equals
+`documentFileRelativePath(documentId, versionId, extension)`; supersession id
+opaque and not self); then rebuilds each document's chain with
+`rebuildVersionChain` — duplicate version numbers drop every entry sharing the
+number, the base version must have no supersession, each later version must
+supersede an already-retained lower-numbered sibling, and the first break
+drops everything above it, so a corrupt high-numbered entry can never become
+current. A `synced` claim survives only when the recorded remote location is
+exactly `documents` / `{owner}/road-wallet/{doc}/{version}.{ext}` for an owned
+version; otherwise the remote location is cleared and the status drops to
+`local_only` for safe re-sync. Unowned versions never carry a remote path.
+Malformed entries never throw.
+
+### H4 — same-owner truck association
+
+Database: `trucks` gains `UNIQUE (id, owner_id)`; the 00013 single-column FK
+is dropped and replaced by `FOREIGN KEY (truck_id, owner_id) REFERENCES trucks
+(id, owner_id) ON DELETE SET NULL (truck_id)` (PostgreSQL 15+ column-scoped
+SET NULL; Supabase runs 15/17; parsed by the PG18 grammar). A non-null truck
+must therefore belong to the document's owner; deleting a truck nulls only
+`truck_id` and leaves the document and its `owner_id` intact. `trucks` RLS is
+untouched. Application: `validateTruckAssociation(documentOwnerId, truck)`
+fails early in `createOperationalDocumentFromFile` when the caller passes
+`truck: { id, ownerId }`; this is a convenience check, not the guarantee.
+
+### H5 — known-sensitive kinds cannot be downgraded
+
+`REQUIRED_SENSITIVITY_FOR_KIND`: `CDL / MEDICAL_DOCUMENT / TWIC →
+PERSONAL_SENSITIVE`; `W9 / FACTORING_NOA / BANKING_DOCUMENT / LEASE_AGREEMENT →
+FINANCIAL_SENSITIVE`. `validateSensitivityForKind` runs inside
+`validateOperationalDocument` (creation, metadata update — including a kind
+change — and persisted normalization, where a downgraded persisted class is
+repaired to the required one). Orchestration ignores a caller-supplied class
+for known kinds. DB CHECK `operational_documents_sensitivity_for_kind_check`
+mirrors the rule; other kinds (incl. `CUSTOM`) stay configurable.
+
+### H6 — no general version deletion
+
+`removeVersion` had no production caller and is removed from the store API.
+Orchestration rollback is internal and narrow: it removes only the
+document/version ids minted in the failing call and only if unsynced. `clear()`
+remains a whole-store maintenance/test primitive and is not connected to
+sign-out or tier changes.
+
 ## C5 — PDF feasibility (probe only; nothing added to the branch)
 
 Probe performed in `/tmp/pdfprobe` (a copy of this candidate's manifest),

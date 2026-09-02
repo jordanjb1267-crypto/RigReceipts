@@ -11,9 +11,12 @@ import {
   nextVersionNumber,
   notCached,
   OperationalDocument,
+  requiredSensitivityForKind,
   Sensitivity,
   SubjectKind,
   syncBindingFor,
+  validateSensitivityForKind,
+  validateTruckAssociation,
 } from '@/domain';
 import { ROAD_WALLET_CLOUD_CAPABILITY, useRoadWalletStore } from '@/store/roadWallet';
 
@@ -39,9 +42,14 @@ export interface NewOperationalDocumentInput {
   documentKind: DocumentKind;
   title: string;
   subjectKind?: SubjectKind;
+  /** Ignored for known-sensitive kinds, whose class is fixed (H5). */
   sensitivity?: Sensitivity;
   offlinePinned?: boolean;
-  truckId?: string | null;
+  /**
+   * Truck association with its owner so the same-owner rule can fail early
+   * here; the database composite FK remains the guarantee (H4).
+   */
+  truck?: { id: string; ownerId: string | null } | null;
   trailerNumber?: string | null;
   issuer?: string | null;
   jurisdiction?: string | null;
@@ -146,16 +154,24 @@ export async function createOperationalDocumentFromFile(
   const versionId = deps.newId();
   const now = deps.now();
 
-  // Import + physical verification first: a failure here creates nothing.
+  // Cheap invariants first, before any file is copied.
+  const truck = input.truck ?? null;
+  validateTruckAssociation(binding.accountOwnerId, truck);
+  const sensitivity =
+    requiredSensitivityForKind(input.documentKind) ??
+    input.sensitivity ??
+    defaultSensitivityForKind(input.documentKind);
+  validateSensitivityForKind(input.documentKind, sensitivity);
+
+  // Import + physical verification: a failure here creates nothing.
   const stored = await deps.fileStore.importFile(source, { documentId, versionId });
 
-  const sensitivity = input.sensitivity ?? defaultSensitivityForKind(input.documentKind);
   const document: OperationalDocument = {
     id: documentId,
     accountOwnerId: binding.accountOwnerId,
     documentKind: input.documentKind,
     subjectKind: input.subjectKind ?? defaultSubjectForKind(input.documentKind),
-    truckId: input.truckId ?? null,
+    truckId: truck?.id ?? null,
     trailerNumber: input.trailerNumber ?? null,
     title: input.title.trim(),
     issuer: input.issuer ?? null,
@@ -187,9 +203,11 @@ export async function createOperationalDocumentFromFile(
     store.addVersion(version);
   } catch (err) {
     // Roll back to a truthful state: no half-created document, no orphan file.
+    // Internal, narrow rollback of the records generated in THIS call only;
+    // it can never touch a committed or synced historical version.
     useRoadWalletStore.setState((s) => ({
-      documents: s.documents.filter((d) => d.id !== documentId),
-      versions: s.versions.filter((v) => v.id !== versionId),
+      documents: s.documents.filter((d) => !(d.id === documentId && d.cloudStatus !== 'synced')),
+      versions: s.versions.filter((v) => !(v.id === versionId && v.cloudStatus !== 'synced')),
     }));
     await deps.fileStore.remove(stored.relativePath).catch(() => {});
     throw err;

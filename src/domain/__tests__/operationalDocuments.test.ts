@@ -12,25 +12,33 @@ import {
   DOCUMENT_KINDS,
   DOCUMENT_LIFECYCLES,
   DOCUMENT_VERSION_IMMUTABLE_FIELDS,
+  DocumentKind,
   DocumentVersion,
   EXPIRING_SOON_DAYS,
   immutableCore,
   immutableCoreEquals,
   isIsoDate,
   isMaskedReference,
+  isSensitivityAllowedForKind,
   isVisibleInSession,
   maskReference,
   nextVersionNumber,
   OperationalDocument,
+  rebuildVersionChain,
   remoteVersionMatches,
   remoteVersionPath,
+  REQUIRED_SENSITIVITY_FOR_KIND,
+  requiredSensitivityForKind,
   ROAD_WALLET_REMOTE_BUCKET,
   SENSITIVITIES,
+  Sensitivity,
   SUBJECT_KINDS,
   toRemoteDocumentRow,
   toRemoteVersionRow,
   validateNewVersion,
   validateOperationalDocument,
+  validateSensitivityForKind,
+  validateTruckAssociation,
   VALIDITY_STATES,
   versionsForDocument,
   visibleDocumentsForSession,
@@ -169,6 +177,126 @@ describe('sensitivity + offline-pin defaults', () => {
     expect(defaultOfflinePinned('STANDARD')).toBe(true);
     expect(defaultOfflinePinned('PERSONAL_SENSITIVE')).toBe(true);
     expect(defaultOfflinePinned('FINANCIAL_SENSITIVE')).toBe(false);
+  });
+});
+
+describe('H5 — known-sensitive kinds have a fixed class', () => {
+  it('maps the seven known kinds and leaves the rest configurable', () => {
+    for (const k of ['CDL', 'MEDICAL_DOCUMENT', 'TWIC'] as const) {
+      expect(requiredSensitivityForKind(k)).toBe('PERSONAL_SENSITIVE');
+    }
+    for (const k of ['W9', 'FACTORING_NOA', 'BANKING_DOCUMENT', 'LEASE_AGREEMENT'] as const) {
+      expect(requiredSensitivityForKind(k)).toBe('FINANCIAL_SENSITIVE');
+    }
+    for (const k of ['VEHICLE_REGISTRATION', 'INSURANCE', 'IFTA', 'UCR', 'CUSTOM'] as const) {
+      expect(requiredSensitivityForKind(k)).toBeNull();
+    }
+    expect(Object.keys(REQUIRED_SENSITIVITY_FOR_KIND).sort()).toEqual(
+      [
+        'BANKING_DOCUMENT',
+        'CDL',
+        'FACTORING_NOA',
+        'LEASE_AGREEMENT',
+        'MEDICAL_DOCUMENT',
+        'TWIC',
+        'W9',
+      ].sort(),
+    );
+  });
+
+  it('rejects every downgrade or cross-class of a known kind', () => {
+    const mustFail: [DocumentKind, Sensitivity][] = [
+      ['W9', 'STANDARD'],
+      ['W9', 'PERSONAL_SENSITIVE'],
+      ['BANKING_DOCUMENT', 'STANDARD'],
+      ['FACTORING_NOA', 'PERSONAL_SENSITIVE'],
+      ['LEASE_AGREEMENT', 'STANDARD'],
+      ['CDL', 'STANDARD'],
+      ['CDL', 'FINANCIAL_SENSITIVE'],
+      ['MEDICAL_DOCUMENT', 'STANDARD'],
+      ['TWIC', 'FINANCIAL_SENSITIVE'],
+    ];
+    for (const [k, s] of mustFail) {
+      expect(isSensitivityAllowedForKind(k, s)).toBe(false);
+      expect(() => validateSensitivityForKind(k, s)).toThrow(/must be/);
+      expect(() => validateOperationalDocument(doc({ documentKind: k, sensitivity: s }))).toThrow(
+        /must be/,
+      );
+    }
+  });
+
+  it('accepts the fixed class and every class for configurable kinds', () => {
+    const mustPass: [DocumentKind, Sensitivity][] = [
+      ['W9', 'FINANCIAL_SENSITIVE'],
+      ['CDL', 'PERSONAL_SENSITIVE'],
+      ['VEHICLE_REGISTRATION', 'STANDARD'],
+      ['VEHICLE_REGISTRATION', 'PERSONAL_SENSITIVE'],
+      ['CUSTOM', 'STANDARD'],
+      ['CUSTOM', 'PERSONAL_SENSITIVE'],
+      ['CUSTOM', 'FINANCIAL_SENSITIVE'],
+    ];
+    for (const [k, s] of mustPass) {
+      expect(isSensitivityAllowedForKind(k, s)).toBe(true);
+      expect(() => validateSensitivityForKind(k, s)).not.toThrow();
+      expect(() =>
+        validateOperationalDocument(doc({ documentKind: k, sensitivity: s })),
+      ).not.toThrow();
+    }
+  });
+});
+
+describe('H4 — application-side same-owner truck check', () => {
+  it('accepts a same-owner truck or no truck; rejects other-owner or unowned trucks', () => {
+    expect(() => validateTruckAssociation('user-a', null)).not.toThrow();
+    expect(() => validateTruckAssociation('user-a', { id: 't1', ownerId: 'user-a' })).not.toThrow();
+    expect(() => validateTruckAssociation('user-a', { id: 't1', ownerId: 'user-b' })).toThrow(
+      /same account/,
+    );
+    expect(() => validateTruckAssociation('user-a', { id: 't1', ownerId: null })).toThrow(
+      /same account/,
+    );
+    expect(() => validateTruckAssociation(null, { id: 't1', ownerId: 'user-a' })).toThrow(
+      /same account/,
+    );
+  });
+});
+
+describe('H3 — rebuildVersionChain', () => {
+  const v1 = version();
+  const v2 = version({ id: V2_ID, versionNumber: 2, supersedesVersionId: V1_ID, sha256: SHA_B });
+  const v3 = version({
+    id: fixedId(4),
+    versionNumber: 3,
+    supersedesVersionId: V2_ID,
+    sha256: 'c'.repeat(64),
+  });
+
+  it('keeps a well-formed chain in ascending order', () => {
+    expect(rebuildVersionChain([v3, v1, v2]).map((v) => v.versionNumber)).toEqual([1, 2, 3]);
+  });
+
+  it('drops every entry sharing a duplicated version number', () => {
+    const dup = version({ id: fixedId(5), versionNumber: 2, supersedesVersionId: V1_ID });
+    expect(rebuildVersionChain([v1, v2, dup]).map((v) => v.id)).toEqual([V1_ID]);
+  });
+
+  it('a fake high-numbered entry with broken supersession never becomes current', () => {
+    const fake = version({ id: fixedId(6), versionNumber: 99, supersedesVersionId: fixedId(7) });
+    const chain = rebuildVersionChain([v1, v2, fake]);
+    expect(chain.map((v) => v.versionNumber)).toEqual([1, 2]);
+    expect(currentVersion(chain, DOC_ID)?.id).toBe(V2_ID);
+  });
+
+  it('forward supersession or a base version that supersedes something breaks the chain', () => {
+    const forward = version({ id: V2_ID, versionNumber: 2, supersedesVersionId: v3.id });
+    expect(rebuildVersionChain([v1, forward, v3]).map((v) => v.versionNumber)).toEqual([1]);
+    const badBase = version({ supersedesVersionId: fixedId(7) });
+    expect(rebuildVersionChain([badBase, v2])).toEqual([]);
+  });
+
+  it('a gap in supersession drops everything above it', () => {
+    const skips = version({ id: fixedId(6), versionNumber: 3, supersedesVersionId: fixedId(7) });
+    expect(rebuildVersionChain([v1, v2, skips]).map((v) => v.versionNumber)).toEqual([1, 2]);
   });
 });
 

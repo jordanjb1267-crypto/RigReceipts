@@ -1,7 +1,7 @@
 import { CloudSyncContext, newOpaqueId, sha256Hex } from '@/domain';
-import { useRoadWalletStore } from '@/store/roadWallet';
+import { normalizeRoadWalletState, useRoadWalletStore } from '@/store/roadWallet';
 
-import { MemoryDocumentFileStore } from '../documentFiles';
+import { MemoryDocumentFileStore, reverifyDocumentFile } from '../documentFiles';
 import {
   createOperationalDocumentFromFile,
   replaceOperationalDocumentFile,
@@ -166,6 +166,129 @@ describe('createOperationalDocumentFromFile', () => {
     expect(s.documents).toHaveLength(0);
     expect(s.versions).toHaveLength(0);
     expect(await fileStore.exists(`road-wallet/${ids[0]}/${ids[1]}.jpg`)).toBe(false);
+  });
+});
+
+describe('H4 — truck association in orchestration', () => {
+  const src = { uri: 'file:///tmp/picker/cab-card.jpg', mimeType: 'image/jpeg' };
+
+  it('accepts a same-owner truck and a null truck', async () => {
+    const same = await createOperationalDocumentFromFile(
+      src,
+      {
+        documentKind: 'VEHICLE_REGISTRATION',
+        title: 'Cab card',
+        truck: { id: 'truck-1', ownerId: 'user-a' },
+      },
+      deps(),
+    );
+    expect(same.document.truckId).toBe('truck-1');
+    const none = await createOperationalDocumentFromFile(
+      src,
+      { documentKind: 'VEHICLE_REGISTRATION', title: 'Cab card', truck: null },
+      deps(),
+    );
+    expect(none.document.truckId).toBeNull();
+  });
+
+  it('rejects another owner’s truck before any file is copied', async () => {
+    await expect(
+      createOperationalDocumentFromFile(
+        src,
+        {
+          documentKind: 'VEHICLE_REGISTRATION',
+          title: 'Cab card',
+          truck: { id: 'truck-9', ownerId: 'user-b' },
+        },
+        deps(),
+      ),
+    ).rejects.toThrow(/same account/);
+    expect(useRoadWalletStore.getState().documents).toHaveLength(0);
+    expect(ids).toHaveLength(2); // ids were minted but no file was imported
+    expect(await fileStore.exists(`road-wallet/${ids[0]}/${ids[1]}.jpg`)).toBe(false);
+  });
+});
+
+describe('H5 — sensitivity is fixed for known kinds at creation', () => {
+  const src = { uri: 'file:///tmp/picker/coi.pdf', mimeType: 'application/pdf' };
+
+  it('ignores a caller-supplied downgrade for a known kind and keeps configurable kinds configurable', async () => {
+    const w9 = await createOperationalDocumentFromFile(
+      src,
+      { documentKind: 'W9', title: 'W-9', sensitivity: 'STANDARD' },
+      deps(),
+    );
+    expect(w9.document.sensitivity).toBe('FINANCIAL_SENSITIVE');
+    const cdl = await createOperationalDocumentFromFile(
+      { uri: 'file:///tmp/picker/cab-card.jpg', mimeType: 'image/jpeg' },
+      { documentKind: 'CDL', title: 'CDL', sensitivity: 'FINANCIAL_SENSITIVE' },
+      deps(),
+    );
+    expect(cdl.document.sensitivity).toBe('PERSONAL_SENSITIVE');
+    const custom = await createOperationalDocumentFromFile(
+      src,
+      { documentKind: 'CUSTOM', title: 'Fuel card agreement', sensitivity: 'FINANCIAL_SENSITIVE' },
+      deps(),
+    );
+    expect(custom.document.sensitivity).toBe('FINANCIAL_SENSITIVE');
+  });
+});
+
+describe('H2 — rehydrated versions require fresh physical verification', () => {
+  const rehydrate = () => {
+    const snapshot = JSON.parse(JSON.stringify(useRoadWalletStore.getState()));
+    return normalizeRoadWalletState(snapshot);
+  };
+
+  it('persisted READY + file present but not yet re-verified → NOT_CACHED; fresh reverify → READY', async () => {
+    const { version } = await createOperationalDocumentFromFile(
+      { uri: 'file:///tmp/picker/cab-card.jpg', mimeType: 'image/jpeg' },
+      { documentKind: 'VEHICLE_REGISTRATION', title: 'Cab card' },
+      deps(),
+    );
+    expect(version.fileCache.state).toBe('READY');
+
+    const restored = rehydrate().versions[0];
+    expect(restored.fileCache.state).toBe('NOT_CACHED');
+    expect(restored.fileCache).toMatchObject({
+      relativePath: version.relativePath,
+      sha256: version.sha256,
+      byteSize: version.byteSize,
+      mimeType: 'image/jpeg',
+    });
+
+    const verified = await reverifyDocumentFile(fileStore, restored.fileCache, restored.fileKind);
+    expect(verified.state).toBe('READY');
+    expect(verified.sha256).toBe(version.sha256);
+  });
+
+  it('persisted READY + physical file missing → never READY', async () => {
+    const { version } = await createOperationalDocumentFromFile(
+      { uri: 'file:///tmp/picker/cab-card.jpg', mimeType: 'image/jpeg' },
+      { documentKind: 'VEHICLE_REGISTRATION', title: 'Cab card' },
+      deps(),
+    );
+    await fileStore.remove(version.relativePath);
+    const restored = rehydrate().versions[0];
+    expect(restored.fileCache.state).toBe('NOT_CACHED');
+    const verified = await reverifyDocumentFile(fileStore, restored.fileCache, restored.fileKind);
+    expect(verified.state).toBe('ERROR');
+    expect(verified.error).toBe('MISSING');
+    expect(verified.sha256).toBe(version.sha256); // evidence retained for retry/diagnosis
+  });
+
+  it('persisted READY + changed bytes → never READY (hash mismatch against immutable evidence)', async () => {
+    const { version } = await createOperationalDocumentFromFile(
+      { uri: 'file:///tmp/picker/cab-card.jpg', mimeType: 'image/jpeg' },
+      { documentKind: 'VEHICLE_REGISTRATION', title: 'Cab card' },
+      deps(),
+    );
+    fileStore.overwrite(version.relativePath, JPEG2);
+    const restored = rehydrate().versions[0];
+    const verified = await reverifyDocumentFile(fileStore, restored.fileCache, restored.fileKind);
+    expect(verified.state).toBe('ERROR');
+    expect(verified.error).toBe('HASH_MISMATCH');
+    expect(restored.sha256).toBe(version.sha256);
   });
 });
 
