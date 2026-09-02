@@ -377,6 +377,30 @@ describe('secure opaque ids at runtime (C4.1)', () => {
   });
 });
 
+describe('readBytes (Pass 1A extension)', () => {
+  it('returns the exact durable bytes as an independent copy', async () => {
+    const stored = await store.importFile(
+      { uri: 'file:///tmp/picker/coi.pdf', mimeType: 'application/pdf' },
+      { documentId: DOC, versionId: VER },
+    );
+    const bytes = await store.readBytes(stored.relativePath);
+    expect(Array.from(bytes)).toEqual(Array.from(PDF));
+    expect(sha256Hex(bytes)).toBe(stored.sha256);
+    bytes[0] = 0; // mutating the returned copy must not alter the stored file
+    expect(await store.sha256(stored.relativePath)).toBe(stored.sha256);
+  });
+
+  it('throws for missing or unreadable files', async () => {
+    await expect(store.readBytes('road-wallet/x/y.pdf')).rejects.toThrow(/missing/);
+    const stored = await store.importFile(
+      { uri: 'file:///tmp/picker/scan.jpg' },
+      { documentId: DOC, versionId: VER },
+    );
+    store.unreadable.add(stored.relativePath);
+    await expect(store.readBytes(stored.relativePath)).rejects.toThrow(/unreadable/);
+  });
+});
+
 describe('store contract parity', () => {
   const REQUIRED: (keyof DocumentFileStore)[] = [
     'importFile',
@@ -384,6 +408,7 @@ describe('store contract parity', () => {
     'byteSize',
     'verify',
     'sha256',
+    'readBytes',
     'remove',
     'uriFor',
     'shareCapability',

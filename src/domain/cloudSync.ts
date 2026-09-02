@@ -16,7 +16,13 @@ import { canUseFeature, Feature, Tier } from './entitlements';
 /** Cloud capabilities are a named subset of the software feature gates. */
 export type CloudCapability = Extract<Feature, 'cloudBackup' | 'cloudDocumentBackup'>;
 
-export type CaptureSyncStatus = 'local_only' | 'pending_sync' | 'synced';
+/**
+ * Generic cloud state for any locally retained record (captures, Road Wallet
+ * documents and versions). `synced` is terminal for immutable content.
+ */
+export type CloudSyncStatus = 'local_only' | 'pending_sync' | 'synced';
+/** Backwards-compatible alias kept for the capture queue (C1). */
+export type CaptureSyncStatus = CloudSyncStatus;
 
 export interface CloudSyncContext {
   userId: string | null;
@@ -90,6 +96,23 @@ export interface SyncableRecord {
 }
 
 /**
+ * Value-level rule shared by every record type: `synced` is terminal for
+ * immutable content; anything else is `pending_sync` exactly when this session
+ * may upload it, otherwise `local_only`.
+ */
+export function reconcileCloudStatus(
+  current: CloudSyncStatus,
+  ctx: CloudSyncContext,
+  capability: CloudCapability,
+  contentOwnerId: string | null | undefined,
+): CloudSyncStatus {
+  if (current === 'synced') return 'synced';
+  return authorizeCloudSync(ctx, capability, contentOwnerId).allowed
+    ? 'pending_sync'
+    : 'local_only';
+}
+
+/**
  * Re-derives the sync state of one unsynced record from the current context.
  * `synced` is terminal and untouched. Everything else is `pending_sync` exactly
  * when this session is authorized to upload it, otherwise `local_only`. Pure:
@@ -100,15 +123,27 @@ export function reconcileSyncStatus<T extends SyncableRecord>(
   ctx: CloudSyncContext,
   capability: CloudCapability,
 ): T {
-  if (record.status === 'synced') return record;
-  const next: CaptureSyncStatus = authorizeCloudSync(ctx, capability, record.accountOwnerId).allowed
-    ? 'pending_sync'
-    : 'local_only';
+  const next = reconcileCloudStatus(record.status, ctx, capability, record.accountOwnerId);
   return next === record.status ? record : { ...record, status: next };
 }
 
+/**
+ * Cloud status of *editable* metadata right after a local mutation. Unlike an
+ * immutable version, edited metadata is never terminal: it must sync again if
+ * this session may, otherwise it is honestly local-only.
+ */
+export function statusAfterLocalMutation(
+  ctx: CloudSyncContext,
+  capability: CloudCapability,
+  contentOwnerId: string | null | undefined,
+): Extract<CloudSyncStatus, 'local_only' | 'pending_sync'> {
+  return authorizeCloudSync(ctx, capability, contentOwnerId).allowed
+    ? 'pending_sync'
+    : 'local_only';
+}
+
 /** Short user-facing label for a sync state (CSV export, list rows). */
-export function captureSyncLabel(status: CaptureSyncStatus): string {
+export function captureSyncLabel(status: CloudSyncStatus): string {
   switch (status) {
     case 'synced':
       return 'yes';

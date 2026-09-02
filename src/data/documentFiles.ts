@@ -73,6 +73,11 @@ export interface DocumentFileStore {
   verify(relativePath: string, options?: VerifyOptions): Promise<FileVerification>;
   /** SHA-256 hex of the actual bytes on disk. Throws when unreadable. */
   sha256(relativePath: string): Promise<string>;
+  /**
+   * The exact durable bytes (for cloud upload after re-verification). Throws
+   * when the file is missing or unreadable. Never logged.
+   */
+  readBytes(relativePath: string): Promise<Uint8Array>;
   /** Removes the local copy. No-op when already gone. */
   remove(relativePath: string): Promise<void>;
   /** Absolute URI for a relative path (app-private location). */
@@ -195,6 +200,12 @@ export class MemoryDocumentFileStore implements DocumentFileStore {
     const bytes = this.read(relativePath);
     if (!bytes) throw new Error('file missing');
     return sha256Hex(bytes);
+  }
+
+  async readBytes(relativePath: string): Promise<Uint8Array> {
+    const bytes = this.read(relativePath);
+    if (!bytes) throw new Error('file missing');
+    return new Uint8Array(bytes);
   }
 
   async remove(relativePath: string): Promise<void> {
@@ -436,6 +447,14 @@ export class ExpoDocumentFileStore implements DocumentFileStore {
     const f = this.file(relativePath);
     if (!f.exists) throw new Error('file missing');
     return this.digest(await f.bytes());
+  }
+
+  async readBytes(relativePath: string): Promise<Uint8Array> {
+    const f = this.file(relativePath);
+    if (!f.exists) throw new Error('file missing');
+    const bytes = await f.bytes();
+    if (!(bytes instanceof Uint8Array)) throw new Error('file unreadable');
+    return bytes;
   }
 
   async remove(relativePath: string): Promise<void> {

@@ -347,6 +347,183 @@ Pass 1 / Pass 1B enforce the rule in the higher-level document-version
 workflow (`reverifyDocumentFile` with `expectedSha256` + `expectedKind` must
 return READY immediately before `share()` is invoked).
 
+## Pass 1A — Road Wallet core (domain, store, orchestration, schema, sync)
+
+No screens, no Board/Reports entry, no Quick Present, no Carrier Packets.
+`road_wallet_enabled` stays `off`. `LoadDocument != OperationalDocument`:
+`src/domain/documents.ts` / `src/store/loadDocs.ts` are untouched; Road Wallet
+documents never feed the Paperwork grade or `expenses`.
+
+### Identity
+
+`OperationalDocument.id` and `DocumentVersion.id` are the accepted C4.1 opaque
+ids (`newSecureOpaqueId()` — 16 CSPRNG bytes → 22-char unpadded base64url,
+128-bit random). The same id is used locally and remotely; Supabase primary
+keys are `text` with the client grammar as a CHECK. No second UUID, no
+`Date.now`/`Math.random`/sequential ids, no filenames or identifiers in ids.
+
+### OperationalDocument (`src/domain/operationalDocuments.ts`)
+
+`id, accountOwnerId, documentKind, subjectKind, truckId, trailerNumber, title,
+issuer, jurisdiction, issuedAt, effectiveAt, expiresAt (YYYY-MM-DD),
+maskedReference, sensitivity, lifecycle (ACTIVE | ARCHIVED), offlinePinned,
+cloudStatus, createdAt, updatedAt`. No local path. No compliance field.
+
+- Subject kinds: `DRIVER CARRIER TRUCK TRAILER GENERAL`.
+- Document kinds: `CDL MEDICAL_DOCUMENT TWIC VEHICLE_REGISTRATION
+TRAILER_REGISTRATION IRP_CAB_CARD ANNUAL_INSPECTION INSURANCE IFTA
+OPERATING_PERMIT OPERATING_AUTHORITY CERTIFICATE_OF_INSURANCE UCR W9
+FACTORING_NOA BANKING_DOCUMENT LEASE_AGREEMENT CUSTOM` — a practical
+  baseline, not a universal legal requirements list.
+- Sensitivity defaults: `CDL / MEDICAL_DOCUMENT / TWIC → PERSONAL_SENSITIVE`;
+  `W9 / FACTORING_NOA / BANKING_DOCUMENT / LEASE_AGREEMENT →
+FINANCIAL_SENSITIVE`; everything else `STANDARD`.
+- `maskedReference` accepts only `****XXXX` (`maskReference()` keeps at most the
+  last four alphanumerics); raw CDL/EIN/policy/account values are rejected by
+  validation and by a DB CHECK.
+- Validity (`deriveValidity`, calendar days in UTC, `EXPIRING_SOON_DAYS = 30`):
+  no/invalid expiry → `NO_EXPIRATION`; expiry before today → `EXPIRED`; today
+  … today+30 inclusive → `EXPIRING_SOON`; later → `CURRENT`. These describe the
+  stored record only — never compliance, legality or enforcement validity.
+- `offlinePinned` defaults `true` for STANDARD/PERSONAL_SENSITIVE and `false`
+  for FINANCIAL_SENSITIVE. It is a future presentation/cache preference: it
+  never deletes or evicts a file, an imported local-only document always keeps
+  its durable copy, and nothing is auto-evicted after cloud upload in Pass 1A.
+
+### DocumentVersion — immutable evidence
+
+Immutable core (`DOCUMENT_VERSION_IMMUTABLE_FIELDS`): `id,
+operationalDocumentId, accountOwnerId, versionNumber, supersedesVersionId,
+fileKind, mimeType, extension, byteSize, sha256, createdAt`. Mutable:
+`fileCache`, `cloudStatus`, `remoteStorageBucket`, `remoteStoragePath`.
+`relativePath` (`road-wallet/{doc}/{version}.{ext}`) is the local durable
+copy's location. No original filename is persisted (C4 ruling).
+
+Replacement = new version N+1 with a new secure id, `supersedesVersionId` =
+prior current version id, prior version untouched. `validateNewVersion`
+enforces same-document/same-owner, unique version numbers, supersession of a
+_prior_ version of the same document, valid SHA-256/byte size. Current version
+= highest `versionNumber` (no circular `currentVersionId` column).
+
+### Local store (`src/store/roadWallet.ts`)
+
+zustand + AsyncStorage, key `rigreceipts.roadWallet`, persist **version 1**;
+`normalizeRoadWalletState` drops malformed entries and orphan versions instead
+of crashing, and does not trust a persisted READY claim without its path.
+Actions: `addDocument`, `updateDocumentMetadata(id, patch, ctx)`,
+`archiveDocument`, `setDocumentCloudStatus`, `addVersion`,
+`setVersionFileCache`, `setVersionCloudState`, `reconcileCloudStatuses(ctx)`,
+`removeVersion` (rollback of a failed import only), `clear`. Every version
+mutation asserts the immutable core is unchanged; there is no generic version
+overwrite. Selectors: `selectVisibleDocuments(s, sessionUserId)`,
+`selectActiveVisibleDocuments`, `selectVersionsForDocument`,
+`selectCurrentVersion`, `selectDocumentById(s, id, sessionUserId)`.
+
+### Account scope
+
+Every document/version carries `accountOwnerId`. Created signed in → bound to
+that user permanently; created signed out → `null`. Selectors show a user only
+their own records and show unowned records only when signed out. Unowned
+records are never auto-claimed or auto-synced (adoption UX is future work).
+Sign-out, account switch, tier change and cloud transitions never delete or
+rebind content; User A's content reappears when User A signs back in.
+
+### Create / replace orchestration (`src/data/roadWallet.ts`)
+
+`createOperationalDocumentFromFile(source, input, deps)`: secure document id +
+version id → `DocumentFileStore.importFile` (durable copy + verification) →
+`OperationalDocument` + version 1 in the store. Import/verification failure →
+no records. Store failure after the copy → records rolled back, orphan file
+removed best-effort, error rethrown. `replaceOperationalDocumentFile(docId,
+source, deps)`: resolves current version → new id → import/verify → version
+N+1 superseding it; prior version untouched. Both are local-only (no network).
+`cloudStatus` on new records comes from `syncBindingFor(ctx,
+'cloudDocumentBackup')`. `configureRoadWalletFileStore()` injects the file
+store (tests use `MemoryDocumentFileStore`; production lazily uses
+`ExpoDocumentFileStore`).
+
+### DocumentFileStore extension
+
+`readBytes(relativePath): Promise<Uint8Array>` added to the contract (both
+implementations; throws on missing/unreadable; never logged) so sync uploads
+the exact durable bytes. No second storage abstraction.
+
+### Cloud status (`CloudSyncStatus`)
+
+`CloudSyncStatus = 'local_only' | 'pending_sync' | 'synced'`;
+`CaptureSyncStatus` is now an alias (C1 behaviour unchanged, all capture tests
+green). Road Wallet syncs under **`cloudDocumentBackup`**, never `cloudBackup`.
+`reconcileCloudStatus` (value-level) and `statusAfterLocalMutation` are shared
+helpers: a synced immutable version stays synced; edited _document metadata_
+becomes `pending_sync` when authorized, else `local_only` — synced metadata is
+not terminal after an edit.
+
+### Sync (`src/data/documentSync.ts`)
+
+Per document, with `assertRemoteEffectAuthorized('cloudDocumentBackup',
+accountOwnerId)` immediately before every remote effect:
+
+1. upsert `operational_documents` (`onConflict: 'id'`) → mark document synced;
+2. per pending version: **re-verify** the local file against the version's
+   immutable `sha256` + `fileKind` (`reverifyDocumentFile`), then `readBytes`
+   and hash the exact buffer again; any mismatch → cache `ERROR`, no upload, no
+   row, immutable evidence untouched (`VersionIntegrityError`);
+3. upload bytes to bucket **`documents`** at
+   `{userId}/road-wallet/{documentId}/{versionId}.{ext}` with `upsert: true`;
+4. insert `document_versions`; on unique violation (`23505`) read back the
+   caller-owned row and compare immutable evidence — identical → idempotent
+   success, different → `VersionIntegrityError`, never overwritten;
+5. only then mark the version `synced` with bucket/path.
+
+Eligibility: signed out / Free / other owner / unowned → `local_only`, no
+remote effect; Driver Pro+ same owner → eligible; upgrade promotes owner-bound
+`local_only` content; downgrade/sign-out before an effect stops remote work and
+keeps local data. `syncPendingRoadWallet` re-authorizes per item, coalesces
+concurrent runs, and `initDocumentSync` reacts to hydration, auth and tier
+changes.
+
+**`upsert: true` rationale.** The object key is fully determined by the
+immutable version and the bytes are re-verified against the version's SHA-256
+immediately before upload, so a retry can only rewrite the object with
+byte-identical content. **Known edge:** an upload followed by a failed row
+insert leaves an owner-scoped object at the deterministic path; the version
+stays `pending_sync`, the retry re-verifies and re-uploads the identical bytes
+and inserts the row (tested). Nothing local is deleted on any partial failure.
+
+### Migration `supabase/migrations/20260902000013_road_wallet_core.sql`
+
+- `operational_documents`: `id text pk CHECK ^[A-Za-z0-9_-]{8,64}$`, `owner_id
+uuid → auth.users on delete cascade`, kind/subject/sensitivity/lifecycle
+  CHECKs, `truck_id uuid → trucks on delete set null`, date columns,
+  `masked_reference CHECK ^\*{4}[A-Za-z0-9]{0,4}$`, `offline_pinned`,
+  timestamps + `set_updated_at` trigger, `UNIQUE (id, owner_id)`, indexes on
+  `(owner_id)`, `(owner_id, expires_at)`, `(owner_id, truck_id)`. RLS: `"own
+rows" FOR ALL` (editable/archivable).
+- `document_versions`: `id text pk` (same CHECK), `owner_id`, `version_number
+  > 0`, `storage_bucket CHECK = 'documents'`, `storage_path CHECK =
+  > owner_id/road-wallet/document_id/id.extension`, `file_kind`, `mime_type`,
+`extension`, `byte_size > 0`, `sha256 CHECK ^[0-9a-f]{64}$`, `created_at`;
+`UNIQUE (operational_document_id, version_number)`; composite FK
+`(operational_document_id, owner_id) → operational_documents (id, owner_id)
+  > ON DELETE CASCADE`; composite self-FK `(supersedes_version_id,
+  > operational_document_id, owner_id) → document_versions (id,
+  > operational_document_id, owner_id)`(same document, same owner; "prior"
+ordering is client-enforced);`CHECK supersedes_version_id <> id`. RLS:
+**SELECT own** + **INSERT own** only — no UPDATE, no DELETE for the client
+(rows leave through the owner cascade / `delete_current_account`).
+- Storage: existing private `documents` bucket, owner-folder policy from
+  `20260716000003_storage.sql`; `delete_current_account` already sweeps it.
+- Static parse (libpg_query): 13 statements OK. **CLEAN_BOOTSTRAP = EVIDENCE
+  GAP. TWO_USER_RLS = EVIDENCE GAP.**
+
+### Deferred to Pass 1B (explicit)
+
+- Add `operational_documents` and `document_versions` to `EXPORT_TABLES` (+
+  tests). Metadata export != binary Road Wallet file export.
+- Screens, Board/Reports entry points, share-time re-verification in the
+  document-version workflow (C4.1 H3), OCR seam (raw OCR never persisted for
+  PERSONAL/FINANCIAL_SENSITIVE).
+
 ## C5 — PDF feasibility (probe only; nothing added to the branch)
 
 Probe performed in `/tmp/pdfprobe` (a copy of this candidate's manifest),

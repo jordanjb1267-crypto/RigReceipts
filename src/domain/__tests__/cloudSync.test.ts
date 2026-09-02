@@ -3,7 +3,9 @@ import {
   captureSyncLabel,
   cloudCapabilityAvailable,
   CloudSyncContext,
+  reconcileCloudStatus,
   reconcileSyncStatus,
+  statusAfterLocalMutation,
   syncBindingFor,
 } from '../cloudSync';
 import { Tier } from '../entitlements';
@@ -155,6 +157,33 @@ describe('reconcileSyncStatus (state transitions)', () => {
     expect(r.note).toBe('keep');
     expect(r.id).toBe('c1');
     expect(r.accountOwnerId).toBe('user-a');
+  });
+});
+
+describe('reconcileCloudStatus / statusAfterLocalMutation (generic, Pass 1A)', () => {
+  it('applies the same rule to any record type and keeps synced terminal', () => {
+    expect(reconcileCloudStatus('local_only', ctx(), 'cloudDocumentBackup', 'user-a')).toBe(
+      'pending_sync',
+    );
+    expect(
+      reconcileCloudStatus('pending_sync', ctx({ tier: 'free' }), 'cloudDocumentBackup', 'user-a'),
+    ).toBe('local_only');
+    expect(reconcileCloudStatus('local_only', ctx(), 'cloudDocumentBackup', null)).toBe(
+      'local_only',
+    );
+    expect(
+      reconcileCloudStatus('synced', ctx({ userId: null }), 'cloudDocumentBackup', 'user-a'),
+    ).toBe('synced');
+  });
+
+  it('edited metadata is never terminal: pending when authorized, else local_only', () => {
+    expect(statusAfterLocalMutation(ctx(), 'cloudDocumentBackup', 'user-a')).toBe('pending_sync');
+    expect(statusAfterLocalMutation(ctx({ tier: 'free' }), 'cloudDocumentBackup', 'user-a')).toBe(
+      'local_only',
+    );
+    expect(
+      statusAfterLocalMutation(ctx({ userId: 'user-b' }), 'cloudDocumentBackup', 'user-a'),
+    ).toBe('local_only');
   });
 });
 
