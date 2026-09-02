@@ -698,6 +698,73 @@ Safety review; retention/delete/export review; real-device storage and share
 testing. **CLEAN_BOOTSTRAP = EVIDENCE GAP. TWO_USER_RLS = EVIDENCE GAP.
 REAL_DEVICE_FILE/SHARE = EVIDENCE GAP.**
 
+## Pass 1B.1 — Road Wallet cloud recovery + readiness hardening
+
+No migration (existing owner SELECT RLS and the owner-folder bucket policy
+suffice). No new dependency. Flags remain OFF.
+
+- **R1 data rights (canonical):** `cloudDocumentBackup` governs new cloud
+  writes only. A signed-in owner may recover already backed-up Road Wallet data
+  regardless of current tier (former Driver Pro → Free → new device). Recovery
+  needs authenticated owner + configured Supabase + owner-scoped RLS reads;
+  grants no writes, no Share/Export, no presentation authority, no other owner.
+- **R2 mapping:** `fromRemoteDocumentRow` / `fromRemoteVersionRow` validate
+  opaque ids, `owner_id = session`, canonical enums, fixed sensitivity, ISO
+  dates, masked reference, canonical `storage_bucket`/`storage_path`
+  (`{uid}/road-wallet/{doc}/{version}.{ext}`), lowercase SHA-256, size > 0;
+  local path reconstructed, never server-provided; recovered versions start
+  `NOT_CACHED`.
+- **R3 merge:** `mergeRecoveredDocument` — absent → import (synced);
+  local `pending_sync`/`local_only` → kept; local synced → replaced only when
+  remote `updated_at` is newer (identity/owner/createdAt immutable).
+  `mergeRecoveredVersion` — same id ⇒ immutable evidence must match exactly;
+  match reconciles bucket/path/status; mismatch = integrity conflict, nothing
+  rewritten.
+- **R4 chain:** remote history per document is unioned with local versions
+  (local wins collisions) and rebuilt with the H0 `1 → 2 → 3` rule; `1 → 2 → 4`
+  imports only `1 → 2`; malformed rows are quarantined and counted, never
+  deleted remotely.
+- **R5/R6 restore:** `DocumentFileStore.writeBytes(path, bytes, mime?)`
+  (memory + Expo SDK 57 `File.create`/`write` into `Paths.document`, canonical
+  path required, parents created idempotently). `restoreDocumentVersionToDevice`
+  → owner/session → exact version → canonical remote path → download from the
+  private `documents` bucket → accept only if length + SHA-256 + kind satisfy
+  the immutable version → write canonical path → re-read + reverify → READY.
+  Any failure cleans partial output, keeps evidence untouched, never READY.
+- **R7 auto-recovery:** ACTIVE + `offlinePinned` + current version backed up +
+  not present → auto-restore; `offlinePinned=false` (FINANCIAL default),
+  archived and historical versions → metadata only / explicit restore.
+- **R8 UX:** Document Detail "Restore to this device" for backed-up versions
+  whose file is unavailable; owner right independent of tier and of
+  `documentShareExport`; FINANCIAL shows an app-private-storage notice (no
+  hardware-encryption claim). PDF stays stored/restored/verifiable only.
+- **R9 order:** `runRoadWalletCloudCycle` (coalesced) = context → recover →
+  merge → auto-restore → reconcile → pending writes only when authorized;
+  `initDocumentSync` runs it on hydration/auth/tier change. Recovery re-checks
+  the active user at every remote phase and cancels on change.
+- **R10 Board:** `useFocusEffect` triggers
+  `refreshRoadWalletReadinessForSession(userId)` when the flag is on; widget
+  shows "Checking…" until current-process verification lands; no polling.
+- **R11 coalescing:** `Map<sessionKey, Promise>` keyed by user id /
+  `__device_only__`; entries removed on completion; a session's refresh touches
+  only its own documents.
+- **R12 detail readiness:** `refreshDocumentReadiness(id, deps)` derives the
+  session from `deps.ctx()` and verifies only when the document exists and is
+  visible to that session (User A's id under User B → no file read).
+- **R13 share:** immediately before `share()`, the LIVE store and session are
+  re-read: exists, visible, ACTIVE, version still belongs, tier still permits,
+  and the given confirmation still satisfies the document's CURRENT
+  sensitivity; the version's fresh cache must still be READY.
+- **R14/R15:** account switch during fetch/download cancels before mutation;
+  A's records may remain account-bound locally but are never surfaced to B and
+  no file is restored in B's pass. Recovery never deletes remote rows/objects
+  or local records/files; bounded counts reported; no sensitive data logged.
+- **R17 copy:** "Driver Pro adds private cloud backup and recovery" (wallet,
+  paywall trigger); the data-rights distinction is documented in
+  `docs/ROAD_WALLET.md`.
+- **Evidence gaps:** CLEAN_BOOTSTRAP, TWO_USER_RLS and
+  REAL_DEVICE_FILE/SHARE/RECOVERY remain gaps.
+
 ## C5 — PDF feasibility (probe only; nothing added to the branch)
 
 Probe performed in `/tmp/pdfprobe` (a copy of this candidate's manifest),

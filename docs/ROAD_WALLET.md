@@ -58,7 +58,7 @@ signed out. Unowned documents are never auto-claimed or auto-synced. Signing
 out, switching accounts or changing plan never deletes local content; a user's
 documents reappear when they sign back in.
 
-## Free is local-first; Driver Pro adds cloud backup
+## Free is local-first; Driver Pro adds cloud backup and recovery
 
 - **Free / Road Log:** full local Road Wallet — add, edit, replace, archive,
   restore, offline readiness, expiry status. Files stay in app-private storage
@@ -73,6 +73,63 @@ documents reappear when they sign back in.
   never shown as backup.
 - `cloudDocumentBackup` is a distinct capability from the receipt queue's
   `cloudBackup`, even though both begin at Driver Pro.
+
+### Data rights: recovery is not held hostage by a downgrade (canonical)
+
+`cloudDocumentBackup` governs **new cloud writes**. Recovering data that
+already exists in the owner's private cloud account is a **data-access
+operation** available to the signed-in owner regardless of current tier.
+Example: a Driver Pro subscriber backs up documents, later downgrades to Free,
+loses the phone, and signs into the same account on a new device — their
+previously backed-up Road Wallet metadata and files are recoverable. A Free
+user's **new** local document still does not upload until `cloudDocumentBackup`
+is entitled. Recovery requires an authenticated owner, a configured Supabase
+and owner-scoped RLS reads; it grants no new writes, no Share/Export, no
+presentation authority, and no access to another owner.
+
+### How recovery works (`src/data/roadWalletRecovery.ts`)
+
+- On hydration and on every account change, `initDocumentSync` runs one
+  coalesced cloud cycle in this order: recover owner cloud metadata → safe
+  merge → auto-restore eligible files → reconcile local cloud states →
+  pending **write** sync only where `cloudDocumentBackup` authorizes it.
+  Recovery always precedes upload so a stale local copy never overwrites newer
+  remote metadata.
+- Rows are read through the owner's own RLS session (no service role, no
+  SECURITY DEFINER) and every row is re-checked to belong to the signed-in user.
+  Explicit mappers validate every field; the local path is reconstructed as
+  `road-wallet/{documentId}/{versionId}.{ext}` and is never taken from the
+  server; recovered versions start `NOT_CACHED`.
+- **Merge:** a remote document absent locally is imported as synced; local
+  `pending_sync`/`local_only` metadata is preserved (never overwritten); a
+  locally synced copy is replaced only when the remote `updated_at` is
+  demonstrably newer. A remote version with the same id must match the local
+  immutable evidence exactly — a mismatch is an integrity conflict and neither
+  side is rewritten. Remote history is rebuilt with the `1 → 2 → 3` chain rule;
+  a malformed row (e.g. `1 → 2 → 4`) is quarantined and reported, never
+  deleted remotely, and never becomes current.
+- **Restore to this device** (`restoreDocumentVersionToDevice`): downloads the
+  exact bytes from the private `documents` bucket at the canonical key, accepts
+  them only if byte length, SHA-256 and content kind satisfy the immutable
+  version, writes them to the canonical app-private path, re-reads and
+  re-verifies the durable file, and only then marks the version READY. Any
+  failure removes the partial output and never claims READY. Downloaded bytes
+  never redefine a version.
+- **Auto-restore policy:** ACTIVE documents with `offlinePinned = true` whose
+  current version is backed up but not on this device are restored
+  automatically; `offlinePinned = false` (the FINANCIAL_SENSITIVE default)
+  recovers metadata only; archived documents and historical versions restore
+  only on explicit request. Document Detail offers **Restore to this device**
+  for backed-up versions whose file is unavailable — an owner right that does
+  not require Share/Export — with an explicit notice for financial documents
+  that an app-private local copy is placed on the device under the platform's
+  app storage protections.
+- Recovery is additive: it never deletes remote rows/objects or local records
+  or verified files, and reports bounded counts (`documentsRecovered`,
+  `versionsRecovered`, `filesRestored`, `integrityConflicts`,
+  `downloadFailures`, `skippedLocalChanges`). A session change during any
+  remote phase cancels the run before local mutation; another account's data
+  is never merged into or surfaced in the current session.
 
 ## Sensitivity classes and fixed kinds
 
@@ -114,7 +171,11 @@ but is never persisted.
 immutable expectations, and becomes `READY` only after
 `reverifyDocumentFile()` succeeds in the current process (SHA-256 and kind
 must match). The wallet re-verifies when it is focused, when a document detail
-opens, and before any share. Missing → `File unavailable` (MISSING); changed
+opens, when the Board is focused (so its counts are truthful; it shows
+"Checking…" meanwhile), and before any share. Readiness refreshes coalesce per
+session (signed-out, User A, User B are distinct) and only ever touch that
+session's own documents; the detail-level refresh verifies a document only if
+it exists and is visible to the current session. Missing → `File unavailable` (MISSING); changed
 bytes → `File unavailable` (HASH_MISMATCH / CONTENT_MISMATCH). A changed file
 never redefines a version; the remedy is to replace the document (new version).
 
@@ -185,9 +246,10 @@ paths, filenames, hashes, dates or contents.
 
 ## Evidence gaps (must close before release)
 
-- **Real device:** file import/copy, `expo-crypto` digest and CSPRNG, camera,
-  document picker and the share sheet have been validated against the SDK 57
-  type surface and by tests — not on hardware.
+- **Real device:** file import/copy, byte write for recovery, `expo-crypto`
+  digest and CSPRNG, camera, document picker, cloud download and the share
+  sheet have been validated against the SDK 57 type surface and by tests — not
+  on hardware.
 - **Database:** clean Supabase bootstrap of migrations 00011–00014 and
   two-user RLS verification are not runnable in the implementation
   environment (statically parsed only).

@@ -1,5 +1,5 @@
-import { Href, useRouter } from 'expo-router';
-import { useMemo } from 'react';
+import { Href, useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useMemo } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -27,11 +27,13 @@ import {
   summarizeSegments,
   unclassifiedMiles,
 } from '@/domain';
+import { refreshRoadWalletReadinessForSession } from '@/data/roadWallet';
 import { useBoard } from '@/data/useBoard';
 import { useRoadWalletSummary } from '@/data/useRoadWalletSummary';
 import type { RoadWalletSummary } from '@/domain';
 import type { BoardData } from '@/mock/board';
 import { useActivationStore } from '@/store/activation';
+import { useAuthStore } from '@/store/auth';
 import { useCapturesStore } from '@/store/captures';
 import { useMileageStore } from '@/store/mileage';
 import { Role, useOnboardingStore } from '@/store/onboarding';
@@ -72,6 +74,19 @@ export default function DashboardScreen() {
   const dismiss = useActivationStore((s) => s.dismiss);
   const { data, isPending, isError, refetch } = useBoard();
   const captures = useCapturesStore((s) => s.captures);
+  const userId = useAuthStore((s) => s.userId);
+  const roadWalletEnabled = isFeatureEnabled('road_wallet_enabled');
+
+  // Road Wallet "ready" counts are only truthful after a current-process
+  // physical check; kick it off (non-blocking, no polling) whenever the Board
+  // is focused. Until it completes the widget shows "Checking…".
+  useFocusEffect(
+    useCallback(() => {
+      if (roadWalletEnabled) {
+        void refreshRoadWalletReadinessForSession(userId).catch(() => {});
+      }
+    }, [roadWalletEnabled, userId]),
+  );
 
   // "Finish setting up" checklist (design handoff §Road Board). The first two
   // rows derive from onboarding and are never toggled by hand.
@@ -136,9 +151,7 @@ export default function DashboardScreen() {
           <LiveMileageWidget onOpen={(p) => router.push(p)} />
         )}
 
-        {isFeatureEnabled('road_wallet_enabled') && (
-          <RoadWalletWidget onOpen={() => router.push('/road-wallet')} />
-        )}
+        {roadWalletEnabled && <RoadWalletWidget onOpen={() => router.push('/road-wallet')} />}
 
         {isPending ? (
           <LoadingState />
@@ -597,9 +610,11 @@ function RoadWalletWidget({ onOpen }: { onOpen: () => void }) {
       <Text style={styles.widgetNote}>
         {summary.totalActive === 0
           ? 'Add registrations, insurance, permits and credentials.'
-          : attention > 0
-            ? `${attention} ${attention === 1 ? 'document needs' : 'documents need'} attention · ${summary.backedUp} backed up`
-            : `${summary.backedUp} backed up · ${summary.needsFileCheck} checking`}
+          : summary.needsFileCheck > 0
+            ? `Checking… ${summary.needsFileCheck} ${summary.needsFileCheck === 1 ? 'file' : 'files'} · ${summary.backedUp} backed up`
+            : attention > 0
+              ? `${attention} ${attention === 1 ? 'document needs' : 'documents need'} attention · ${summary.backedUp} backed up`
+              : `${summary.backedUp} backed up`}
       </Text>
       <View style={styles.fiRow}>
         <View style={styles.fiChip}>

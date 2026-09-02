@@ -34,7 +34,7 @@ export const PAYWALL_TRIGGER_COPY: Record<PaywallTrigger, { headline: string; bo
   },
   cloud_document_backup: {
     headline: 'Keep a backed-up copy of your Road Wallet.',
-    body: 'Driver Pro backs up your registrations, insurance, permits, and credentials to your private account and alerts you before they expire. Your wallet keeps working offline on this device either way.',
+    body: 'Driver Pro adds private cloud backup and recovery for your registrations, insurance, permits, and credentials, and alerts you before they expire. Your wallet keeps working offline on this device either way.',
   },
   saved_presentation_sets: {
     headline: 'Save the sets you present most.',

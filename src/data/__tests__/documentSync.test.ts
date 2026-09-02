@@ -9,6 +9,7 @@ import { MemoryDocumentFileStore } from '../documentFiles';
 import {
   __resetDocumentSyncForTests,
   initDocumentSync,
+  runRoadWalletCloudCycle,
   syncDocumentVersion,
   syncOperationalDocument,
   syncPendingRoadWallet,
@@ -89,6 +90,18 @@ jest.mock('@/lib/supabase', () => {
             state.uploads.push({ bucket, path, bytes, ...opts });
             return { error: null };
           },
+          download: async (path: string) => {
+            const hit = state.uploads.find((u) => u.bucket === bucket && u.path === path);
+            if (!hit) return { data: null, error: new Error('not found') };
+            const bytes = hit.bytes;
+            return {
+              data: {
+                arrayBuffer: async () =>
+                  bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+              },
+              error: null,
+            };
+          },
         }),
       },
       from: (table: string) => ({
@@ -115,17 +128,17 @@ jest.mock('@/lib/supabase', () => {
         },
         select: () => {
           const filters: [string, unknown][] = [];
+          const matching = () =>
+            [...state.tables[table].values()].filter((r) => filters.every(([c, v]) => r[c] === v));
           const q = {
             eq: (col: string, val: unknown) => {
               filters.push([col, val]);
               return q;
             },
-            maybeSingle: async () => {
-              const rows = [...state.tables[table].values()].filter((r) =>
-                filters.every(([c, v]) => r[c] === v),
-              );
-              return { data: rows[0] ?? null, error: null };
-            },
+            maybeSingle: async () => ({ data: matching()[0] ?? null, error: null }),
+            // Awaiting the query itself (recovery reads) yields every matching row.
+            then: (resolve: (v: { data: Record<string, unknown>[]; error: null }) => void) =>
+              resolve({ data: matching(), error: null }),
           };
           return q;
         },
@@ -559,6 +572,66 @@ describe('metadata edits after sync', () => {
     signIn(null);
     await sync();
     expect(ver(version.id)).toEqual(synced);
+  });
+});
+
+describe('runRoadWalletCloudCycle (Pass 1B.1 R9)', () => {
+  it('recovers the owner’s cloud metadata + file before any write, on a fresh device', async () => {
+    // Device 1: Driver Pro creates and backs up a document.
+    signIn('user-a');
+    setTier('driver_pro');
+    const { document, version } = await create();
+    await sync();
+    expect(remote.tables.document_versions.size).toBe(1);
+
+    // Device 2: empty local store, same account, now Free after a downgrade.
+    useRoadWalletStore.getState().clear();
+    fileStore = new MemoryDocumentFileStore();
+    configureRoadWalletFileStore(fileStore);
+    setTier('free');
+    await runRoadWalletCloudCycle();
+
+    const s = useRoadWalletStore.getState();
+    expect(s.documents.map((d) => d.id)).toEqual([document.id]);
+    const v = s.versions.find((x) => x.id === version.id)!;
+    expect(v).toMatchObject({
+      cloudStatus: 'synced',
+      remoteStoragePath: `user-a/road-wallet/${document.id}/${version.id}.jpg`,
+    });
+    expect(v.fileCache.state).toBe('READY'); // pinned current version auto-restored + verified
+    expect(await fileStore.sha256(version.relativePath)).toBe(version.sha256);
+    // No new writes happened for the Free tier.
+    expect(remote.uploads).toHaveLength(1);
+    expect(remote.upserts).toHaveLength(1);
+  });
+
+  it('a stale local synced copy never overwrites newer remote metadata (recovery precedes upload)', async () => {
+    signIn('user-a');
+    setTier('driver_pro');
+    const { document } = await create();
+    await sync();
+    // Another device renamed the document later.
+    const row = remote.tables.operational_documents.get(document.id)!;
+    remote.tables.operational_documents.set(document.id, {
+      ...row,
+      title: 'Renamed elsewhere',
+      updated_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+
+    await runRoadWalletCloudCycle();
+    expect(doc(document.id).title).toBe('Renamed elsewhere');
+    expect(remote.tables.operational_documents.get(document.id)?.title).toBe('Renamed elsewhere');
+  });
+
+  it('coalesces concurrent cycles', async () => {
+    signIn('user-a');
+    setTier('driver_pro');
+    await create();
+    const [p1, p2] = [runRoadWalletCloudCycle(), runRoadWalletCloudCycle()];
+    expect(p1).toBe(p2);
+    await Promise.all([p1, p2]);
+    await flush();
+    expect(remote.uploads).toHaveLength(1);
   });
 });
 

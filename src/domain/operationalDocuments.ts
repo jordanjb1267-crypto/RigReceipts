@@ -1,5 +1,10 @@
 import { CloudSyncStatus } from './cloudSync';
-import { DocumentFileKind, FileCacheEntry, isOpaqueId } from './documentFiles';
+import {
+  DocumentFileKind,
+  documentFileRelativePath,
+  FileCacheEntry,
+  isOpaqueId,
+} from './documentFiles';
 import { isSha256Hex } from './sha256';
 
 /**
@@ -785,6 +790,236 @@ export function toRemoteVersionRow(
     created_at: new Date(version.createdAt).toISOString(),
   };
 }
+
+// ---------------------------------------------------------------------------
+// Remote → local recovery mapping (Pass 1B.1) — validated, never trusted
+// ---------------------------------------------------------------------------
+
+const isRec = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
+const optStr = (v: unknown): string | null => (typeof v === 'string' && v.length > 0 ? v : null);
+const isoToMs = (v: unknown): number | null => {
+  if (typeof v !== 'string') return null;
+  const ms = Date.parse(v);
+  return Number.isFinite(ms) ? ms : null;
+};
+
+/**
+ * Maps an `operational_documents` row fetched through the owner's own RLS
+ * session into a local document. Every field is validated; the row must belong
+ * to `sessionUserId` (defensive on top of RLS). Returns null for anything that
+ * cannot be proven sound. No local path ever comes from the server.
+ */
+export function fromRemoteDocumentRow(
+  row: unknown,
+  sessionUserId: string,
+): OperationalDocument | null {
+  if (!isRec(row)) return null;
+  if (typeof row.id !== 'string' || !isOpaqueId(row.id)) return null;
+  if (row.owner_id !== sessionUserId) return null;
+  if (!isEnum(DOCUMENT_KINDS, row.document_kind)) return null;
+  if (!isEnum(SUBJECT_KINDS, row.subject_kind)) return null;
+  if (!isEnum(SENSITIVITIES, row.sensitivity)) return null;
+  if (!isEnum(DOCUMENT_LIFECYCLES, row.lifecycle)) return null;
+  if (typeof row.title !== 'string' || !row.title.trim()) return null;
+  const createdAt = isoToMs(row.created_at);
+  const updatedAt = isoToMs(row.updated_at);
+  if (createdAt === null || updatedAt === null) return null;
+  const doc: OperationalDocument = {
+    id: row.id,
+    accountOwnerId: sessionUserId,
+    documentKind: row.document_kind,
+    subjectKind: row.subject_kind,
+    truckId: optStr(row.truck_id),
+    trailerNumber: optStr(row.trailer_number),
+    title: row.title,
+    issuer: optStr(row.issuer),
+    jurisdiction: optStr(row.jurisdiction),
+    issuedAt: optStr(row.issued_at),
+    effectiveAt: optStr(row.effective_at),
+    expiresAt: optStr(row.expires_at),
+    maskedReference: optStr(row.masked_reference),
+    sensitivity: row.sensitivity,
+    lifecycle: row.lifecycle,
+    offlinePinned: row.offline_pinned === true,
+    cloudStatus: 'synced',
+    createdAt,
+    updatedAt,
+  };
+  try {
+    // Enforces opaque id, enum sets, fixed sensitivity for known kinds, ISO
+    // dates and masked-reference rules.
+    validateOperationalDocument(doc);
+  } catch {
+    return null;
+  }
+  return doc;
+}
+
+const REMOTE_EXTENSION_RE = /^[a-z0-9]{1,8}$/;
+
+/**
+ * Maps a `document_versions` row into local immutable evidence. The parent
+ * must already be a validated, session-owned document. The storage path must
+ * be exactly the canonical owner-first key; the local relative path is
+ * reconstructed (never read from the server); the cache starts NOT_CACHED.
+ */
+export function fromRemoteVersionRow(
+  row: unknown,
+  sessionUserId: string,
+  parent: OperationalDocument,
+): DocumentVersion | null {
+  if (!isRec(row)) return null;
+  if (typeof row.id !== 'string' || !isOpaqueId(row.id)) return null;
+  if (row.owner_id !== sessionUserId) return null;
+  if (row.operational_document_id !== parent.id) return null;
+  if (parent.accountOwnerId !== sessionUserId) return null;
+  const versionNumber = Number(row.version_number);
+  if (!Number.isInteger(versionNumber) || versionNumber < 1) return null;
+  const supersedes =
+    row.supersedes_version_id === null || row.supersedes_version_id === undefined
+      ? null
+      : typeof row.supersedes_version_id === 'string' && isOpaqueId(row.supersedes_version_id)
+        ? row.supersedes_version_id
+        : undefined;
+  if (supersedes === undefined || supersedes === row.id) return null;
+  const fileKind = row.file_kind;
+  if (fileKind !== 'IMAGE' && fileKind !== 'PDF' && fileKind !== 'OTHER') return null;
+  if (typeof row.mime_type !== 'string' || !row.mime_type) return null;
+  if (typeof row.extension !== 'string' || !REMOTE_EXTENSION_RE.test(row.extension)) return null;
+  const byteSize = Number(row.byte_size);
+  if (!Number.isFinite(byteSize) || byteSize <= 0) return null;
+  if (typeof row.sha256 !== 'string' || !isSha256Hex(row.sha256)) return null;
+  if (row.storage_bucket !== ROAD_WALLET_REMOTE_BUCKET) return null;
+  const expectedPath = remoteVersionPath(sessionUserId, parent.id, row.id, row.extension);
+  if (row.storage_path !== expectedPath) return null;
+  const createdAt = isoToMs(row.created_at);
+  if (createdAt === null) return null;
+
+  let relativePath: string;
+  try {
+    relativePath = documentFileRelativePath(parent.id, row.id, row.extension);
+  } catch {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    operationalDocumentId: parent.id,
+    accountOwnerId: sessionUserId,
+    versionNumber,
+    supersedesVersionId: supersedes,
+    fileKind,
+    mimeType: row.mime_type,
+    extension: row.extension,
+    byteSize,
+    sha256: row.sha256,
+    relativePath,
+    fileCache: {
+      state: 'NOT_CACHED',
+      relativePath,
+      mimeType: row.mime_type,
+      byteSize,
+      sha256: row.sha256,
+      error: null,
+      verifiedAt: null,
+    },
+    cloudStatus: 'synced',
+    remoteStorageBucket: ROAD_WALLET_REMOTE_BUCKET,
+    remoteStoragePath: expectedPath,
+    createdAt,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Safe remote/local merge (Pass 1B.1 R3)
+// ---------------------------------------------------------------------------
+
+export type DocumentMergeAction =
+  'import' | 'keep_local' | 'replace_metadata' | 'keep_synced_local';
+
+/**
+ * Recovery never overwrites unsynced local work. Local `pending_sync` /
+ * `local_only` metadata is authoritative for this device; a synced local copy
+ * is replaced only when the remote row is demonstrably newer. Identity,
+ * ownership and creation time are immutable in every branch.
+ */
+export function mergeRecoveredDocument(
+  local: OperationalDocument | undefined,
+  remote: OperationalDocument,
+): { action: DocumentMergeAction; document: OperationalDocument } {
+  if (!local) return { action: 'import', document: remote };
+  if (local.cloudStatus !== 'synced') return { action: 'keep_local', document: local };
+  if (remote.updatedAt > local.updatedAt) {
+    return {
+      action: 'replace_metadata',
+      document: {
+        ...remote,
+        id: local.id,
+        accountOwnerId: local.accountOwnerId,
+        createdAt: local.createdAt,
+        cloudStatus: 'synced',
+      },
+    };
+  }
+  return { action: 'keep_synced_local', document: local };
+}
+
+export type VersionMergeAction = 'import' | 'reconcile' | 'conflict' | 'unchanged';
+
+/**
+ * Same version id ⇒ immutable evidence must match exactly. A match only
+ * reconciles cloud state (bucket/path/synced) and keeps the local file cache;
+ * a mismatch is an integrity conflict and neither side is rewritten.
+ */
+export function mergeRecoveredVersion(
+  local: DocumentVersion | undefined,
+  remote: DocumentVersion,
+): { action: VersionMergeAction; version?: DocumentVersion } {
+  if (!local) return { action: 'import', version: remote };
+  if (!immutableCoreEquals(immutableCore(local), immutableCore(remote))) {
+    return { action: 'conflict' };
+  }
+  if (
+    local.cloudStatus === 'synced' &&
+    local.remoteStorageBucket === remote.remoteStorageBucket &&
+    local.remoteStoragePath === remote.remoteStoragePath
+  ) {
+    return { action: 'unchanged', version: local };
+  }
+  return {
+    action: 'reconcile',
+    version: {
+      ...local,
+      cloudStatus: 'synced',
+      remoteStorageBucket: remote.remoteStorageBucket,
+      remoteStoragePath: remote.remoteStoragePath,
+    },
+  };
+}
+
+/** Bounded, non-sensitive recovery outcome. */
+export interface RoadWalletRecoveryResult {
+  documentsRecovered: number;
+  versionsRecovered: number;
+  filesRestored: number;
+  integrityConflicts: number;
+  downloadFailures: number;
+  skippedLocalChanges: number;
+  /** Set when the run was skipped or abandoned; nothing was mutated after this point. */
+  outcome: 'completed' | 'signed_out' | 'not_configured' | 'cancelled' | 'fetch_failed';
+}
+
+export const emptyRecoveryResult = (
+  outcome: RoadWalletRecoveryResult['outcome'] = 'completed',
+): RoadWalletRecoveryResult => ({
+  documentsRecovered: 0,
+  versionsRecovered: 0,
+  filesRestored: 0,
+  integrityConflicts: 0,
+  downloadFailures: 0,
+  skippedLocalChanges: 0,
+  outcome,
+});
 
 /**
  * Whether an already-existing remote version row carries exactly the immutable

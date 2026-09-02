@@ -78,6 +78,17 @@ interface RoadWalletState {
   /** Re-derives every unsynced cloud status from the current context. */
   reconcileCloudStatuses: (ctx: CloudSyncContext) => number;
   /**
+   * Cloud recovery (Pass 1B.1): inserts a validated remote document that does
+   * not exist locally (`cloudStatus: synced`). Rejects duplicates.
+   */
+  importRecoveredDocument: (doc: OperationalDocument) => void;
+  /**
+   * Cloud recovery: replaces editable metadata of a LOCALLY SYNCED document
+   * with demonstrably newer remote metadata. Identity, ownership and createdAt
+   * are kept from the local record; throws if the local copy is not synced.
+   */
+  replaceSyncedDocumentMetadata: (remote: OperationalDocument) => void;
+  /**
    * Whole-store maintenance primitive (tests / explicit account cleanup only).
    * Never wired to sign-out, account switch or tier changes. There is
    * deliberately no per-version delete: versions are historical evidence.
@@ -380,6 +391,33 @@ export const useRoadWalletStore = create<RoadWalletState>()(
             return next;
           }),
         })),
+
+      importRecoveredDocument: (doc) => {
+        validateOperationalDocument(doc);
+        if (doc.cloudStatus !== 'synced') throw new Error('recovered document must be synced');
+        if (get().documents.some((d) => d.id === doc.id)) throw new Error('duplicate document id');
+        set((s) => ({ documents: [doc, ...s.documents] }));
+      },
+
+      replaceSyncedDocumentMetadata: (remote) => {
+        const local = get().documents.find((d) => d.id === remote.id);
+        if (!local) throw new Error('document not found');
+        if (local.cloudStatus !== 'synced') {
+          throw new Error('local metadata has unsynced changes; not overwritten');
+        }
+        if (local.accountOwnerId !== remote.accountOwnerId) {
+          throw new Error('ownership is immutable');
+        }
+        const next: OperationalDocument = {
+          ...remote,
+          id: local.id,
+          accountOwnerId: local.accountOwnerId,
+          createdAt: local.createdAt,
+          cloudStatus: 'synced',
+        };
+        validateOperationalDocument(next);
+        set((s) => ({ documents: s.documents.map((d) => (d.id === local.id ? next : d)) }));
+      },
 
       reconcileCloudStatuses: (ctx) => {
         let changed = 0;

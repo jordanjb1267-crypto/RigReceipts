@@ -8,6 +8,7 @@ import {
   markError,
   markReady,
   newOpaqueId,
+  parseDocumentFileRelativePath,
   resolveFileType,
   SecureRandomBytes,
   sha256Hex,
@@ -78,6 +79,13 @@ export interface DocumentFileStore {
    * when the file is missing or unreadable. Never logged.
    */
   readBytes(relativePath: string): Promise<Uint8Array>;
+  /**
+   * Writes exact bytes to an app-private canonical path (cloud recovery),
+   * creating parent directories idempotently and overwriting any partial file.
+   * A successful write proves nothing about readiness — callers must reverify.
+   * The path must already be canonical (`road-wallet/{doc}/{version}.{ext}`).
+   */
+  writeBytes(relativePath: string, bytes: Uint8Array, mimeType?: string): Promise<void>;
   /** Removes the local copy. No-op when already gone. */
   remove(relativePath: string): Promise<void>;
   /** Absolute URI for a relative path (app-private location). */
@@ -208,6 +216,17 @@ export class MemoryDocumentFileStore implements DocumentFileStore {
     return new Uint8Array(bytes);
   }
 
+  /** Test hook: relative paths whose writes should fail. */
+  readonly unwritable = new Set<string>();
+
+  async writeBytes(relativePath: string, bytes: Uint8Array, _mimeType?: string): Promise<void> {
+    if (!parseDocumentFileRelativePath(relativePath)) {
+      throw new Error('writeBytes requires a canonical road-wallet path');
+    }
+    if (this.unwritable.has(relativePath)) throw new Error('write failed');
+    this.files.set(relativePath, new Uint8Array(bytes));
+  }
+
   async remove(relativePath: string): Promise<void> {
     this.files.delete(relativePath);
   }
@@ -236,6 +255,9 @@ interface FsFile {
   readonly type: string;
   bytes(): Promise<Uint8Array>;
   copy(destination: FsFile | FsDirectory, options?: { overwrite?: boolean }): Promise<void>;
+  /** SDK 57: `create(options?: FileCreateOptions)` and `write(content: string | Uint8Array)`. */
+  create(options?: { intermediates?: boolean; overwrite?: boolean }): void;
+  write(content: string | Uint8Array): void;
   delete(): void;
 }
 interface FsDirectory {
@@ -455,6 +477,18 @@ export class ExpoDocumentFileStore implements DocumentFileStore {
     const bytes = await f.bytes();
     if (!(bytes instanceof Uint8Array)) throw new Error('file unreadable');
     return bytes;
+  }
+
+  async writeBytes(relativePath: string, bytes: Uint8Array, _mimeType?: string): Promise<void> {
+    const parsed = parseDocumentFileRelativePath(relativePath);
+    if (!parsed) throw new Error('writeBytes requires a canonical road-wallet path');
+    const { File, Directory, Paths } = this.fs();
+    // App-private document directory only; parents created idempotently.
+    const dir = new Directory(Paths.document, 'road-wallet', parsed.documentId);
+    dir.create({ intermediates: true, idempotent: true });
+    const file = new File(dir, `${parsed.versionId}.${parsed.ext}`);
+    if (!file.exists) file.create({ intermediates: true, overwrite: true });
+    file.write(bytes);
   }
 
   async remove(relativePath: string): Promise<void> {

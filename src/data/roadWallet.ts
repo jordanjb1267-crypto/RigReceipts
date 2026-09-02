@@ -9,6 +9,7 @@ import {
   documentKindLabel,
   DocumentVersion,
   FileCacheEntry,
+  isVisibleInSession,
   markCaching,
   markReady,
   nextVersionNumber,
@@ -233,20 +234,30 @@ export interface ReadinessRefreshResult {
   errored: number;
 }
 
-let readinessInFlight: Promise<ReadinessRefreshResult> | null = null;
+/** Coalescing is per session: User B's refresh is never satisfied by User A's. */
+const readinessInFlight = new Map<string, Promise<ReadinessRefreshResult>>();
+export const readinessSessionKey = (sessionUserId: string | null): string =>
+  sessionUserId ?? '__device_only__';
+
+/** Test-only: exposes in-flight session keys so leaks can be asserted. */
+export const __readinessInFlightKeys = (): string[] => [...readinessInFlight.keys()];
 
 /**
  * Re-verifies the CURRENT version's physical file for every ACTIVE document
  * visible in this session, against the immutable version's SHA-256 and kind.
  * Only `fileCache` changes — never the immutable evidence, never a new version.
- * Concurrent calls coalesce onto the in-flight run.
+ * Concurrent calls for the SAME session coalesce onto the in-flight run;
+ * different sessions never share a promise, and only the session's own visible
+ * documents are ever touched.
  */
 export function refreshRoadWalletReadinessForSession(
   sessionUserId: string | null,
   deps: Pick<RoadWalletDeps, 'fileStore' | 'now'> = defaultRoadWalletDeps(),
 ): Promise<ReadinessRefreshResult> {
-  if (readinessInFlight) return readinessInFlight;
-  readinessInFlight = (async () => {
+  const key = readinessSessionKey(sessionUserId);
+  const existing = readinessInFlight.get(key);
+  if (existing) return existing;
+  const run = (async () => {
     const result: ReadinessRefreshResult = { checked: 0, ready: 0, errored: 0 };
     try {
       const state = useRoadWalletStore.getState();
@@ -255,7 +266,7 @@ export function refreshRoadWalletReadinessForSession(
       );
       for (const doc of docs) {
         const current = currentVersion(useRoadWalletStore.getState().versions, doc.id);
-        if (!current) continue;
+        if (!current || current.accountOwnerId !== sessionUserId) continue;
         await refreshVersionReadiness(current, deps);
         result.checked++;
         const after = useRoadWalletStore.getState().versions.find((v) => v.id === current.id);
@@ -264,10 +275,11 @@ export function refreshRoadWalletReadinessForSession(
       }
       return result;
     } finally {
-      readinessInFlight = null;
+      readinessInFlight.delete(key);
     }
   })();
-  return readinessInFlight;
+  readinessInFlight.set(key, run);
+  return run;
 }
 
 /** Re-verifies one version's physical file and records the result on its cache. */
@@ -291,13 +303,22 @@ export async function refreshVersionReadiness(
   return entry;
 }
 
-/** Re-verifies the current version of one document (Document Detail open). */
+/**
+ * Re-verifies the current version of one document (Document Detail open) —
+ * only when the document exists AND is visible to the CURRENT session. An
+ * opaque id belonging to another account on the same device triggers no file
+ * read and returns null.
+ */
 export async function refreshDocumentReadiness(
   documentId: string,
-  deps: Pick<RoadWalletDeps, 'fileStore' | 'now'> = defaultRoadWalletDeps(),
+  deps: Pick<RoadWalletDeps, 'fileStore' | 'now' | 'ctx'> = defaultRoadWalletDeps(),
 ): Promise<FileCacheEntry | null> {
-  const current = currentVersion(useRoadWalletStore.getState().versions, documentId);
-  if (!current) return null;
+  const sessionUserId = deps.ctx().userId;
+  const state = useRoadWalletStore.getState();
+  const doc = state.documents.find((d) => d.id === documentId);
+  if (!doc || !isVisibleInSession(doc, sessionUserId)) return null;
+  const current = currentVersion(state.versions, documentId);
+  if (!current || current.accountOwnerId !== sessionUserId) return null;
   return refreshVersionReadiness(current, deps);
 }
 
@@ -388,15 +409,38 @@ export async function shareOperationalDocumentVersion(
   const capability = await deps.fileStore.shareCapability();
   if (!capability.available) throw new ShareDeniedError('SHARE_UNAVAILABLE');
 
-  // Late re-check: ownership and entitlement may have changed while verifying.
+  // Late re-check against the LIVE store and LIVE session — never the snapshot
+  // captured before verification. The document may have been archived, its
+  // sensitivity raised, the account switched or the entitlement lost while the
+  // file and share-capability checks were running.
   deps.beforeShare?.();
-  assertShareAuthorized(deps.ctx(), doc);
+  const liveCtx = deps.ctx();
+  const liveState = useRoadWalletStore.getState();
+  const liveDoc = liveState.documents.find((d) => d.id === doc.id);
+  if (!liveDoc) throw new ShareDeniedError('NOT_FOUND');
+  assertShareAuthorized(liveCtx, liveDoc);
+  if (liveDoc.lifecycle === 'ARCHIVED') throw new ShareDeniedError('ARCHIVED');
+  const liveVersion = liveState.versions.find(
+    (v) => v.id === version.id && v.operationalDocumentId === liveDoc.id,
+  );
+  if (!liveVersion) throw new ShareDeniedError('NO_VERSION');
+  if (
+    !shareConfirmationSatisfies(
+      input.sensitiveConfirmation,
+      requiredShareConfirmation(liveDoc.sensitivity),
+    )
+  ) {
+    throw new ShareDeniedError('CONFIRMATION_REQUIRED');
+  }
+  if (liveVersion.fileCache.state !== 'READY') {
+    throw new ShareDeniedError('FILE_UNAVAILABLE', liveVersion.fileCache.error);
+  }
 
-  await deps.fileStore.share(version.relativePath, {
-    mimeType: version.mimeType,
-    dialogTitle: `${documentKindLabel(doc.documentKind)} — version ${version.versionNumber}`,
+  await deps.fileStore.share(liveVersion.relativePath, {
+    mimeType: liveVersion.mimeType,
+    dialogTitle: `${documentKindLabel(liveDoc.documentKind)} — version ${liveVersion.versionNumber}`,
   });
-  return { versionId: version.id, mimeType: version.mimeType };
+  return { versionId: liveVersion.id, mimeType: liveVersion.mimeType };
 }
 
 /**

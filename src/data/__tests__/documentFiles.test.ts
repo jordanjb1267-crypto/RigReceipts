@@ -401,6 +401,28 @@ describe('readBytes (Pass 1A extension)', () => {
   });
 });
 
+describe('writeBytes (Pass 1B.1 extension)', () => {
+  it('writes exact bytes to a canonical path, overwriting a partial file; a write alone is not READY', async () => {
+    const path = `road-wallet/${DOC}/${VER}.jpg`;
+    await store.writeBytes(path, new Uint8Array([1, 2, 3]), 'image/jpeg');
+    await store.writeBytes(path, JPEG, 'image/jpeg');
+    expect(Array.from(await store.readBytes(path))).toEqual(Array.from(JPEG));
+    expect(await store.sha256(path)).toBe(sha256Hex(JPEG));
+    // The caller must still verify; the store never marks readiness.
+    expect(
+      await store.verify(path, { expectedKind: 'IMAGE', expectedSha256: sha256Hex(JPEG) }),
+    ).toMatchObject({ ok: true });
+  });
+
+  it('refuses non-canonical destinations', async () => {
+    await expect(store.writeBytes('road-wallet/John Smith/CDL.jpg', JPEG)).rejects.toThrow(
+      /canonical/,
+    );
+    await expect(store.writeBytes('/tmp/anything.jpg', JPEG)).rejects.toThrow(/canonical/);
+    await expect(store.writeBytes(`receipts/${DOC}/${VER}.jpg`, JPEG)).rejects.toThrow(/canonical/);
+  });
+});
+
 describe('store contract parity', () => {
   const REQUIRED: (keyof DocumentFileStore)[] = [
     'importFile',
@@ -409,6 +431,7 @@ describe('store contract parity', () => {
     'verify',
     'sha256',
     'readBytes',
+    'writeBytes',
     'remove',
     'uriFor',
     'shareCapability',

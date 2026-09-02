@@ -21,6 +21,7 @@ import {
 } from './cloudSyncAuth';
 import { DocumentFileStore, reverifyDocumentFile } from './documentFiles';
 import { roadWalletFileStore } from './roadWallet';
+import { recoverRoadWalletFromCloud } from './roadWalletRecovery';
 
 /**
  * Road Wallet cloud synchronization (Refinement Pass 1A) under the
@@ -224,17 +225,59 @@ export async function syncPendingRoadWallet(d: SyncDeps = deps()): Promise<RoadW
   }
 }
 
+let cycleInFlight: Promise<void> | null = null;
+let cycleRerunRequested = false;
+
+/**
+ * One full cloud cycle in the canonical order (Pass 1B.1 R9):
+ *   1. current authenticated context;
+ *   2. signed in + configured → RECOVER owner cloud metadata (data-rights
+ *      operation, tier-independent) and safely merge it;
+ *   3. auto-restore eligible `offlinePinned` current versions (inside recovery);
+ *   4. reconcile local cloud states;
+ *   5. pending WRITE sync only where `cloudDocumentBackup` authorizes it.
+ * Recovery always precedes upload so a stale local copy never overwrites newer
+ * remote metadata. Concurrent cycles coalesce; a request during a run schedules
+ * exactly one follow-up. Recovery itself re-checks the active user at every
+ * remote phase, so a mid-cycle account switch cannot leak another account's
+ * state into the current session.
+ */
+export function runRoadWalletCloudCycle(): Promise<void> {
+  if (cycleInFlight) {
+    cycleRerunRequested = true;
+    return cycleInFlight;
+  }
+  cycleInFlight = (async () => {
+    try {
+      const ctx = currentCloudSyncContext();
+      if (ctx.userId && ctx.supabaseConfigured) {
+        await recoverRoadWalletFromCloud().catch(() => {});
+      }
+      await syncPendingRoadWallet();
+    } finally {
+      cycleInFlight = null;
+      if (cycleRerunRequested) {
+        cycleRerunRequested = false;
+        void runRoadWalletCloudCycle();
+      }
+    }
+  })();
+  return cycleInFlight;
+}
+
 let started = false;
 
 /**
- * Keeps Road Wallet cloud state honest and backfills on hydration, auth changes
- * and tier changes. Device-only mode reconciles everything to `local_only`.
+ * Keeps Road Wallet cloud state honest on hydration, auth changes and tier
+ * changes by running {@link runRoadWalletCloudCycle}. Device-only mode
+ * reconciles everything to `local_only` and makes no remote calls. Never
+ * depends on a screen being visited; never deletes local content; no polling.
  */
 export function initDocumentSync(): void {
   if (started) return;
   started = true;
   const run = () => {
-    void syncPendingRoadWallet();
+    void runRoadWalletCloudCycle();
   };
   if (useRoadWalletStore.persist.hasHydrated()) run();
   useRoadWalletStore.persist.onFinishHydration(run);
@@ -245,5 +288,7 @@ export function initDocumentSync(): void {
 export function __resetDocumentSyncForTests(): void {
   inFlight = false;
   rerunRequested = false;
+  cycleInFlight = null;
+  cycleRerunRequested = false;
   started = false;
 }

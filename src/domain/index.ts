@@ -137,6 +137,11 @@ export {
   toRemoteDocumentRow,
   toRemoteVersionRow,
   remoteVersionMatches,
+  fromRemoteDocumentRow,
+  fromRemoteVersionRow,
+  mergeRecoveredDocument,
+  mergeRecoveredVersion,
+  emptyRecoveryResult,
 } from './operationalDocuments';
 export type {
   SubjectKind,
@@ -153,6 +158,9 @@ export type {
   BackupState,
   RoadWalletSummary,
   SensitiveShareConfirmation,
+  DocumentMergeAction,
+  VersionMergeAction,
+  RoadWalletRecoveryResult,
 } from './operationalDocuments';
 export { EQUIPMENT_TYPES, equipmentLabel } from './equipment';
 export type { EquipmentType } from './equipment';

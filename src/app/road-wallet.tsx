@@ -109,7 +109,7 @@ function RoadWalletScreen() {
           <Text style={styles.emptyTitle}>Nothing in your wallet yet.</Text>
           <Text style={styles.emptyCopy}>
             Add a registration, insurance card, IFTA license, permit, CDL or carrier paperwork.
-            Files stay on this device; Driver Pro backs them up to your private account.
+            Files stay on this device; Driver Pro adds private cloud backup and recovery.
           </Text>
         </Card>
       ) : (

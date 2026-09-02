@@ -32,9 +32,10 @@ useAuthStore.getState().init();
 void initAnalytics();
 // Backfills the offline capture queue to Supabase whenever a user is signed in.
 initCaptureSync();
-// Keeps Road Wallet cloud state honest and backs up documents for entitled
-// accounts (cloudDocumentBackup). Reacts to hydration, auth and tier changes;
-// never depends on a screen being visited; never deletes local content.
+// Road Wallet cloud cycle: recover the signed-in owner's already backed-up
+// documents (tier-independent data access) before any new backup writes
+// (cloudDocumentBackup). Reacts to hydration, auth and tier changes; never
+// depends on a screen being visited; never deletes local content.
 initDocumentSync();
 
 const queryClient = new QueryClient();

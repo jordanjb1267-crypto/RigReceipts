@@ -14,7 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button, Card, Pill } from '@/components';
 import { DocumentSourceSheet, SourceOutcome } from '@/components/roadWallet/DocumentSourceSheet';
-import { saveErrorCopy, shareErrorCopy } from '@/components/roadWallet/errorCopy';
+import { restoreErrorCopy, saveErrorCopy, shareErrorCopy } from '@/components/roadWallet/errorCopy';
 import { RoadWalletGate } from '@/components/roadWallet/RoadWalletGate';
 import { currentCloudSyncContext } from '@/data/cloudSyncAuth';
 import { syncPendingRoadWallet } from '@/data/documentSync';
@@ -25,6 +25,7 @@ import {
   ShareDeniedError,
   shareOperationalDocumentVersion,
 } from '@/data/roadWallet';
+import { restoreDocumentVersionToDevice } from '@/data/roadWalletRecovery';
 import { useOwnedTrucks, resolveTruckLabel } from '@/data/trucks';
 import {
   BACKUP_STATE_LABEL,
@@ -89,7 +90,7 @@ function DocumentDetailScreen() {
   const current = doc ? currentVersion(versions, doc.id) : null;
 
   const [mode, setMode] = useState<Mode>('view');
-  const [busy, setBusy] = useState<'share' | 'replace' | 'save' | null>(null);
+  const [busy, setBusy] = useState<'share' | 'replace' | 'save' | 'restore' | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   // Readiness is re-verified in this process when the detail opens.
@@ -118,6 +119,38 @@ function DocumentDetailScreen() {
   const readiness = current?.fileCache.state ?? 'NOT_CACHED';
   const canShare = canUseFeature(tier, 'documentShareExport');
   const truckLabel = resolveTruckLabel(doc.truckId, trucks.data);
+  // Restore is a data-access right of the signed-in owner of already backed-up
+  // data — independent of the current tier and of Share/Export.
+  const canRestore =
+    !!userId && !!current && current.cloudStatus === 'synced' && readiness !== 'READY';
+
+  const runRestore = async () => {
+    setBusy('restore');
+    setNotice(null);
+    try {
+      await restoreDocumentVersionToDevice(doc.id);
+      setNotice('Restored to this device and verified.');
+    } catch (err) {
+      setNotice(restoreErrorCopy(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const restore = () => {
+    if (doc.sensitivity === 'FINANCIAL_SENSITIVE') {
+      Alert.alert(
+        'Restore a financial document to this device?',
+        'Restoring places an app-private local copy of this document on this device, protected by the platform’s app storage protections. Continue only on a device you control.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Restore to this device', onPress: () => void runRestore() },
+        ],
+      );
+      return;
+    }
+    void runRestore();
+  };
 
   const archiveToggle = () => {
     const ctx = currentCloudSyncContext();
@@ -298,6 +331,15 @@ function DocumentDetailScreen() {
                 disabled={busy !== null}
                 onPress={() => setMode('edit')}
               />
+              {canRestore && (
+                <Button
+                  label={busy === 'restore' ? 'Restoring…' : 'Restore to this device'}
+                  variant="secondary"
+                  loading={busy === 'restore'}
+                  disabled={busy !== null}
+                  onPress={restore}
+                />
+              )}
               <Button
                 label="Replace document file"
                 variant="secondary"

@@ -7,7 +7,10 @@ import {
 
 import { MemoryDocumentFileStore, reverifyDocumentFile } from '../documentFiles';
 import {
+  __readinessInFlightKeys,
   createOperationalDocumentFromFile,
+  readinessSessionKey,
+  refreshDocumentReadiness,
   refreshRoadWalletReadinessForSession,
   replaceOperationalDocumentFile,
   RoadWalletDeps,
@@ -390,6 +393,109 @@ describe('refreshRoadWalletReadinessForSession (Pass 1B §3)', () => {
   });
 });
 
+describe('R11 — session-keyed readiness coalescing', () => {
+  it('User A and User B refreshes never share an in-flight promise, only touch their own docs, and clean up', async () => {
+    const a = await createOperationalDocumentFromFile(
+      { uri: 'file:///tmp/picker/cab-card.jpg', mimeType: 'image/jpeg' },
+      { documentKind: 'VEHICLE_REGISTRATION', title: 'A' },
+      deps({ userId: 'user-a' }),
+    );
+    const b = await createOperationalDocumentFromFile(
+      { uri: 'file:///tmp/picker/cab-card-2.jpg', mimeType: 'image/jpeg' },
+      { documentKind: 'VEHICLE_REGISTRATION', title: 'B' },
+      deps({ userId: 'user-b' }),
+    );
+    const anon = await createOperationalDocumentFromFile(
+      { uri: 'file:///tmp/picker/coi.pdf', mimeType: 'application/pdf' },
+      { documentKind: 'CERTIFICATE_OF_INSURANCE', title: 'Anon' },
+      deps({ userId: null }),
+    );
+    useRoadWalletStore.setState(
+      normalizeRoadWalletState(JSON.parse(JSON.stringify(useRoadWalletStore.getState()))),
+    );
+
+    const pa = refreshRoadWalletReadinessForSession('user-a', { fileStore, now: () => 1 });
+    const pb = refreshRoadWalletReadinessForSession('user-b', { fileStore, now: () => 1 });
+    const pDevice = refreshRoadWalletReadinessForSession(null, { fileStore, now: () => 1 });
+    expect(pa).not.toBe(pb);
+    expect(pa).not.toBe(pDevice);
+    expect(refreshRoadWalletReadinessForSession('user-a', { fileStore, now: () => 1 })).toBe(pa);
+    expect(__readinessInFlightKeys().sort()).toEqual(
+      [readinessSessionKey(null), 'user-a', 'user-b'].sort(),
+    );
+
+    const [ra, rb, rd] = await Promise.all([pa, pb, pDevice]);
+    expect(ra).toEqual({ checked: 1, ready: 1, errored: 0 });
+    expect(rb).toEqual({ checked: 1, ready: 1, errored: 0 });
+    expect(rd).toEqual({ checked: 1, ready: 1, errored: 0 });
+    expect(__readinessInFlightKeys()).toEqual([]);
+    const s = useRoadWalletStore.getState();
+    for (const id of [a.version.id, b.version.id, anon.version.id]) {
+      expect(s.versions.find((v) => v.id === id)?.fileCache.state).toBe('READY');
+    }
+  });
+
+  it("User B's refresh does not verify User A's files", async () => {
+    const a = await createOperationalDocumentFromFile(
+      { uri: 'file:///tmp/picker/cab-card.jpg', mimeType: 'image/jpeg' },
+      { documentKind: 'VEHICLE_REGISTRATION', title: 'A' },
+      deps({ userId: 'user-a' }),
+    );
+    useRoadWalletStore.setState(
+      normalizeRoadWalletState(JSON.parse(JSON.stringify(useRoadWalletStore.getState()))),
+    );
+    const rb = await refreshRoadWalletReadinessForSession('user-b', { fileStore, now: () => 1 });
+    expect(rb).toEqual({ checked: 0, ready: 0, errored: 0 });
+    expect(
+      useRoadWalletStore.getState().versions.find((v) => v.id === a.version.id)?.fileCache.state,
+    ).toBe('NOT_CACHED');
+  });
+});
+
+describe('R12 — account-scoped detail readiness', () => {
+  const rehydrate = () =>
+    useRoadWalletStore.setState(
+      normalizeRoadWalletState(JSON.parse(JSON.stringify(useRoadWalletStore.getState()))),
+    );
+  const readinessDeps = (userId: string | null) => ({
+    fileStore,
+    now: () => 2,
+    ctx: () => ({ userId, tier: 'free' as const, supabaseConfigured: true }),
+  });
+
+  it('User A document under User A → verified; under User B → denied with no file read', async () => {
+    const a = await createOperationalDocumentFromFile(
+      { uri: 'file:///tmp/picker/cab-card.jpg', mimeType: 'image/jpeg' },
+      { documentKind: 'VEHICLE_REGISTRATION', title: 'A' },
+      deps({ userId: 'user-a' }),
+    );
+    rehydrate();
+    const spy = jest.spyOn(fileStore, 'verify');
+    expect(await refreshDocumentReadiness(a.document.id, readinessDeps('user-b'))).toBeNull();
+    expect(spy).not.toHaveBeenCalled();
+    expect(useRoadWalletStore.getState().versions[0].fileCache.state).toBe('NOT_CACHED');
+    expect((await refreshDocumentReadiness(a.document.id, readinessDeps('user-a')))?.state).toBe(
+      'READY',
+    );
+    expect(spy).toHaveBeenCalledTimes(1);
+    spy.mockRestore();
+  });
+
+  it('unowned document: allowed signed out, denied signed in; unknown id → null', async () => {
+    const anon = await createOperationalDocumentFromFile(
+      { uri: 'file:///tmp/picker/coi.pdf', mimeType: 'application/pdf' },
+      { documentKind: 'CERTIFICATE_OF_INSURANCE', title: 'Anon' },
+      deps({ userId: null }),
+    );
+    rehydrate();
+    expect(await refreshDocumentReadiness(anon.document.id, readinessDeps('user-a'))).toBeNull();
+    expect((await refreshDocumentReadiness(anon.document.id, readinessDeps(null)))?.state).toBe(
+      'READY',
+    );
+    expect(await refreshDocumentReadiness('unknown', readinessDeps(null))).toBeNull();
+  });
+});
+
 describe('shareOperationalDocumentVersion (Pass 1B §15–§18)', () => {
   type Tier = 'free' | 'driver_pro' | 'owner_operator' | 'fleet_lite' | 'lifetime';
   const shareDeps = (
@@ -572,6 +678,68 @@ describe('shareOperationalDocumentVersion (Pass 1B §15–§18)', () => {
       mimeType: 'application/pdf',
     });
     expect(fileStore.shared).toHaveLength(2);
+  });
+
+  it('R13: re-reads the LIVE store before sharing — archive during verification denies', async () => {
+    const { document } = await createStandard();
+    const d = shareDeps();
+    d.beforeShare = () => useRoadWalletStore.getState().archiveDocument(document.id, d.ctx());
+    await expect(
+      shareOperationalDocumentVersion(
+        { documentId: document.id, sensitiveConfirmation: 'NONE' },
+        d,
+      ),
+    ).rejects.toMatchObject({ reason: 'ARCHIVED' });
+    expect(fileStore.shared).toHaveLength(0);
+  });
+
+  it('R13: sensitivity raised during verification requires the stronger CURRENT acknowledgement', async () => {
+    const custom = await createOperationalDocumentFromFile(
+      { uri: 'file:///tmp/picker/coi.pdf', mimeType: 'application/pdf' },
+      { documentKind: 'CUSTOM', title: 'Agreement', sensitivity: 'STANDARD' },
+      deps({ tier: 'driver_pro' }),
+    );
+    const d = shareDeps();
+    d.beforeShare = () =>
+      useRoadWalletStore
+        .getState()
+        .updateDocumentMetadata(
+          custom.document.id,
+          { sensitivity: 'FINANCIAL_SENSITIVE' },
+          d.ctx(),
+        );
+    await expect(
+      shareOperationalDocumentVersion(
+        { documentId: custom.document.id, sensitiveConfirmation: 'NONE' },
+        d,
+      ),
+    ).rejects.toMatchObject({ reason: 'CONFIRMATION_REQUIRED' });
+    // An earlier PERSONAL acknowledgement is not enough once the class became FINANCIAL.
+    const d2 = shareDeps();
+    d2.beforeShare = () =>
+      useRoadWalletStore
+        .getState()
+        .updateDocumentMetadata(
+          custom.document.id,
+          { sensitivity: 'FINANCIAL_SENSITIVE' },
+          d2.ctx(),
+        );
+    useRoadWalletStore
+      .getState()
+      .updateDocumentMetadata(custom.document.id, { sensitivity: 'PERSONAL_SENSITIVE' }, d2.ctx());
+    await expect(
+      shareOperationalDocumentVersion(
+        { documentId: custom.document.id, sensitiveConfirmation: 'PERSONAL_ACKNOWLEDGED' },
+        d2,
+      ),
+    ).rejects.toMatchObject({ reason: 'CONFIRMATION_REQUIRED' });
+    expect(fileStore.shared).toHaveLength(0);
+    // With the stronger acknowledgement the share proceeds.
+    await shareOperationalDocumentVersion(
+      { documentId: custom.document.id, sensitiveConfirmation: 'FINANCIAL_ACKNOWLEDGED' },
+      shareDeps(),
+    );
+    expect(fileStore.shared).toHaveLength(1);
   });
 
   it('denies when the platform share sheet is unavailable, and can target an explicit prior version', async () => {

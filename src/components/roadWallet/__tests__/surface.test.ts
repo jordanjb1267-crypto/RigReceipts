@@ -80,12 +80,63 @@ describe('feature flag gating', () => {
   });
 
   it('Board, Reports and Scan entries are gated by road_wallet_enabled', () => {
-    expect(board).toMatch(/isFeatureEnabled\('road_wallet_enabled'\)[\s\S]{0,80}<RoadWalletWidget/);
+    expect(board).toMatch(/const roadWalletEnabled = isFeatureEnabled\('road_wallet_enabled'\);/);
+    expect(board).toMatch(/\{roadWalletEnabled && <RoadWalletWidget/);
     expect(reports).toMatch(/roadWalletEnabled && \([\s\S]{0,600}router\.push\('\/road-wallet'\)/);
     expect(scan).toMatch(
       /isFeatureEnabled\('road_wallet_enabled'\) && \([\s\S]{0,400}onAddRoadDocument/,
     );
     expect(scan).toMatch(/router\.push\('\/add-road-document'\)/);
+  });
+});
+
+describe('Pass 1B.1 — Board readiness truth, restore UX, recovery ordering', () => {
+  const sync = read('src/data/documentSync.ts');
+  const recovery = read('src/data/roadWalletRecovery.ts');
+
+  it('the Board triggers a current-process readiness check on focus when the flag is on (no polling)', () => {
+    expect(board).toMatch(/useFocusEffect\(/);
+    expect(board).toMatch(
+      /if \(roadWalletEnabled\) \{[\s\S]{0,120}refreshRoadWalletReadinessForSession\(userId\)/,
+    );
+    expect(board).not.toMatch(/setInterval|setTimeout\(/);
+    expect(board).toMatch(/Checking…/);
+  });
+
+  it('Document Detail offers "Restore to this device" (owner right, not Share/Export) with the financial notice', () => {
+    expect(detail).toMatch(/Restore to this device/);
+    expect(detail).toMatch(/restoreDocumentVersionToDevice\(doc\.id\)/);
+    expect(detail).toMatch(/current\.cloudStatus === 'synced' && readiness !== 'READY'/);
+    expect(detail).not.toMatch(/canShare && canRestore|canRestore && canShare/);
+    expect(detail).toMatch(/app-private local copy[\s\S]{0,120}platform’s app storage protections/);
+    expect(detail).not.toMatch(/hardware[- ]encrypt/i);
+  });
+
+  it('the cloud cycle recovers before it writes, coalesces, and is what initDocumentSync runs', () => {
+    const recoverIdx = sync.indexOf('await recoverRoadWalletFromCloud()');
+    const writeIdx = sync.indexOf('await syncPendingRoadWallet()', recoverIdx);
+    expect(recoverIdx).toBeGreaterThan(-1);
+    expect(writeIdx).toBeGreaterThan(recoverIdx);
+    expect(sync).toMatch(
+      /void runRoadWalletCloudCycle\(\);\s*\};\s*if \(useRoadWalletStore\.persist\.hasHydrated\(\)\) run\(\);/,
+    );
+    expect(sync).toMatch(/cycleInFlight/);
+    expect(sync).not.toMatch(/setInterval/);
+  });
+
+  it('recovery uses only owner-scoped RLS reads and the private documents bucket — no service role, no SECURITY DEFINER', () => {
+    expect(recovery).toMatch(/\.eq\('owner_id', userId\)/);
+    expect(recovery).toMatch(/storage\.from\(bucket\)\.download\(path\)/);
+    expect(recovery).not.toMatch(/service_role|serviceRole|security definer|rpc\(/i);
+    expect(recovery).toMatch(/fromRemoteDocumentRow\(row, userId\)/);
+    expect(recovery).toMatch(/fromRemoteVersionRow\(row, userId, parent\)/);
+  });
+
+  it('copy describes Driver Pro as cloud backup and recovery, never a bare "backs them up"', () => {
+    for (const src of [wallet, detail, add, read('src/domain/paywallTriggers.ts')]) {
+      expect(src).not.toMatch(/backs them up|backs up your/);
+    }
+    expect(wallet).toMatch(/private cloud backup and recovery/);
   });
 });
 
