@@ -5,8 +5,8 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button, Card, Pill, RouteBand, Screen } from '@/components';
-import { syncCapture } from '@/data/captureSync';
-import { SCAN_TYPES, ScanTypeSlug } from '@/domain';
+import { createCapture } from '@/data/captureSync';
+import { CaptureSyncStatus, SCAN_TYPES, ScanTypeSlug } from '@/domain';
 import { OcrEngineName, parseReceipt, recognizeDocument } from '@/ocr';
 import { useAuthStore } from '@/store/auth';
 import { useCapturesStore } from '@/store/captures';
@@ -34,6 +34,7 @@ export default function ScanScreen() {
   const [stage, setStage] = useState<Stage>('picker');
   const [scanType, setScanType] = useState<ScanTypeSlug>('receipt');
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [savedStatus, setSavedStatus] = useState<CaptureSyncStatus>('local_only');
   const signedIn = useAuthStore((s) => s.status === 'signed_in');
 
   const runOcr = async (imageUri: string | null, forceStub: boolean) => {
@@ -95,12 +96,17 @@ export default function ScanScreen() {
         <ReviewSheet
           draft={draft}
           onChange={setDraft}
-          onSaved={() => setStage('saved')}
+          onSaved={(status) => {
+            setSavedStatus(status);
+            setStage('saved');
+          }}
           onCancel={reset}
         />
       )}
 
-      {stage === 'saved' && <SavedConfirm onAnother={reset} signedIn={signedIn} />}
+      {stage === 'saved' && (
+        <SavedConfirm onAnother={reset} signedIn={signedIn} status={savedStatus} />
+      )}
     </Screen>
   );
 }
@@ -241,16 +247,15 @@ function ReviewSheet({
 }: {
   draft: Draft;
   onChange: (d: Draft) => void;
-  onSaved: () => void;
+  onSaved: (status: CaptureSyncStatus) => void;
   onCancel: () => void;
 }) {
-  const addCapture = useCapturesStore((s) => s.addCapture);
-  const markSynced = useCapturesStore((s) => s.markSynced);
-  const userId = useAuthStore((s) => s.userId);
   const isFuel = draft.scanType === 'fuel' || draft.gallons !== '';
 
   const save = () => {
-    const id = addCapture({
+    // Owner binding, initial sync state and any immediate upload are decided
+    // by the cloud-sync boundary, never by this screen.
+    const id = createCapture({
       scanType: draft.scanType,
       imageUri: draft.imageUri,
       engine: draft.engine,
@@ -260,16 +265,8 @@ function ReviewSheet({
       date: draft.date.trim() || null,
       gallons: draft.gallons ? Number(draft.gallons) : null,
     });
-    if (userId) {
-      // Immediate best-effort sync; on failure it stays queued for the backfill.
-      const capture = useCapturesStore.getState().captures.find((c) => c.id === id);
-      if (capture) {
-        syncCapture(userId, capture)
-          .then((remoteScanId) => markSynced(id, remoteScanId))
-          .catch(() => {});
-      }
-    }
-    onSaved();
+    const saved = useCapturesStore.getState().captures.find((c) => c.id === id);
+    onSaved(saved?.status ?? 'local_only');
   };
 
   return (
@@ -352,18 +349,53 @@ function Field({
   );
 }
 
-function SavedConfirm({ onAnother, signedIn }: { onAnother: () => void; signedIn: boolean }) {
+/** Post-save copy reflects the capture's real sync state, not just sign-in. */
+function savedCopy(
+  status: CaptureSyncStatus,
+  signedIn: boolean,
+): { label: string; title: string; body: string } {
+  switch (status) {
+    case 'synced':
+    case 'pending_sync':
+      return {
+        label: 'Backing up',
+        title: 'Filed and backing up.',
+        body: 'Saved on this device and syncing to your account — nothing is lost if you close the app.',
+      };
+    case 'local_only':
+      return signedIn
+        ? {
+            label: 'On this device',
+            title: 'Filed to your device.',
+            body: 'Stored on this device. Cloud backup is part of Driver Pro — nothing is lost if you close the app.',
+          }
+        : {
+            label: 'On this device',
+            title: 'Filed to your device.',
+            body: 'Stored on this device. Sign in from onboarding to back it up — nothing is lost if you close the app.',
+          };
+    default: {
+      const exhaustive: never = status;
+      return exhaustive;
+    }
+  }
+}
+
+function SavedConfirm({
+  onAnother,
+  signedIn,
+  status,
+}: {
+  onAnother: () => void;
+  signedIn: boolean;
+  status: CaptureSyncStatus;
+}) {
+  const copy = savedCopy(status, signedIn);
   return (
     <>
-      <Card dark label="Saved" labelRight={signedIn ? 'Backing up' : 'Offline queue'}>
-        <Text style={styles.savedTitle}>
-          {signedIn ? 'Filed and backing up.' : 'Filed to your device.'}
-        </Text>
-        <Text style={styles.savedCopy}>
-          {signedIn
-            ? 'Saved on this device and syncing to your account — nothing is lost if you close the app.'
-            : 'Stored on this device. Sign in from onboarding to back it up — nothing is lost if you close the app.'}
-        </Text>
+      <Card dark label="Saved" labelRight={copy.label}>
+        <Text style={styles.savedTitle}>{copy.title}</Text>
+        <Text style={styles.savedCopy}>{copy.body}</Text>
       </Card>
       <View style={{ marginTop: spacing.lg }}>
         <Button label="Scan Another" onPress={onAnother} />

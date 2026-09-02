@@ -4,7 +4,14 @@ import { Alert, Share, StyleSheet, Text, View } from 'react-native';
 
 import { Card, Pill, RouteBand, Screen } from '@/components';
 import { isFeatureEnabled } from '@/config/flags';
-import { buildCsv, CsvColumn, monthRange, SCAN_TYPES, summarizeRange } from '@/domain';
+import {
+  buildCsv,
+  captureSyncLabel,
+  CsvColumn,
+  monthRange,
+  SCAN_TYPES,
+  summarizeRange,
+} from '@/domain';
 import { Capture, useCapturesStore } from '@/store/captures';
 import { colors, spacing, type } from '@/theme';
 
@@ -19,7 +26,7 @@ const CAPTURE_CSV_COLUMNS: CsvColumn<Capture>[] = [
   { header: 'Vendor', value: (c) => c.vendor },
   { header: 'Amount (USD)', value: (c) => c.totalUsd },
   { header: 'Gallons', value: (c) => c.gallons },
-  { header: 'Synced', value: (c) => (c.status === 'synced' ? 'yes' : 'pending') },
+  { header: 'Synced', value: (c) => captureSyncLabel(c.status) },
 ];
 
 /**

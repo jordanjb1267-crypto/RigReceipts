@@ -57,14 +57,14 @@ gates and the `basic_external_intelligence` data entitlement (DB mirror:
 `carrier_packet_history_enabled`, `multi_unit_documents_enabled` all default
 `off`.
 
-| Capability | Free | Driver Pro | Owner-Operator | Fleet Lite | Lifetime |
-| --- | --- | --- | --- | --- | --- |
-| `roadWalletBasic`, `quickPresent` (local/offline, no document-count gate) | yes | yes | yes | yes | yes |
-| `unlimitedRoadWallet`, `cloudDocumentBackup`, `documentExpiryAlerts`, `savedPresentationSets`, `documentShareExport` | no | yes | yes | yes | yes |
-| `carrierProfile`, `carrierPacketBuilder`, `carrierPacketTemplates`, `carrierPacketHistory` | no | no | yes | yes | yes |
-| `multiTruckDocumentWallet`, `fleetDocumentStatus`, `multiUnitPacketSupplements` | no | no | no | yes | no |
-| `basic_community_intelligence`, `basic_external_intelligence` (data) | yes | yes | yes | yes | yes |
-| `licensed_market_intelligence`, `high_volume_market_intelligence` (data) | no | no | no | no | no |
+| Capability                                                                                                           | Free | Driver Pro | Owner-Operator | Fleet Lite | Lifetime |
+| -------------------------------------------------------------------------------------------------------------------- | ---- | ---------- | -------------- | ---------- | -------- |
+| `roadWalletBasic`, `quickPresent` (local/offline, no document-count gate)                                            | yes  | yes        | yes            | yes        | yes      |
+| `unlimitedRoadWallet`, `cloudDocumentBackup`, `documentExpiryAlerts`, `savedPresentationSets`, `documentShareExport` | no   | yes        | yes            | yes        | yes      |
+| `carrierProfile`, `carrierPacketBuilder`, `carrierPacketTemplates`, `carrierPacketHistory`                           | no   | no         | yes            | yes        | yes      |
+| `multiTruckDocumentWallet`, `fleetDocumentStatus`, `multiUnitPacketSupplements`                                      | no   | no         | no             | yes        | no       |
+| `basic_community_intelligence`, `basic_external_intelligence` (data)                                                 | yes  | yes        | yes            | yes        | yes      |
+| `licensed_market_intelligence`, `high_volume_market_intelligence` (data)                                             | no   | no         | no             | no         | no       |
 
 `basicDestinationOutlook` is defined at `free` for the frozen future contract
 only; no external-data feature is implemented in Passes 0–3.

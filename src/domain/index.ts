@@ -26,6 +26,31 @@ export {
   resolvePaywallTrigger,
 } from './paywallTriggers';
 export type { PaywallTrigger } from './paywallTriggers';
+export {
+  cloudCapabilityAvailable,
+  authorizeCloudSync,
+  syncBindingFor,
+  reconcileSyncStatus,
+  captureSyncLabel,
+} from './cloudSync';
+export type {
+  CloudCapability,
+  CaptureSyncStatus,
+  CloudSyncContext,
+  CloudSyncDenial,
+  CloudSyncDecision,
+  SyncBinding,
+  SyncableRecord,
+} from './cloudSync';
+export {
+  STORAGE_CLASSES,
+  STORAGE_BUCKETS,
+  SCAN_TYPE_STORAGE_CLASS,
+  bucketForStorageClass,
+  storageClassForScanType,
+  bucketForScanType,
+} from './storageClass';
+export type { StorageClass, StorageBucket } from './storageClass';
 export { EQUIPMENT_TYPES, equipmentLabel } from './equipment';
 export type { EquipmentType } from './equipment';
 export {
