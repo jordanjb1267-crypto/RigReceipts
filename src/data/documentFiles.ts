@@ -7,7 +7,9 @@ import {
   markCaching,
   markError,
   markReady,
+  newOpaqueId,
   resolveFileType,
+  SecureRandomBytes,
   sha256Hex,
   sniffFileKind,
 } from '@/domain';
@@ -238,6 +240,14 @@ interface FileSystemModule {
 interface CryptoModule {
   CryptoDigestAlgorithm: { SHA256: string };
   digest(algorithm: string, data: Uint8Array): Promise<ArrayBuffer>;
+  /**
+   * Fills the array from the native CSPRNG with no JS fallback (SDK 57 source:
+   * `ExpoCrypto.getRandomValues(typedArray)`; throws when the native module is
+   * missing). NOTE: `getRandomBytes()` is deliberately NOT used — its SDK 57
+   * implementation falls back to `Math.random` under `__DEV__` with remote
+   * debugging enabled.
+   */
+  getRandomValues?<T extends Uint8Array>(typedArray: T): T;
 }
 interface SharingModule {
   isAvailableAsync(): Promise<boolean>;
@@ -273,6 +283,56 @@ function loadSharing(): SharingModule | null {
     return null;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Secure opaque identifiers (runtime CSPRNG, fail-closed)
+// ---------------------------------------------------------------------------
+
+export class SecureRandomUnavailableError extends Error {
+  constructor(detail: string) {
+    super(`secure random source unavailable: ${detail}`);
+    this.name = 'SecureRandomUnavailableError';
+  }
+}
+
+type GlobalCrypto = { getRandomValues?: (array: Uint8Array) => Uint8Array } | undefined;
+
+/**
+ * Cryptographically secure random bytes, or an explicit failure. Order:
+ *   1. `expo-crypto` `getRandomValues` — the native CSPRNG, no JS fallback;
+ *   2. `globalThis.crypto.getRandomValues` when genuinely present (Web Crypto /
+ *      Node / the Expo winter runtime polyfill backed by expo-crypto);
+ *   3. otherwise throw {@link SecureRandomUnavailableError}.
+ * Never `Math.random`, never time-based, never sequential.
+ */
+export const secureRandomBytes: SecureRandomBytes = (byteCount) => {
+  const out = new Uint8Array(byteCount);
+
+  const expoCrypto = loadCrypto();
+  if (expoCrypto && typeof expoCrypto.getRandomValues === 'function') {
+    try {
+      const filled = expoCrypto.getRandomValues(out);
+      if (filled instanceof Uint8Array && filled.length === byteCount) return filled;
+      throw new Error('expo-crypto returned an unexpected buffer');
+    } catch (err) {
+      throw new SecureRandomUnavailableError(
+        err instanceof Error ? err.message : 'expo-crypto getRandomValues failed',
+      );
+    }
+  }
+
+  const webCrypto = (globalThis as { crypto?: GlobalCrypto }).crypto;
+  if (webCrypto && typeof webCrypto.getRandomValues === 'function') {
+    const filled = webCrypto.getRandomValues(out);
+    if (filled instanceof Uint8Array && filled.length === byteCount) return filled;
+    throw new SecureRandomUnavailableError('globalThis.crypto returned an unexpected buffer');
+  }
+
+  throw new SecureRandomUnavailableError('no CSPRNG (expo-crypto or globalThis.crypto) found');
+};
+
+/** New 128-bit random opaque id for document / version paths. Fails closed. */
+export const newSecureOpaqueId = (): string => newOpaqueId(secureRandomBytes);
 
 const UTI_FOR_MIME: Record<string, string> = {
   'application/pdf': 'com.adobe.pdf',

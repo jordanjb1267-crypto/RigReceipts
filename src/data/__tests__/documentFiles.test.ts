@@ -1,23 +1,80 @@
-import { notCached, sha256Hex } from '@/domain';
+import { isOpaqueId, notCached, sha256Hex } from '@/domain';
+import * as expoCryptoMock from 'expo-crypto';
 
 import {
   cacheDocumentFile,
   DocumentFileStore,
   ExpoDocumentFileStore,
   MemoryDocumentFileStore,
+  newSecureOpaqueId,
   reverifyDocumentFile,
+  secureRandomBytes,
+  SecureRandomUnavailableError,
   verifyBytes,
 } from '../documentFiles';
+
+// Node fs, required lazily + typed locally (the app tsconfig loads no Node types).
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const nodeFs = require('node:fs') as { readFileSync(path: string, enc: string): string };
+
+interface CryptoMockState {
+  /** When null, the mocked module exposes no getRandomValues at all. */
+  fill: ((array: Uint8Array) => Uint8Array) | null;
+  getRandomBytesCalls: number;
+}
+
+// Controllable stand-in for the native module. `getRandomBytes` is present but
+// must never be called (its SDK 57 implementation can fall back to Math.random).
+jest.mock('expo-crypto', () => {
+  const state: CryptoMockState = { fill: null, getRandomBytesCalls: 0 };
+  const mod = {
+    __state: state,
+    CryptoDigestAlgorithm: { SHA256: 'SHA-256' },
+    digest: async () => new ArrayBuffer(32),
+    getRandomBytes: () => {
+      state.getRandomBytesCalls++;
+      throw new Error('getRandomBytes must not be used');
+    },
+  };
+  Object.defineProperty(mod, 'getRandomValues', {
+    enumerable: true,
+    get: () => (state.fill ? (a: Uint8Array) => state.fill!(a) : undefined),
+  });
+  return mod;
+});
+
+const cryptoState = (expoCryptoMock as unknown as { __state: CryptoMockState }).__state;
 
 const DOC = 'doc_Ab12Cd34Ef56Gh78';
 const VER = 'ver_Zz98Yy87Xx76Ww65';
 const VER2 = 'ver_Qq11Rr22Ss33Tt44';
+
+const ascii = (s: string) => Array.from(s, (c) => c.charCodeAt(0));
+const ftypBox = (major: string, compatible: string[]) => {
+  const size = 16 + compatible.length * 4;
+  return new Uint8Array([
+    0,
+    0,
+    0,
+    size,
+    ...ascii('ftyp'),
+    ...ascii(major),
+    0,
+    0,
+    0,
+    0,
+    ...compatible.flatMap(ascii),
+    ...new Array(16).fill(0),
+  ]);
+};
 
 const JPEG = new Uint8Array([
   0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 1, 2, 3, 4,
 ]);
 const PDF = new TextEncoder().encode('%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF\n');
 const EMPTY = new Uint8Array([]);
+const HEIC = ftypBox('heic', ['mif1', 'heic']);
+const MP4 = ftypBox('isom', ['isom', 'mp42', 'avc1']);
 
 let store: MemoryDocumentFileStore;
 
@@ -27,6 +84,10 @@ beforeEach(() => {
   store.addSource('file:///tmp/picker/coi.pdf', PDF, 'application/pdf');
   store.addSource('file:///tmp/picker/empty.jpg', EMPTY, 'image/jpeg');
   store.addSource('file:///tmp/picker/mislabelled.jpg', PDF, 'image/jpeg');
+  store.addSource('file:///tmp/picker/photo.heic', HEIC, 'image/heic');
+  store.addSource('file:///tmp/picker/video-renamed.heic', MP4, 'image/heic');
+  cryptoState.fill = null;
+  cryptoState.getRandomBytesCalls = 0;
 });
 
 describe('verifyBytes', () => {
@@ -117,6 +178,22 @@ describe('MemoryDocumentFileStore', () => {
     ).rejects.toThrow(/CONTENT_MISMATCH/);
   });
 
+  it('imports a genuine HEIC but rejects an MP4 renamed to .heic with an image/heic declaration', async () => {
+    const heic = await store.importFile(
+      { uri: 'file:///tmp/picker/photo.heic', mimeType: 'image/heic', name: 'IMG_0042.HEIC' },
+      { documentId: DOC, versionId: VER },
+    );
+    expect(heic).toMatchObject({ ext: 'heic', mimeType: 'image/heic', kind: 'IMAGE' });
+
+    await expect(
+      store.importFile(
+        { uri: 'file:///tmp/picker/video-renamed.heic', mimeType: 'image/heic', name: 'clip.heic' },
+        { documentId: DOC, versionId: VER2 },
+      ),
+    ).rejects.toThrow(/CONTENT_MISMATCH/);
+    expect(await store.exists(`road-wallet/${DOC}/${VER2}.heic`)).toBe(false);
+  });
+
   it('rejects a missing source', async () => {
     await expect(
       store.importFile({ uri: 'file:///nope' }, { documentId: DOC, versionId: VER }),
@@ -184,6 +261,119 @@ describe('MemoryDocumentFileStore', () => {
       /unavailable/,
     );
     expect(store.shared).toHaveLength(1);
+  });
+});
+
+describe('secure opaque ids at runtime (C4.1)', () => {
+  const withGlobalCrypto = (value: unknown, fn: () => void) => {
+    const g = globalThis as { crypto?: unknown };
+    const original = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+    Object.defineProperty(g, 'crypto', { value, configurable: true, writable: true });
+    try {
+      fn();
+    } finally {
+      if (original) Object.defineProperty(globalThis, 'crypto', original);
+      else delete g.crypto;
+    }
+  };
+
+  it('uses expo-crypto getRandomValues (native CSPRNG) when present and never getRandomBytes', () => {
+    let calls = 0;
+    cryptoState.fill = (a) => {
+      calls++;
+      for (let i = 0; i < a.length; i++) a[i] = (i * 17 + 3) & 0xff;
+      return a;
+    };
+    const rnd = jest.spyOn(Math, 'random');
+    const id = newSecureOpaqueId();
+    expect(calls).toBe(1);
+    expect(cryptoState.getRandomBytesCalls).toBe(0);
+    expect(rnd).not.toHaveBeenCalled();
+    rnd.mockRestore();
+    expect(id).toHaveLength(22);
+    expect(isOpaqueId(id)).toBe(true);
+    expect(newSecureOpaqueId()).toBe(id); // deterministic fill => deterministic id
+    expect(secureRandomBytes(16)).toEqual(
+      new Uint8Array(Array.from({ length: 16 }, (_, i) => (i * 17 + 3) & 0xff)),
+    );
+  });
+
+  it('falls through to globalThis.crypto.getRandomValues only when genuinely present', () => {
+    cryptoState.fill = null;
+    let used = 0;
+    withGlobalCrypto(
+      {
+        getRandomValues: (a: Uint8Array) => {
+          used++;
+          a.fill(0xab);
+          return a;
+        },
+      },
+      () => {
+        const id = newSecureOpaqueId();
+        expect(used).toBe(1);
+        expect(id).toBe('q6urq6urq6urq6urq6urqw');
+        expect(isOpaqueId(id)).toBe(true);
+      },
+    );
+  });
+
+  it('fails closed when no CSPRNG is available — no Math.random, no time, no counter', () => {
+    cryptoState.fill = null;
+    // Spy only around the direct calls: Jest's own `toThrow` matcher uses
+    // Math.random internally (source-map quicksort) while symbolicating stacks.
+    const rnd = jest.spyOn(Math, 'random');
+    const now = jest.spyOn(Date, 'now');
+    const errors: unknown[] = [];
+    withGlobalCrypto(undefined, () => {
+      for (const fn of [newSecureOpaqueId, () => secureRandomBytes(16)]) {
+        try {
+          fn();
+          errors.push(null);
+        } catch (e) {
+          errors.push(e);
+        }
+      }
+    });
+    withGlobalCrypto({}, () => {
+      try {
+        newSecureOpaqueId();
+        errors.push(null);
+      } catch (e) {
+        errors.push(e);
+      }
+    });
+    expect(rnd).not.toHaveBeenCalled();
+    expect(now).not.toHaveBeenCalled();
+    rnd.mockRestore();
+    now.mockRestore();
+
+    expect(errors).toHaveLength(3);
+    for (const e of errors) {
+      expect(e).toBeInstanceOf(SecureRandomUnavailableError);
+      expect((e as Error).message).toMatch(/no CSPRNG/);
+    }
+  });
+
+  it('fails closed when the native source throws or returns a wrong-sized buffer', () => {
+    cryptoState.fill = () => {
+      throw new Error('native module missing');
+    };
+    expect(() => newSecureOpaqueId()).toThrow(SecureRandomUnavailableError);
+    expect(() => newSecureOpaqueId()).toThrow(/native module missing/);
+
+    cryptoState.fill = () => new Uint8Array(4);
+    expect(() => newSecureOpaqueId()).toThrow(SecureRandomUnavailableError);
+  });
+
+  it('contains no Math.random fallback anywhere in the file substrate source', () => {
+    const stripComments = (src: string) =>
+      src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+    for (const path of ['src/domain/documentFiles.ts', 'src/data/documentFiles.ts']) {
+      const code = stripComments(nodeFs.readFileSync(path, 'utf8'));
+      expect(code).not.toMatch(/Math\.random/);
+      expect(code).not.toMatch(/getRandomBytes\s*\(/);
+    }
   });
 });
 

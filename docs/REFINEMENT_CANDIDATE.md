@@ -253,7 +253,7 @@ anything with whitespace/punctuation (names, CDL/EIN/VIN/policy numbers) is
 rejected at path construction. Extension is an allowlisted lowercase token
 (`jpg`, `png`, `heic`, `webp`, `pdf`; unknown → `bin`, never coerced to an
 image). Original filenames are used only to derive an extension and are never
-stored. `newOpaqueId()` produces 22-char ids from `crypto.getRandomValues`.
+stored. Identifiers are 128-bit random base64url ids (see C4.1 below).
 
 ### Readiness semantics (`src/domain/documentFiles.ts`)
 
@@ -283,6 +283,69 @@ Only **Share/Export** via the platform share sheet (`expo-sharing`
 exposed, and only after `shareCapability()` reports availability. There is
 deliberately no "Open in system viewer" action: a genuine iOS + Android
 external-open behaviour has not been validated (see C5).
+
+## C4.1 — file-substrate hardening (pre-Pass 1)
+
+### H1 — opaque identifiers: 128-bit random, base64url, fail-closed
+
+`newOpaqueId(source)` (`src/domain/documentFiles.ts`) takes **exactly 16
+cryptographically secure random bytes** from an injected source and encodes
+them as RFC 4648 §5 base64url **without `=` padding** → a 22-character id in
+`[A-Za-z0-9_-]`. The random input is used directly (no modulo mapping into a
+smaller alphabet); the identifier therefore carries 128 bits of randomness.
+The function has no default source and no fallback: a missing source, a source
+that throws, or a wrong-length buffer throws. Deterministic byte sources
+remain injectable for pure unit tests (`opaqueIdFromBytes` / `newOpaqueId`).
+
+Runtime source — `secureRandomBytes` / `newSecureOpaqueId`
+(`src/data/documentFiles.ts`), in order:
+
+1. `expo-crypto` **`getRandomValues(typedArray)`** — the SDK 57 implementation
+   calls the native module directly (`ExpoCrypto.getRandomValues`) with no JS
+   fallback and throws when the native module is absent.
+   `getRandomBytes()` is **deliberately not used**: its SDK 57 source falls back
+   to `Math.random` under `__DEV__` when remote debugging is active.
+2. `globalThis.crypto.getRandomValues` — only when genuinely present as a
+   function.
+3. Otherwise **`SecureRandomUnavailableError`** is thrown. Never `Math.random`,
+   never `Date.now` entropy, never counters.
+
+A static test asserts the substrate source contains no `Math.random` or
+`getRandomBytes(` call; runtime tests spy on `Math.random` / `Date.now` around
+id generation.
+
+### H2 — bounded HEIC/HEIF content sniffing
+
+`sniffFileKind` no longer treats a generic ISO-BMFF `ftyp` box as an image.
+`isHeifImage(bytes)` parses `[size:4]['ftyp'][major:4][minor:4][compatible…]`
+and accepts only when:
+
+- the box is well-formed and complete (`size ≥ 16`, `size % 4 === 0`,
+  `size ≤ bytes.length`; extended-size `1` / unsized `0` / truncated boxes are
+  malformed → `UNKNOWN`);
+- the major brand **or** a compatible brand is an HEVC still-image brand
+  (`heic`, `heix`, `hevc`, `hevx`, `heim`, `heis`, `hevm`, `hevs`);
+- **no** AVIF brand (`avif`, `avis`) appears anywhere in the brand list.
+
+Structural brands (`mif1`, `msf1`) alone are not sufficient. Generic
+containers (`isom`, `mp41`, `mp42`, `iso2`, `qt  `, `M4A `, `M4V `) are
+`UNKNOWN` and fail `contentMatchesKind('IMAGE', …)`, so an MP4 renamed
+`.heic` and declared `image/heic` fails import verification
+(`CONTENT_MISMATCH`). AVIF is not a supported type and is never treated as
+HEIC. JPEG (`FF D8 FF`), PNG (`89 50 4E 47`), WebP (`RIFF…WEBP`) and PDF
+(`%PDF-`) detection is unchanged; the extension allowlist is unchanged.
+
+### H3 — share-time integrity rule (frozen for Pass 1 / Pass 1B)
+
+> UI/domain code must not share/export a Road Wallet file merely because the
+> path exists. Before an explicit user share/export of a stored document
+> version, the current physical file must be reverified against that version's
+> expected SHA-256 and expected file kind.
+
+`DocumentFileStore.share()` stays a low-level, path-based primitive in C4.1.
+Pass 1 / Pass 1B enforce the rule in the higher-level document-version
+workflow (`reverifyDocumentFile` with `expectedSha256` + `expectedKind` must
+return READY immediately before `share()` is invoked).
 
 ## C5 — PDF feasibility (probe only; nothing added to the branch)
 

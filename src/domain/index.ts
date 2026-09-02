@@ -64,11 +64,16 @@ export {
   extensionFromName,
   resolveFileType,
   sniffFileKind,
+  isHeifImage,
   contentMatchesKind,
   DOCUMENT_FILES_ROOT,
   isOpaqueId,
   documentFileRelativePath,
   parseDocumentFileRelativePath,
+  OPAQUE_ID_BYTES,
+  OPAQUE_ID_LENGTH,
+  base64UrlEncode,
+  opaqueIdFromBytes,
   newOpaqueId,
 } from './documentFiles';
 export type {
@@ -78,6 +83,7 @@ export type {
   FileCacheEntry,
   DocumentFileKind,
   ResolvedFileType,
+  SecureRandomBytes,
 } from './documentFiles';
 export { EQUIPMENT_TYPES, equipmentLabel } from './equipment';
 export type { EquipmentType } from './equipment';

@@ -196,16 +196,54 @@ export function sniffFileKind(bytes: Uint8Array): DocumentFileKind | 'UNKNOWN' {
   ) {
     return 'IMAGE'; // RIFF....WEBP
   }
-  if (
-    bytes.length >= 12 &&
-    bytes[4] === 0x66 &&
-    bytes[5] === 0x74 &&
-    bytes[6] === 0x79 &&
-    bytes[7] === 0x70
-  ) {
-    return 'IMAGE'; // ISO BMFF 'ftyp' (HEIC/HEIF)
-  }
+  if (isHeifImage(bytes)) return 'IMAGE';
   return 'UNKNOWN';
+}
+
+/**
+ * HEIC/HEIF still-image brands (ISO/IEC 23008-12). `mif1`/`msf1` are structural
+ * brands shared with AVIF and image sequences, so they are deliberately not
+ * sufficient on their own; an HEVC-coded image brand must be present.
+ */
+const HEIC_IMAGE_BRANDS: ReadonlySet<string> = new Set([
+  'heic',
+  'heix',
+  'hevc',
+  'hevx',
+  'heim',
+  'heis',
+  'hevm',
+  'hevs',
+]);
+
+/** AVIF brands — not a supported type; never silently treated as HEIC. */
+const AVIF_BRANDS: ReadonlySet<string> = new Set(['avif', 'avis']);
+
+const fourcc = (bytes: Uint8Array, offset: number): string =>
+  String.fromCharCode(bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]);
+
+/**
+ * Bounded HEIC/HEIF detector over the ISO-BMFF `ftyp` box:
+ * `[size:4][ 'ftyp' ][major:4][minor:4][compatible:4...]`.
+ *
+ * Accepts only when the box is well-formed and complete, the major or a
+ * compatible brand is an HEVC image brand, and no AVIF brand appears anywhere.
+ * Generic containers (`isom`, `mp41`, `mp42`, `iso2`, `qt  `, ...) that merely
+ * carry `ftyp` are rejected.
+ */
+export function isHeifImage(bytes: Uint8Array): boolean {
+  if (bytes.length < 16) return false;
+  if (fourcc(bytes, 4) !== 'ftyp') return false;
+  const boxSize = ((bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3]) >>> 0;
+  // Extended (size === 1) or unsized (size === 0) boxes, undersized boxes,
+  // misaligned brand lists and truncated boxes are all treated as malformed.
+  if (boxSize < 16 || boxSize % 4 !== 0 || boxSize > bytes.length) return false;
+
+  const brands: string[] = [fourcc(bytes, 8)];
+  for (let offset = 16; offset + 4 <= boxSize; offset += 4) brands.push(fourcc(bytes, offset));
+
+  if (brands.some((b) => AVIF_BRANDS.has(b))) return false;
+  return brands.some((b) => HEIC_IMAGE_BRANDS.has(b));
 }
 
 /**
@@ -273,26 +311,70 @@ export function parseDocumentFileRelativePath(
   return m ? { documentId: m[1], versionId: m[2], ext: m[3] } : null;
 }
 
-const OPAQUE_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+// ---------------------------------------------------------------------------
+// Opaque identifiers — 128-bit random, base64url, fail-closed
+// ---------------------------------------------------------------------------
+
+/** Random input per identifier: 16 bytes = 128 bits. */
+export const OPAQUE_ID_BYTES = 16;
+/** base64url of 16 bytes without padding is exactly 22 characters. */
+export const OPAQUE_ID_LENGTH = 22;
+
+const BASE64URL_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+
+/** RFC 4648 §5 base64url without `=` padding. Output stays within `[A-Za-z0-9_-]`. */
+export function base64UrlEncode(bytes: Uint8Array): string {
+  let out = '';
+  let i = 0;
+  for (; i + 3 <= bytes.length; i += 3) {
+    const n = (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2];
+    out +=
+      BASE64URL_ALPHABET[(n >>> 18) & 63] +
+      BASE64URL_ALPHABET[(n >>> 12) & 63] +
+      BASE64URL_ALPHABET[(n >>> 6) & 63] +
+      BASE64URL_ALPHABET[n & 63];
+  }
+  const rest = bytes.length - i;
+  if (rest === 1) {
+    const n = bytes[i] << 16;
+    out += BASE64URL_ALPHABET[(n >>> 18) & 63] + BASE64URL_ALPHABET[(n >>> 12) & 63];
+  } else if (rest === 2) {
+    const n = (bytes[i] << 16) | (bytes[i + 1] << 8);
+    out +=
+      BASE64URL_ALPHABET[(n >>> 18) & 63] +
+      BASE64URL_ALPHABET[(n >>> 12) & 63] +
+      BASE64URL_ALPHABET[(n >>> 6) & 63];
+  }
+  return out;
+}
+
+/** A source of cryptographically secure random bytes. Must throw when it cannot deliver. */
+export type SecureRandomBytes = (byteCount: number) => Uint8Array;
 
 /**
- * Generates an opaque id from a byte source (defaults to `crypto.getRandomValues`
- * when present). Length 22 ≈ 131 bits of entropy.
+ * Encodes exactly {@link OPAQUE_ID_BYTES} random bytes as a 22-character
+ * base64url identifier. Pure; used by tests with deterministic vectors.
  */
-export function newOpaqueId(randomBytes?: (n: number) => Uint8Array): string {
-  const n = 22;
-  const source =
-    randomBytes ??
-    ((count: number) => {
-      const out = new Uint8Array(count);
-      const c = (globalThis as { crypto?: { getRandomValues?: (a: Uint8Array) => Uint8Array } })
-        .crypto;
-      if (c?.getRandomValues) return c.getRandomValues(out);
-      for (let i = 0; i < count; i++) out[i] = Math.floor(Math.random() * 256);
-      return out;
-    });
-  const bytes = source(n);
-  let id = '';
-  for (let i = 0; i < n; i++) id += OPAQUE_ALPHABET[bytes[i] % OPAQUE_ALPHABET.length];
+export function opaqueIdFromBytes(bytes: Uint8Array): string {
+  if (!(bytes instanceof Uint8Array) || bytes.length !== OPAQUE_ID_BYTES) {
+    throw new Error(`opaque id requires exactly ${OPAQUE_ID_BYTES} random bytes`);
+  }
+  const id = base64UrlEncode(bytes);
+  if (id.length !== OPAQUE_ID_LENGTH || !isOpaqueId(id)) {
+    throw new Error('opaque id encoding produced an invalid identifier');
+  }
   return id;
+}
+
+/**
+ * Generates a 128-bit random opaque identifier from the given secure byte
+ * source. There is deliberately no default source and no fallback: callers
+ * inject a CSPRNG (see `newSecureOpaqueId` in `src/data/documentFiles.ts`) or
+ * a deterministic vector in tests. Any source failure fails closed.
+ */
+export function newOpaqueId(randomBytes: SecureRandomBytes): string {
+  if (typeof randomBytes !== 'function') {
+    throw new Error('newOpaqueId requires a secure random byte source');
+  }
+  return opaqueIdFromBytes(randomBytes(OPAQUE_ID_BYTES));
 }
