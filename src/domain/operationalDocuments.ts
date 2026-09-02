@@ -423,28 +423,38 @@ export function validateNewVersion(
   if (siblings.some((v) => v.versionNumber === candidate.versionNumber)) {
     throw new Error('duplicate versionNumber within document');
   }
-  if (candidate.supersedesVersionId !== null) {
-    const prior = siblings.find((v) => v.id === candidate.supersedesVersionId);
-    if (!prior)
-      throw new Error('supersedesVersionId must reference a version of the same document');
-    if (prior.versionNumber >= candidate.versionNumber) {
-      throw new Error('supersedesVersionId must reference a prior version');
+  // Chain continuity (Pass 1B-H0): exactly 1 → 2 → 3 …, each superseding the
+  // immediately prior CURRENT version. No gaps, no branching, no odd base.
+  const current = currentVersion(siblings, document.id);
+  if (!current) {
+    if (candidate.versionNumber !== 1) throw new Error('the first version must be version 1');
+    if (candidate.supersedesVersionId !== null) {
+      throw new Error('the first version must not supersede anything');
     }
-  } else if (siblings.length > 0) {
+    return;
+  }
+  if (candidate.versionNumber !== current.versionNumber + 1) {
+    throw new Error(
+      `replacement must be version ${current.versionNumber + 1} (current is ${current.versionNumber})`,
+    );
+  }
+  if (candidate.supersedesVersionId !== current.id) {
     throw new Error('a replacement version must supersede the current version');
   }
 }
 
 /**
  * Deterministic rebuild of one document's persisted version chain (Pass 1A.1
- * H3). Input versions must already be structurally sound and belong to this
- * document. Rules, in order:
+ * H3, tightened in Pass 1B-H0). Input versions must already be structurally
+ * sound and belong to this document. A valid chain is EXACTLY
+ * `1 → 2 → 3 …`: version 1 has no supersession, and every version N > 1 has
+ * `versionNumber = N-1 + 1` and `supersedesVersionId = previous.id`. Rules:
  *   - duplicate version numbers: every entry sharing the number is dropped;
- *   - ascending walk: the lowest retained version must have no supersession;
- *     each later version must supersede an already-retained sibling with a
- *     lower number. The first version that breaks the chain is dropped along
- *     with everything above it, so a corrupt high-numbered entry can never
- *     become "current".
+ *   - the chain must begin at version 1 with `supersedesVersionId = null`;
+ *   - each next version must be contiguous and supersede the immediately
+ *     prior retained version;
+ *   - the first gap/break truncates that version and everything above it, so a
+ *     corrupt or out-of-sequence entry can never become "current".
  */
 export function rebuildVersionChain(versions: readonly DocumentVersion[]): DocumentVersion[] {
   const counts = new Map<number, number>();
@@ -455,13 +465,13 @@ export function rebuildVersionChain(versions: readonly DocumentVersion[]): Docum
 
   const retained: DocumentVersion[] = [];
   for (const v of unique) {
-    if (retained.length === 0) {
-      if (v.supersedesVersionId !== null) break;
+    const prev = retained[retained.length - 1];
+    if (!prev) {
+      if (v.versionNumber !== 1 || v.supersedesVersionId !== null) break;
       retained.push(v);
       continue;
     }
-    const prior = retained.find((r) => r.id === v.supersedesVersionId);
-    if (!prior || prior.versionNumber >= v.versionNumber) break;
+    if (v.versionNumber !== prev.versionNumber + 1 || v.supersedesVersionId !== prev.id) break;
     retained.push(v);
   }
   return retained;
@@ -506,6 +516,152 @@ export const visibleDocumentsForSession = (
   documents: readonly OperationalDocument[],
   sessionUserId: string | null,
 ): OperationalDocument[] => documents.filter((d) => isVisibleInSession(d, sessionUserId));
+
+// ---------------------------------------------------------------------------
+// Product-surface projections (Pass 1B) — derived, never stored
+// ---------------------------------------------------------------------------
+
+/**
+ * Backup truth for one document: "backed up" requires BOTH the editable
+ * metadata and the CURRENT version to be synced. Authentication alone proves
+ * nothing.
+ */
+export type BackupState = 'on_device' | 'backing_up' | 'backed_up';
+
+export function backupState(
+  doc: Pick<OperationalDocument, 'cloudStatus'>,
+  current: Pick<DocumentVersion, 'cloudStatus'> | null,
+): BackupState {
+  if (!current) return doc.cloudStatus === 'synced' ? 'backing_up' : 'on_device';
+  if (doc.cloudStatus === 'synced' && current.cloudStatus === 'synced') return 'backed_up';
+  if (doc.cloudStatus === 'pending_sync' || current.cloudStatus === 'pending_sync') {
+    return 'backing_up';
+  }
+  if (doc.cloudStatus === 'synced' || current.cloudStatus === 'synced') return 'backing_up';
+  return 'on_device';
+}
+
+export const BACKUP_STATE_LABEL: Record<BackupState, string> = {
+  on_device: 'On this device',
+  backing_up: 'Backing up',
+  backed_up: 'Backed up',
+};
+
+/** Current-runtime readiness copy. NOT_CACHED is "checking", never "ready". */
+export const READINESS_LABEL: Record<FileCacheEntry['state'], string> = {
+  NOT_CACHED: 'Checking file',
+  CACHING: 'Checking file',
+  READY: 'Ready offline',
+  ERROR: 'File unavailable',
+};
+
+export const VALIDITY_LABEL: Record<ValidityState, string> = {
+  NO_EXPIRATION: 'No expiration',
+  CURRENT: 'Current',
+  EXPIRING_SOON: 'Expiring soon',
+  EXPIRED: 'Expired',
+};
+
+/**
+ * The only place the app talks about compliance — to say it does not judge it.
+ * Screen copy tests allow the words "compliant" / "legally valid" solely here.
+ */
+export const ROAD_WALLET_DISCLAIMER =
+  'RigReceipts stores and organizes your documents. It does not determine whether a document is compliant, legally valid, or accepted by any authority — check that with the issuing agency.';
+
+export interface RoadWalletSummary {
+  totalActive: number;
+  /** Current version physically verified READY in this process. */
+  readyOffline: number;
+  /** Active documents whose current version is not READY (checking or error). */
+  needsFileCheck: number;
+  expiringSoon: number;
+  expired: number;
+  /** Metadata synced AND current version synced. */
+  backedUp: number;
+  archived: number;
+}
+
+/** Real summary from the store + session identity. Never from mock data. */
+export function roadWalletSummary(
+  documents: readonly OperationalDocument[],
+  versions: readonly DocumentVersion[],
+  sessionUserId: string | null,
+  now: Date,
+): RoadWalletSummary {
+  const visible = visibleDocumentsForSession(documents, sessionUserId);
+  const summary: RoadWalletSummary = {
+    totalActive: 0,
+    readyOffline: 0,
+    needsFileCheck: 0,
+    expiringSoon: 0,
+    expired: 0,
+    backedUp: 0,
+    archived: 0,
+  };
+  for (const doc of visible) {
+    if (doc.lifecycle === 'ARCHIVED') {
+      summary.archived++;
+      continue;
+    }
+    summary.totalActive++;
+    const current = currentVersion(versions, doc.id);
+    if (current?.fileCache.state === 'READY') summary.readyOffline++;
+    else summary.needsFileCheck++;
+    const validity = deriveValidity(doc.expiresAt, now);
+    if (validity === 'EXPIRING_SOON') summary.expiringSoon++;
+    if (validity === 'EXPIRED') summary.expired++;
+    if (backupState(doc, current) === 'backed_up') summary.backedUp++;
+  }
+  return summary;
+}
+
+/** Confirmation strength a share/export requires for a sensitivity class. */
+export type SensitiveShareConfirmation =
+  'NONE' | 'PERSONAL_ACKNOWLEDGED' | 'FINANCIAL_ACKNOWLEDGED';
+
+export function requiredShareConfirmation(sensitivity: Sensitivity): SensitiveShareConfirmation {
+  switch (sensitivity) {
+    case 'STANDARD':
+      return 'NONE';
+    case 'PERSONAL_SENSITIVE':
+      return 'PERSONAL_ACKNOWLEDGED';
+    case 'FINANCIAL_SENSITIVE':
+      return 'FINANCIAL_ACKNOWLEDGED';
+    default: {
+      const exhaustive: never = sensitivity;
+      return exhaustive;
+    }
+  }
+}
+
+export function shareConfirmationSatisfies(
+  given: SensitiveShareConfirmation,
+  required: SensitiveShareConfirmation,
+): boolean {
+  const rank: Record<SensitiveShareConfirmation, number> = {
+    NONE: 0,
+    PERSONAL_ACKNOWLEDGED: 1,
+    FINANCIAL_ACKNOWLEDGED: 2,
+  };
+  return rank[given] >= rank[required];
+}
+
+export const SHARE_CONFIRMATION_COPY: Record<
+  Exclude<SensitiveShareConfirmation, 'NONE'>,
+  { title: string; body: string; confirm: string }
+> = {
+  PERSONAL_ACKNOWLEDGED: {
+    title: 'Share a personal document?',
+    body: 'This document may contain personal identity or medical information. Share only with someone you intend to receive it.',
+    confirm: 'Share document',
+  },
+  FINANCIAL_ACKNOWLEDGED: {
+    title: 'Share a financial document?',
+    body: 'This document may contain tax, banking, factoring or other financial information. Confirm that you want to share this exact document.',
+    confirm: 'Yes, share this exact document',
+  },
+};
 
 /** Analytics-safe projection: no title, issuer, reference, dates or ids. */
 export function analyticsSafeDocumentSummary(

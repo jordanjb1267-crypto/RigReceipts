@@ -601,6 +601,103 @@ document/version ids minted in the failing call and only if unsynced. `clear()`
 remains a whole-store maintenance/test primitive and is not connected to
 sign-out or tier changes.
 
+## Pass 1B — Road Wallet product surface
+
+Full product/security notes: `docs/ROAD_WALLET.md`. Flags remain OFF.
+
+### H0 — version chain continuity
+
+`validateNewVersion`: the first version must be exactly 1 with no
+supersession; a replacement must be `current.versionNumber + 1` and supersede
+`current.id`. `rebuildVersionChain`: persisted history must begin at 1,
+proceed contiguously, and each version must supersede the immediately prior
+retained version; the first break truncates it and everything above.
+Lone 999 / lone 2 rejected; `1 → 3` keeps 1; `1 → 2 → 4` keeps 1, 2; v3
+superseding v1 while v2 exists keeps 1, 2. No migration (not cleanly
+expressible relationally; no trigger invented).
+
+### Surface
+
+- Routes `road-wallet`, `add-road-document` (modal), `document-detail`
+  (modal) registered in the root stack; five tabs unchanged. Every route
+  renders through `RoadWalletGate`, which `<Redirect>`s to Reports when
+  `road_wallet_enabled` is off.
+- `initDocumentSync()` wired once in `_layout.tsx` beside `initCaptureSync()`.
+- Board: `RoadWalletWidget` (flag-gated) from `useRoadWalletSummary()` — real
+  store + session + `deriveValidity` + current-runtime READY; never
+  `@/mock/board`. `TabPath = Extract<Href, string>` (no casts).
+- Reports: "Road Wallet" RouteBand → `/road-wallet` (flag-gated); existing
+  entries untouched.
+- Scan: one "Road Wallet document" RouteBand → `/add-road-document`
+  (flag-gated); `SCAN_TYPES` unchanged (15).
+
+### Readiness + summary
+
+`refreshRoadWalletReadinessForSession(userId)` re-verifies the current version
+of every ACTIVE, session-visible document against immutable SHA-256/kind,
+updating only `fileCache`; coalesces concurrent runs; triggered on wallet
+focus, detail open, and before share. `roadWalletSummary` → `totalActive,
+readyOffline, needsFileCheck, expiringSoon, expired, backedUp, archived`;
+`readyOffline` = current-runtime READY; `backedUp` = metadata AND current
+version synced; archived excluded from active counts.
+
+### Screens
+
+- **Road Wallet:** real summary tiles, active list (kind/title, subject,
+  validity + date, backup label, readiness pill), Add document, archived
+  section, disclaimer. Copy set: Ready offline / Checking file / File
+  unavailable / On this device / Backing up / Backed up / Expiring soon /
+  Expired / No expiration. No paths, hashes, buckets or raw identifiers.
+- **Add document:** Take Photo (expo-camera) / Choose Photo
+  (expo-image-picker) / Choose File / PDF (expo-document-picker) → temporary
+  URI → metadata (kind, title defaulting to `documentKindLabel`, subject,
+  issuer, jurisdiction, dates as `YYYY-MM-DD` via `isIsoDate`, truck from the
+  signed-in account's trucks only, trailer number, **last 4 of document
+  number** → `maskReference`) → `createOperationalDocumentFromFile`. Known
+  kinds show a fixed sensitivity; configurable kinds offer the three classes.
+  Errors mapped to safe copy (`saveErrorCopy`).
+- **Document detail:** validity/readiness/backup pills; image rendered only
+  when READY via `uriFor`; PDF file card (no inline preview, no system-open);
+  details (masked reference, unresolved truck shown as unassigned); Edit
+  details (`updateDocumentMetadata` with live ctx; fixed sensitivity resolved
+  on kind change; lifecycle not patchable); Replace document file → N+1;
+  Archive / Restore (`restoreDocument` added); Share / Export; version history
+  (Version N, date, type, size, per-version cloud label); no delete-version.
+- **Share:** `shareOperationalDocumentVersion({ documentId, versionId?,
+sensitiveConfirmation })` — session → visibility (not archived) → version →
+  `documentShareExport` → re-verify SHA-256/kind → record cache → share
+  capability → late owner/entitlement re-check → `DocumentFileStore.share()`.
+  Free → `document_share_export` paywall. PERSONAL / FINANCIAL require the
+  matching confirmation signal (`SHARE_CONFIRMATION_COPY`). Denials surface
+  through `shareErrorCopy` (missing → replace/restore; changed → replace).
+
+### Truck association
+
+`src/data/trucks.ts`: owner-scoped fetch (`trucks` where `owner_id = uid`,
+defensively re-filtered) via React Query; empty in device-only mode (documents
+save with `truckId = null`). `truck: { id, ownerId }` is passed into the
+orchestration; an unresolved persisted association displays as
+"Unassigned / not on this account". The composite DB FK remains authoritative.
+
+### Account export
+
+`EXPORT_TABLES` += `operational_documents`, `document_versions`.
+`ACCOUNT_EXPORT_SCOPE` copy (shown in Account & data): metadata only — no
+binary image/PDF bytes, no portable file archive, no device-only documents.
+
+### Not done (by design)
+
+No analytics events added. No binary export. No Quick Present. No inline PDF /
+system-open. No new migration. No production flag enablement.
+
+### Release gate (recorded)
+
+Privacy Policy update for operational / personal / financial-sensitive
+document storage; App Store privacy disclosures review; Google Play Data
+Safety review; retention/delete/export review; real-device storage and share
+testing. **CLEAN_BOOTSTRAP = EVIDENCE GAP. TWO_USER_RLS = EVIDENCE GAP.
+REAL_DEVICE_FILE/SHARE = EVIDENCE GAP.**
+
 ## C5 — PDF feasibility (probe only; nothing added to the branch)
 
 Probe performed in `/tmp/pdfprobe` (a copy of this candidate's manifest),

@@ -1,22 +1,29 @@
 import {
+  canUseFeature,
   CloudSyncContext,
   currentVersion,
   defaultOfflinePinned,
   defaultSensitivityForKind,
   defaultSubjectForKind,
   DocumentKind,
+  documentKindLabel,
   DocumentVersion,
+  FileCacheEntry,
   markCaching,
   markReady,
   nextVersionNumber,
   notCached,
   OperationalDocument,
   requiredSensitivityForKind,
+  requiredShareConfirmation,
   Sensitivity,
+  SensitiveShareConfirmation,
+  shareConfirmationSatisfies,
   SubjectKind,
   syncBindingFor,
   validateSensitivityForKind,
   validateTruckAssociation,
+  visibleDocumentsForSession,
 } from '@/domain';
 import { ROAD_WALLET_CLOUD_CAPABILITY, useRoadWalletStore } from '@/store/roadWallet';
 
@@ -26,6 +33,7 @@ import {
   ExpoDocumentFileStore,
   ImportSource,
   newSecureOpaqueId,
+  reverifyDocumentFile,
   StoredDocumentFile,
 } from './documentFiles';
 
@@ -213,6 +221,182 @@ export async function createOperationalDocumentFromFile(
     throw err;
   }
   return { document, version };
+}
+
+// ---------------------------------------------------------------------------
+// Current-runtime readiness refresh (Pass 1B)
+// ---------------------------------------------------------------------------
+
+export interface ReadinessRefreshResult {
+  checked: number;
+  ready: number;
+  errored: number;
+}
+
+let readinessInFlight: Promise<ReadinessRefreshResult> | null = null;
+
+/**
+ * Re-verifies the CURRENT version's physical file for every ACTIVE document
+ * visible in this session, against the immutable version's SHA-256 and kind.
+ * Only `fileCache` changes — never the immutable evidence, never a new version.
+ * Concurrent calls coalesce onto the in-flight run.
+ */
+export function refreshRoadWalletReadinessForSession(
+  sessionUserId: string | null,
+  deps: Pick<RoadWalletDeps, 'fileStore' | 'now'> = defaultRoadWalletDeps(),
+): Promise<ReadinessRefreshResult> {
+  if (readinessInFlight) return readinessInFlight;
+  readinessInFlight = (async () => {
+    const result: ReadinessRefreshResult = { checked: 0, ready: 0, errored: 0 };
+    try {
+      const state = useRoadWalletStore.getState();
+      const docs = visibleDocumentsForSession(state.documents, sessionUserId).filter(
+        (d) => d.lifecycle === 'ACTIVE',
+      );
+      for (const doc of docs) {
+        const current = currentVersion(useRoadWalletStore.getState().versions, doc.id);
+        if (!current) continue;
+        await refreshVersionReadiness(current, deps);
+        result.checked++;
+        const after = useRoadWalletStore.getState().versions.find((v) => v.id === current.id);
+        if (after?.fileCache.state === 'READY') result.ready++;
+        else result.errored++;
+      }
+      return result;
+    } finally {
+      readinessInFlight = null;
+    }
+  })();
+  return readinessInFlight;
+}
+
+/** Re-verifies one version's physical file and records the result on its cache. */
+export async function refreshVersionReadiness(
+  version: DocumentVersion,
+  deps: Pick<RoadWalletDeps, 'fileStore' | 'now'> = defaultRoadWalletDeps(),
+): Promise<FileCacheEntry> {
+  const entry = await reverifyDocumentFile(
+    deps.fileStore,
+    {
+      ...version.fileCache,
+      relativePath: version.relativePath,
+      sha256: version.sha256,
+      byteSize: version.byteSize,
+      mimeType: version.mimeType,
+    },
+    version.fileKind,
+    deps.now,
+  );
+  useRoadWalletStore.getState().setVersionFileCache(version.id, entry);
+  return entry;
+}
+
+/** Re-verifies the current version of one document (Document Detail open). */
+export async function refreshDocumentReadiness(
+  documentId: string,
+  deps: Pick<RoadWalletDeps, 'fileStore' | 'now'> = defaultRoadWalletDeps(),
+): Promise<FileCacheEntry | null> {
+  const current = currentVersion(useRoadWalletStore.getState().versions, documentId);
+  if (!current) return null;
+  return refreshVersionReadiness(current, deps);
+}
+
+// ---------------------------------------------------------------------------
+// Share / Export effect boundary (Pass 1B)
+// ---------------------------------------------------------------------------
+
+export type ShareDenialReason =
+  | 'NOT_FOUND'
+  | 'NOT_VISIBLE'
+  | 'ARCHIVED'
+  | 'NO_VERSION'
+  | 'NOT_ENTITLED'
+  | 'CONFIRMATION_REQUIRED'
+  | 'FILE_UNAVAILABLE'
+  | 'SHARE_UNAVAILABLE';
+
+export class ShareDeniedError extends Error {
+  readonly reason: ShareDenialReason;
+  /** Verification failure detail when `reason` is FILE_UNAVAILABLE. */
+  readonly fileError: FileCacheEntry['error'];
+
+  constructor(reason: ShareDenialReason, fileError: FileCacheEntry['error'] = null) {
+    super(`share denied: ${reason}${fileError ? ` (${fileError})` : ''}`);
+    this.name = 'ShareDeniedError';
+    this.reason = reason;
+    this.fileError = fileError;
+  }
+}
+
+export interface ShareDocumentVersionInput {
+  documentId: string;
+  /** Defaults to the current version. */
+  versionId?: string;
+  /** Explicit user acknowledgement for PERSONAL / FINANCIAL sensitive documents. */
+  sensitiveConfirmation: SensitiveShareConfirmation;
+}
+
+export interface ShareDeps extends Pick<RoadWalletDeps, 'fileStore' | 'ctx' | 'now'> {
+  /** Called immediately before the share effect; lets tests observe the late re-check. */
+  beforeShare?: () => void;
+}
+
+const assertShareAuthorized = (ctx: CloudSyncContext, doc: OperationalDocument): void => {
+  if (doc.accountOwnerId !== ctx.userId) throw new ShareDeniedError('NOT_VISIBLE');
+  if (!canUseFeature(ctx.tier, 'documentShareExport')) throw new ShareDeniedError('NOT_ENTITLED');
+};
+
+/**
+ * The only path that may open the platform share sheet for a Road Wallet file.
+ * A path existing is never enough:
+ *   1. resolve the CURRENT session;
+ *   2. the document must be visible in this session (and not archived);
+ *   3. resolve the exact version (default: current);
+ *   4. the current tier must permit `documentShareExport`;
+ *   5. re-verify the physical file against the version's immutable SHA-256 + kind;
+ *   6. record the fresh verification on `fileCache`;
+ *   7. the platform share capability must be available;
+ *   8. immediately before the effect: re-check ownership and entitlement;
+ *   9. `DocumentFileStore.share()`.
+ * Non-STANDARD documents additionally require the matching explicit confirmation.
+ */
+export async function shareOperationalDocumentVersion(
+  input: ShareDocumentVersionInput,
+  deps: ShareDeps = defaultRoadWalletDeps(),
+): Promise<{ versionId: string; mimeType: string }> {
+  const ctx = deps.ctx();
+  const state = useRoadWalletStore.getState();
+  const doc = state.documents.find((d) => d.id === input.documentId);
+  if (!doc) throw new ShareDeniedError('NOT_FOUND');
+  assertShareAuthorized(ctx, doc);
+  if (doc.lifecycle === 'ARCHIVED') throw new ShareDeniedError('ARCHIVED');
+
+  const version = input.versionId
+    ? (state.versions.find((v) => v.id === input.versionId && v.operationalDocumentId === doc.id) ??
+      null)
+    : currentVersion(state.versions, doc.id);
+  if (!version) throw new ShareDeniedError('NO_VERSION');
+
+  const required = requiredShareConfirmation(doc.sensitivity);
+  if (!shareConfirmationSatisfies(input.sensitiveConfirmation, required)) {
+    throw new ShareDeniedError('CONFIRMATION_REQUIRED');
+  }
+
+  const verified = await refreshVersionReadiness(version, deps);
+  if (verified.state !== 'READY') throw new ShareDeniedError('FILE_UNAVAILABLE', verified.error);
+
+  const capability = await deps.fileStore.shareCapability();
+  if (!capability.available) throw new ShareDeniedError('SHARE_UNAVAILABLE');
+
+  // Late re-check: ownership and entitlement may have changed while verifying.
+  deps.beforeShare?.();
+  assertShareAuthorized(deps.ctx(), doc);
+
+  await deps.fileStore.share(version.relativePath, {
+    mimeType: version.mimeType,
+    dialogTitle: `${documentKindLabel(doc.documentKind)} — version ${version.versionNumber}`,
+  });
+  return { versionId: version.id, mimeType: version.mimeType };
 }
 
 /**

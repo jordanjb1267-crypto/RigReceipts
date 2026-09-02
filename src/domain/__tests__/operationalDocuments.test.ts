@@ -2,6 +2,8 @@ import { newOpaqueId } from '../documentFiles';
 import {
   analyticsSafeDocumentSummary,
   assertImmutableCoreUnchanged,
+  BACKUP_STATE_LABEL,
+  backupState,
   currentVersion,
   daysUntilExpiry,
   defaultOfflinePinned,
@@ -24,14 +26,20 @@ import {
   maskReference,
   nextVersionNumber,
   OperationalDocument,
+  READINESS_LABEL,
   rebuildVersionChain,
   remoteVersionMatches,
   remoteVersionPath,
   REQUIRED_SENSITIVITY_FOR_KIND,
   requiredSensitivityForKind,
+  requiredShareConfirmation,
+  ROAD_WALLET_DISCLAIMER,
   ROAD_WALLET_REMOTE_BUCKET,
+  roadWalletSummary,
   SENSITIVITIES,
   Sensitivity,
+  SHARE_CONFIRMATION_COPY,
+  shareConfirmationSatisfies,
   SUBJECT_KINDS,
   toRemoteDocumentRow,
   toRemoteVersionRow,
@@ -39,6 +47,7 @@ import {
   validateOperationalDocument,
   validateSensitivityForKind,
   validateTruckAssociation,
+  VALIDITY_LABEL,
   VALIDITY_STATES,
   versionsForDocument,
   visibleDocumentsForSession,
@@ -452,7 +461,7 @@ describe('version replacement rules', () => {
     ).toThrow(/duplicate version id/);
   });
 
-  it('supersession must point at a prior version of the same document', () => {
+  it('supersession must point at the current version of the same document', () => {
     const otherDoc = fixedId(9);
     const foreign = version({ id: fixedId(8), operationalDocumentId: otherDoc });
     expect(() =>
@@ -461,15 +470,86 @@ describe('version replacement rules', () => {
         d,
         [v1, foreign],
       ),
-    ).toThrow(/same document/);
-    // Pointing "forward" (at a higher-numbered version) is rejected.
-    const v3 = version({ id: fixedId(7), versionNumber: 3, supersedesVersionId: V1_ID });
-    expect(() =>
-      validateNewVersion(version({ id: V2_ID, versionNumber: 2, supersedesVersionId: v3.id }), d, [
-        v1,
-        v3,
-      ]),
-    ).toThrow(/prior version/);
+    ).toThrow(/supersede the current version/);
+  });
+
+  describe('Pass 1B-H0 — chain continuity', () => {
+    const v2 = version({ id: V2_ID, versionNumber: 2, supersedesVersionId: V1_ID, sha256: SHA_B });
+
+    it('rejects a lone version 999 or a lone version 2 as the first version', () => {
+      expect(() => validateNewVersion(version({ versionNumber: 999 }), d, [])).toThrow(
+        /first version must be version 1/,
+      );
+      expect(() => validateNewVersion(version({ versionNumber: 2 }), d, [])).toThrow(
+        /first version must be version 1/,
+      );
+      expect(() => validateNewVersion(version({ supersedesVersionId: fixedId(7) }), d, [])).toThrow(
+        /must not supersede/,
+      );
+    });
+
+    it('addVersion cannot inject v5 when current is v1 (contiguous numbering required)', () => {
+      expect(() =>
+        validateNewVersion(
+          version({ id: V2_ID, versionNumber: 5, supersedesVersionId: V1_ID }),
+          d,
+          [v1],
+        ),
+      ).toThrow(/replacement must be version 2/);
+      expect(() =>
+        validateNewVersion(
+          version({ id: V2_ID, versionNumber: 3, supersedesVersionId: V1_ID }),
+          d,
+          [v1],
+        ),
+      ).toThrow(/replacement must be version 2/);
+    });
+
+    it('addVersion cannot make v3 supersede v1 when current is v2 (immediate predecessor required)', () => {
+      expect(() =>
+        validateNewVersion(
+          version({ id: fixedId(4), versionNumber: 3, supersedesVersionId: V1_ID }),
+          d,
+          [v1, v2],
+        ),
+      ).toThrow(/supersede the current version/);
+      expect(() =>
+        validateNewVersion(
+          version({ id: fixedId(4), versionNumber: 3, supersedesVersionId: V2_ID }),
+          d,
+          [v1, v2],
+        ),
+      ).not.toThrow();
+    });
+
+    it('rebuildVersionChain enforces 1 → 2 → 3 exactly', () => {
+      const v3 = version({ id: fixedId(4), versionNumber: 3, supersedesVersionId: V2_ID });
+      const v4 = version({ id: fixedId(5), versionNumber: 4, supersedesVersionId: V2_ID });
+      // lone 999 / lone 2 → rejected
+      expect(rebuildVersionChain([version({ versionNumber: 999 })])).toEqual([]);
+      expect(
+        rebuildVersionChain([version({ versionNumber: 2, supersedesVersionId: null })]),
+      ).toEqual([]);
+      // 1 → 3 → retain only 1
+      expect(
+        rebuildVersionChain([
+          v1,
+          version({ id: fixedId(4), versionNumber: 3, supersedesVersionId: V1_ID }),
+        ]).map((v) => v.versionNumber),
+      ).toEqual([1]);
+      // 1 → 2 → 4 → retain 1, 2
+      expect(rebuildVersionChain([v1, v2, v4]).map((v) => v.versionNumber)).toEqual([1, 2]);
+      // v3 superseding v1 while v2 exists → retain 1, 2
+      expect(
+        rebuildVersionChain([
+          v1,
+          v2,
+          version({ id: fixedId(4), versionNumber: 3, supersedesVersionId: V1_ID }),
+        ]).map((v) => v.versionNumber),
+      ).toEqual([1, 2]);
+      // 1 → 2 → 3 valid
+      expect(rebuildVersionChain([v3, v1, v2]).map((v) => v.versionNumber)).toEqual([1, 2, 3]);
+    });
   });
 
   it('rejects versions for another document or owner and malformed evidence', () => {
@@ -507,6 +587,110 @@ describe('session visibility (account scope)', () => {
     expect(visibleDocumentsForSession([a, b, anon], null)).toEqual([anon]);
     expect(isVisibleInSession(anon, 'user-a')).toBe(false);
     expect(anon.accountOwnerId).toBeNull();
+  });
+});
+
+describe('Pass 1B — product projections', () => {
+  const now = new Date(Date.UTC(2026, 8, 2));
+  const ready = version({ fileCache: { ...version().fileCache, state: 'READY' } });
+  const notReady = version({ fileCache: { ...version().fileCache, state: 'NOT_CACHED' } });
+
+  it('backupState requires BOTH metadata and current version synced', () => {
+    expect(backupState({ cloudStatus: 'synced' }, { cloudStatus: 'synced' })).toBe('backed_up');
+    expect(backupState({ cloudStatus: 'synced' }, { cloudStatus: 'pending_sync' })).toBe(
+      'backing_up',
+    );
+    expect(backupState({ cloudStatus: 'pending_sync' }, { cloudStatus: 'synced' })).toBe(
+      'backing_up',
+    );
+    expect(backupState({ cloudStatus: 'local_only' }, { cloudStatus: 'local_only' })).toBe(
+      'on_device',
+    );
+    expect(backupState({ cloudStatus: 'synced' }, { cloudStatus: 'local_only' })).toBe(
+      'backing_up',
+    );
+    expect(backupState({ cloudStatus: 'local_only' }, null)).toBe('on_device');
+    expect(BACKUP_STATE_LABEL.backed_up).toBe('Backed up');
+  });
+
+  it('readiness copy never calls NOT_CACHED ready', () => {
+    expect(READINESS_LABEL.NOT_CACHED).toBe('Checking file');
+    expect(READINESS_LABEL.CACHING).toBe('Checking file');
+    expect(READINESS_LABEL.READY).toBe('Ready offline');
+    expect(READINESS_LABEL.ERROR).toBe('File unavailable');
+    expect(VALIDITY_LABEL.EXPIRING_SOON).toBe('Expiring soon');
+    expect(VALIDITY_LABEL.EXPIRED).toBe('Expired');
+  });
+
+  it('roadWalletSummary counts only session-visible ACTIVE documents, using current-runtime READY', () => {
+    const a = doc({ id: fixedId(21), expiresAt: '2026-09-20', cloudStatus: 'synced' }); // expiring soon
+    const b = doc({ id: fixedId(22), expiresAt: '2026-01-01' }); // expired
+    const archived = doc({ id: fixedId(23), lifecycle: 'ARCHIVED' });
+    const other = doc({ id: fixedId(24), accountOwnerId: 'user-b' });
+    const vA = {
+      ...ready,
+      id: fixedId(25),
+      operationalDocumentId: a.id,
+      cloudStatus: 'synced' as const,
+    };
+    const vB = { ...notReady, id: fixedId(26), operationalDocumentId: b.id };
+    const vArchived = { ...ready, id: fixedId(27), operationalDocumentId: archived.id };
+    const vOther = {
+      ...ready,
+      id: fixedId(28),
+      operationalDocumentId: other.id,
+      accountOwnerId: 'user-b',
+    };
+
+    const s = roadWalletSummary(
+      [a, b, archived, other],
+      [vA, vB, vArchived, vOther],
+      'user-a',
+      now,
+    );
+    expect(s).toEqual({
+      totalActive: 2,
+      readyOffline: 1,
+      needsFileCheck: 1,
+      expiringSoon: 1,
+      expired: 1,
+      backedUp: 1,
+      archived: 1,
+    });
+    expect(roadWalletSummary([a, b, archived, other], [vA, vB], null, now).totalActive).toBe(0);
+    expect(roadWalletSummary([], [], 'user-a', now)).toEqual({
+      totalActive: 0,
+      readyOffline: 0,
+      needsFileCheck: 0,
+      expiringSoon: 0,
+      expired: 0,
+      backedUp: 0,
+      archived: 0,
+    });
+  });
+
+  it('share confirmation strength follows sensitivity', () => {
+    expect(requiredShareConfirmation('STANDARD')).toBe('NONE');
+    expect(requiredShareConfirmation('PERSONAL_SENSITIVE')).toBe('PERSONAL_ACKNOWLEDGED');
+    expect(requiredShareConfirmation('FINANCIAL_SENSITIVE')).toBe('FINANCIAL_ACKNOWLEDGED');
+    expect(shareConfirmationSatisfies('NONE', 'NONE')).toBe(true);
+    expect(shareConfirmationSatisfies('NONE', 'PERSONAL_ACKNOWLEDGED')).toBe(false);
+    expect(shareConfirmationSatisfies('PERSONAL_ACKNOWLEDGED', 'PERSONAL_ACKNOWLEDGED')).toBe(true);
+    expect(shareConfirmationSatisfies('PERSONAL_ACKNOWLEDGED', 'FINANCIAL_ACKNOWLEDGED')).toBe(
+      false,
+    );
+    expect(shareConfirmationSatisfies('FINANCIAL_ACKNOWLEDGED', 'PERSONAL_ACKNOWLEDGED')).toBe(
+      true,
+    );
+    expect(SHARE_CONFIRMATION_COPY.PERSONAL_ACKNOWLEDGED.body).toMatch(
+      /personal identity or medical/,
+    );
+    expect(SHARE_CONFIRMATION_COPY.FINANCIAL_ACKNOWLEDGED.body).toMatch(/tax, banking, factoring/);
+  });
+
+  it('the disclaimer is the only place compliance is mentioned, and it disclaims', () => {
+    expect(ROAD_WALLET_DISCLAIMER).toMatch(/does not determine/);
+    expect(ROAD_WALLET_DISCLAIMER).toMatch(/compliant/);
   });
 });
 

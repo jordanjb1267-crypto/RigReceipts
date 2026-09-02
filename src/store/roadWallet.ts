@@ -20,6 +20,7 @@ import {
   reconcileCloudStatus,
   remoteVersionPath,
   requiredSensitivityForKind,
+  roadWalletSummary,
   SENSITIVITIES,
   statusAfterLocalMutation,
   SUBJECT_KINDS,
@@ -60,6 +61,8 @@ interface RoadWalletState {
     now?: number,
   ) => void;
   archiveDocument: (id: string, ctx: CloudSyncContext, now?: number) => void;
+  /** Returns an archived document to ACTIVE; identity, ownership and every version preserved. */
+  restoreDocument: (id: string, ctx: CloudSyncContext, now?: number) => void;
   setDocumentCloudStatus: (id: string, status: CloudSyncStatus) => void;
   /** Inserts a validated immutable version (unique number, same-document supersession). */
   addVersion: (version: DocumentVersion) => void;
@@ -319,6 +322,22 @@ export const useRoadWalletStore = create<RoadWalletState>()(
         set((s) => ({ documents: s.documents.map((d) => (d.id === id ? next : d)) }));
       },
 
+      restoreDocument: (id, ctx, now = Date.now()) => {
+        const existing = get().documents.find((d) => d.id === id);
+        if (!existing) throw new Error('document not found');
+        const next: OperationalDocument = {
+          ...existing,
+          lifecycle: 'ACTIVE',
+          updatedAt: now,
+          cloudStatus: statusAfterLocalMutation(
+            ctx,
+            ROAD_WALLET_CLOUD_CAPABILITY,
+            existing.accountOwnerId,
+          ),
+        };
+        set((s) => ({ documents: s.documents.map((d) => (d.id === id ? next : d)) }));
+      },
+
       setDocumentCloudStatus: (id, status) =>
         set((s) => ({
           documents: s.documents.map((d) => (d.id === id ? { ...d, cloudStatus: status } : d)),
@@ -428,3 +447,10 @@ export const selectDocumentById = (s: S, id: string, sessionUserId: string | nul
   const doc = s.documents.find((d) => d.id === id);
   return doc && doc.accountOwnerId === sessionUserId ? doc : null;
 };
+
+export const selectArchivedVisibleDocuments = (s: S, sessionUserId: string | null) =>
+  selectVisibleDocuments(s, sessionUserId).filter((d) => d.lifecycle === 'ARCHIVED');
+
+/** Real Road Wallet summary for the session — never from mock board data. */
+export const selectRoadWalletSummary = (s: S, sessionUserId: string | null, now: Date) =>
+  roadWalletSummary(s.documents, s.versions, sessionUserId, now);

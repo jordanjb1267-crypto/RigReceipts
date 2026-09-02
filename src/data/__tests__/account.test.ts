@@ -1,4 +1,4 @@
-import { buildExportBundle, EXPORT_TABLES } from '../account';
+import { ACCOUNT_EXPORT_SCOPE, buildExportBundle, EXPORT_TABLES } from '../account';
 
 const NOW = new Date('2026-07-19T12:00:00.000Z');
 
@@ -33,5 +33,17 @@ describe('buildExportBundle', () => {
     }
     // No duplicates.
     expect(new Set(EXPORT_TABLES).size).toBe(EXPORT_TABLES.length);
+  });
+
+  it('exports Road Wallet metadata tables (Pass 1B)', () => {
+    expect(EXPORT_TABLES).toContain('operational_documents');
+    expect(EXPORT_TABLES).toContain('document_versions');
+  });
+
+  it('describes the export as metadata, explicitly excluding binary files and device-only documents', () => {
+    expect(ACCOUNT_EXPORT_SCOPE.includes).toMatch(/Road Wallet document metadata/);
+    expect(ACCOUNT_EXPORT_SCOPE.excludes).toMatch(/image\/PDF files/);
+    expect(ACCOUNT_EXPORT_SCOPE.excludes).toMatch(/portable archive/);
+    expect(ACCOUNT_EXPORT_SCOPE.excludes).toMatch(/device-only documents/);
   });
 });

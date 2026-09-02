@@ -123,6 +123,15 @@ export {
   isVisibleInSession,
   visibleDocumentsForSession,
   analyticsSafeDocumentSummary,
+  backupState,
+  BACKUP_STATE_LABEL,
+  READINESS_LABEL,
+  VALIDITY_LABEL,
+  ROAD_WALLET_DISCLAIMER,
+  roadWalletSummary,
+  requiredShareConfirmation,
+  shareConfirmationSatisfies,
+  SHARE_CONFIRMATION_COPY,
   ROAD_WALLET_REMOTE_BUCKET,
   remoteVersionPath,
   toRemoteDocumentRow,
@@ -141,6 +150,9 @@ export type {
   DocumentVersionImmutableCore,
   RemoteOperationalDocumentRow,
   RemoteDocumentVersionRow,
+  BackupState,
+  RoadWalletSummary,
+  SensitiveShareConfirmation,
 } from './operationalDocuments';
 export { EQUIPMENT_TYPES, equipmentLabel } from './equipment';
 export type { EquipmentType } from './equipment';

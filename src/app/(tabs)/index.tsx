@@ -1,4 +1,4 @@
-import { useRouter } from 'expo-router';
+import { Href, useRouter } from 'expo-router';
 import { useMemo } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -28,6 +28,8 @@ import {
   unclassifiedMiles,
 } from '@/domain';
 import { useBoard } from '@/data/useBoard';
+import { useRoadWalletSummary } from '@/data/useRoadWalletSummary';
+import type { RoadWalletSummary } from '@/domain';
 import type { BoardData } from '@/mock/board';
 import { useActivationStore } from '@/store/activation';
 import { useCapturesStore } from '@/store/captures';
@@ -134,6 +136,10 @@ export default function DashboardScreen() {
           <LiveMileageWidget onOpen={(p) => router.push(p)} />
         )}
 
+        {isFeatureEnabled('road_wallet_enabled') && (
+          <RoadWalletWidget onOpen={() => router.push('/road-wallet')} />
+        )}
+
         {isPending ? (
           <LoadingState />
         ) : isError || !data ? (
@@ -214,7 +220,12 @@ function ErrorState({ onRetry }: { onRetry: () => void }) {
 // Board
 // ---------------------------------------------------------------------------
 
-type TabPath = '/scan' | '/loads' | '/miles' | '/reports' | '/rate-board';
+/**
+ * Routes the Board may push. Derived from Expo Router's `Href` (the typed route
+ * union when typed routes are generated) so new destinations such as
+ * `/road-wallet` never need casts.
+ */
+type TabPath = Extract<Href, string>;
 
 function Board({
   data,
@@ -544,6 +555,57 @@ function LiveMileageWidget({ onOpen }: { onOpen: (path: string) => void }) {
           <MetricTile label="Empty" value={miText(today.businessEmpty)} />
         </View>
       )}
+    </WidgetCard>
+  );
+}
+
+/**
+ * Road Wallet widget (Pass 1B §20) — REAL summary from the Road Wallet store,
+ * never from `@/mock/board`. "Ready" counts only versions verified READY in
+ * this process. No presentation-mode action until Pass 2.
+ */
+function RoadWalletWidget({ onOpen }: { onOpen: () => void }) {
+  const summary: RoadWalletSummary = useRoadWalletSummary();
+  const attention = summary.expired + summary.expiringSoon;
+  const tone: Tone =
+    summary.expired > 0
+      ? 'rust'
+      : summary.expiringSoon > 0
+        ? 'amber'
+        : summary.totalActive > 0
+          ? 'green'
+          : 'neutral';
+  const label =
+    summary.totalActive === 0
+      ? 'Empty'
+      : summary.expired > 0
+        ? `${summary.expired} expired`
+        : summary.expiringSoon > 0
+          ? `${summary.expiringSoon} expiring`
+          : 'Up to date';
+
+  return (
+    <WidgetCard
+      label="Road Wallet"
+      headerRight={<Pill label={label} tone={tone} />}
+      onPress={onOpen}
+    >
+      <Text style={styles.bigNum}>
+        {summary.readyOffline}
+        <Text style={styles.widgetNote}> of {summary.totalActive} ready offline</Text>
+      </Text>
+      <Text style={styles.widgetNote}>
+        {summary.totalActive === 0
+          ? 'Add registrations, insurance, permits and credentials.'
+          : attention > 0
+            ? `${attention} ${attention === 1 ? 'document needs' : 'documents need'} attention · ${summary.backedUp} backed up`
+            : `${summary.backedUp} backed up · ${summary.needsFileCheck} checking`}
+      </Text>
+      <View style={styles.fiRow}>
+        <View style={styles.fiChip}>
+          <Text style={styles.fiChipText}>Open Wallet</Text>
+        </View>
+      </View>
     </WidgetCard>
   );
 }

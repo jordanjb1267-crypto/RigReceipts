@@ -1,10 +1,12 @@
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
+import { useRouter } from 'expo-router';
 import { useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button, Card, Pill, RouteBand, Screen } from '@/components';
+import { isFeatureEnabled } from '@/config/flags';
 import { createCapture } from '@/data/captureSync';
 import { CaptureSyncStatus, SCAN_TYPES, ScanTypeSlug } from '@/domain';
 import { OcrEngineName, parseReceipt, recognizeDocument } from '@/ocr';
@@ -31,6 +33,7 @@ interface Draft {
  * sheet always requires a confirm before a record is created.
  */
 export default function ScanScreen() {
+  const router = useRouter();
   const [stage, setStage] = useState<Stage>('picker');
   const [scanType, setScanType] = useState<ScanTypeSlug>('receipt');
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -82,6 +85,7 @@ export default function ScanScreen() {
             if (!res.canceled && res.assets[0]) runOcr(res.assets[0].uri, false);
           }}
           onUseSample={() => runOcr(null, true)}
+          onAddRoadDocument={() => router.push('/add-road-document')}
         />
       )}
 
@@ -119,12 +123,15 @@ function Picker({
   onOpenCamera,
   onChoosePhoto,
   onUseSample,
+  onAddRoadDocument,
 }: {
   scanType: ScanTypeSlug;
   onPick: (t: ScanTypeSlug) => void;
   onOpenCamera: () => void;
   onChoosePhoto: () => void;
   onUseSample: () => void;
+  /** Road Wallet capture entry — a separate workflow, not a scan type (Pass 1B §22). */
+  onAddRoadDocument: () => void;
 }) {
   return (
     <>
@@ -156,6 +163,17 @@ function Picker({
         subtitle="Text is read on your phone. You confirm every field before it saves."
         value="Private"
       />
+      {isFeatureEnabled('road_wallet_enabled') && (
+        <RouteBand
+          dark
+          marker="▤"
+          markerTone="blue"
+          title="Road Wallet document"
+          subtitle="Add registration, insurance, IFTA, permits, credentials or carrier paperwork."
+          value="Add"
+          onPress={onAddRoadDocument}
+        />
+      )}
       <Pressable onPress={onUseSample} style={styles.sampleLink}>
         <Text style={styles.sampleLinkText}>No camera here? Use a sample document →</Text>
       </Pressable>

@@ -1,11 +1,17 @@
 import { CloudSyncContext, newOpaqueId, sha256Hex } from '@/domain';
-import { normalizeRoadWalletState, useRoadWalletStore } from '@/store/roadWallet';
+import {
+  normalizeRoadWalletState,
+  selectRoadWalletSummary,
+  useRoadWalletStore,
+} from '@/store/roadWallet';
 
 import { MemoryDocumentFileStore, reverifyDocumentFile } from '../documentFiles';
 import {
   createOperationalDocumentFromFile,
+  refreshRoadWalletReadinessForSession,
   replaceOperationalDocumentFile,
   RoadWalletDeps,
+  shareOperationalDocumentVersion,
 } from '../roadWallet';
 
 const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46, 1, 2, 3, 4]);
@@ -289,6 +295,306 @@ describe('H2 — rehydrated versions require fresh physical verification', () =>
     expect(verified.state).toBe('ERROR');
     expect(verified.error).toBe('HASH_MISMATCH');
     expect(restored.sha256).toBe(version.sha256);
+  });
+});
+
+describe('refreshRoadWalletReadinessForSession (Pass 1B §3)', () => {
+  const refreshDeps = () => ({ fileStore, now: () => 9_000 });
+
+  const rehydrateStore = () => {
+    const snapshot = JSON.parse(JSON.stringify(useRoadWalletStore.getState()));
+    useRoadWalletStore.setState(normalizeRoadWalletState(snapshot));
+  };
+
+  it('rehydrated NOT_CACHED → refresh → READY; summary counts only current-runtime READY', async () => {
+    await createOperationalDocumentFromFile(
+      { uri: 'file:///tmp/picker/cab-card.jpg', mimeType: 'image/jpeg' },
+      { documentKind: 'VEHICLE_REGISTRATION', title: 'Cab card' },
+      deps(),
+    );
+    rehydrateStore();
+    const before = selectRoadWalletSummary(useRoadWalletStore.getState(), 'user-a', new Date());
+    expect(before).toMatchObject({ totalActive: 1, readyOffline: 0, needsFileCheck: 1 });
+
+    const result = await refreshRoadWalletReadinessForSession('user-a', refreshDeps());
+    expect(result).toEqual({ checked: 1, ready: 1, errored: 0 });
+    const after = selectRoadWalletSummary(useRoadWalletStore.getState(), 'user-a', new Date());
+    expect(after).toMatchObject({ readyOffline: 1, needsFileCheck: 0 });
+    expect(useRoadWalletStore.getState().versions[0].fileCache).toMatchObject({
+      state: 'READY',
+      verifiedAt: 9_000,
+    });
+  });
+
+  it('missing → ERROR/MISSING and tampered → ERROR/HASH_MISMATCH; immutable hash untouched, no new version', async () => {
+    const a = await createOperationalDocumentFromFile(
+      { uri: 'file:///tmp/picker/cab-card.jpg', mimeType: 'image/jpeg' },
+      { documentKind: 'VEHICLE_REGISTRATION', title: 'A' },
+      deps(),
+    );
+    const b = await createOperationalDocumentFromFile(
+      { uri: 'file:///tmp/picker/cab-card-2.jpg', mimeType: 'image/jpeg' },
+      { documentKind: 'INSURANCE', title: 'B' },
+      deps(),
+    );
+    await fileStore.remove(a.version.relativePath);
+    fileStore.overwrite(b.version.relativePath, JPEG);
+    rehydrateStore();
+
+    const result = await refreshRoadWalletReadinessForSession('user-a', refreshDeps());
+    expect(result).toEqual({ checked: 2, ready: 0, errored: 2 });
+    const va = useRoadWalletStore.getState().versions.find((v) => v.id === a.version.id)!;
+    const vb = useRoadWalletStore.getState().versions.find((v) => v.id === b.version.id)!;
+    expect(va.fileCache).toMatchObject({ state: 'ERROR', error: 'MISSING' });
+    expect(vb.fileCache).toMatchObject({ state: 'ERROR', error: 'HASH_MISMATCH' });
+    expect(vb.sha256).toBe(b.version.sha256);
+    expect(useRoadWalletStore.getState().versions).toHaveLength(2);
+  });
+
+  it('skips archived and other-session documents; coalesces concurrent refreshes', async () => {
+    const mine = await createOperationalDocumentFromFile(
+      { uri: 'file:///tmp/picker/cab-card.jpg', mimeType: 'image/jpeg' },
+      { documentKind: 'VEHICLE_REGISTRATION', title: 'Mine' },
+      deps(),
+    );
+    const archived = await createOperationalDocumentFromFile(
+      { uri: 'file:///tmp/picker/cab-card-2.jpg', mimeType: 'image/jpeg' },
+      { documentKind: 'INSURANCE', title: 'Old' },
+      deps(),
+    );
+    useRoadWalletStore.getState().archiveDocument(archived.document.id, deps().ctx());
+    const other = await createOperationalDocumentFromFile(
+      { uri: 'file:///tmp/picker/coi.pdf', mimeType: 'application/pdf' },
+      { documentKind: 'CERTIFICATE_OF_INSURANCE', title: 'Other' },
+      deps({ userId: 'user-b' }),
+    );
+    rehydrateStore();
+
+    const [r1, r2] = await Promise.all([
+      refreshRoadWalletReadinessForSession('user-a', refreshDeps()),
+      refreshRoadWalletReadinessForSession('user-a', refreshDeps()),
+    ]);
+    expect(r1).toBe(r2); // same coalesced result object
+    expect(r1).toEqual({ checked: 1, ready: 1, errored: 0 });
+    const s = useRoadWalletStore.getState();
+    expect(s.versions.find((v) => v.id === mine.version.id)?.fileCache.state).toBe('READY');
+    expect(s.versions.find((v) => v.id === archived.version.id)?.fileCache.state).toBe(
+      'NOT_CACHED',
+    );
+    expect(s.versions.find((v) => v.id === other.version.id)?.fileCache.state).toBe('NOT_CACHED');
+    expect(selectRoadWalletSummary(s, 'user-a', new Date())).toMatchObject({
+      totalActive: 1,
+      readyOffline: 1,
+      archived: 1,
+    });
+  });
+});
+
+describe('shareOperationalDocumentVersion (Pass 1B §15–§18)', () => {
+  type Tier = 'free' | 'driver_pro' | 'owner_operator' | 'fleet_lite' | 'lifetime';
+  const shareDeps = (
+    over: { userId?: string | null; tier?: Tier } = {},
+    beforeShare?: () => void,
+  ) => {
+    const ctx = { userId: 'user-a' as string | null, tier: 'driver_pro' as Tier, ...over };
+    return {
+      fileStore,
+      now: () => 9_000,
+      ctx: () => ({ userId: ctx.userId, tier: ctx.tier, supabaseConfigured: true }),
+      beforeShare,
+      set(next: Partial<typeof ctx>) {
+        Object.assign(ctx, next);
+      },
+    };
+  };
+  const createStandard = () =>
+    createOperationalDocumentFromFile(
+      { uri: 'file:///tmp/picker/cab-card.jpg', mimeType: 'image/jpeg' },
+      { documentKind: 'VEHICLE_REGISTRATION', title: 'Cab card' },
+      deps({ tier: 'driver_pro' }),
+    );
+
+  it('Free is denied at the effect boundary (not just the button); Driver Pro and Lifetime succeed', async () => {
+    const { document, version } = await createStandard();
+    await expect(
+      shareOperationalDocumentVersion(
+        { documentId: document.id, sensitiveConfirmation: 'NONE' },
+        shareDeps({ tier: 'free' }),
+      ),
+    ).rejects.toMatchObject({ reason: 'NOT_ENTITLED' });
+    expect(fileStore.shared).toHaveLength(0);
+
+    await shareOperationalDocumentVersion(
+      { documentId: document.id, sensitiveConfirmation: 'NONE' },
+      shareDeps({ tier: 'driver_pro' }),
+    );
+    await shareOperationalDocumentVersion(
+      { documentId: document.id, sensitiveConfirmation: 'NONE' },
+      shareDeps({ tier: 'lifetime' }),
+    );
+    expect(fileStore.shared).toEqual([
+      { relativePath: version.relativePath, mimeType: 'image/jpeg' },
+      { relativePath: version.relativePath, mimeType: 'image/jpeg' },
+    ]);
+  });
+
+  it('wrong account, unknown document and archived documents are denied', async () => {
+    const { document } = await createStandard();
+    await expect(
+      shareOperationalDocumentVersion(
+        { documentId: document.id, sensitiveConfirmation: 'NONE' },
+        shareDeps({ userId: 'user-b' }),
+      ),
+    ).rejects.toMatchObject({ reason: 'NOT_VISIBLE' });
+    await expect(
+      shareOperationalDocumentVersion(
+        { documentId: 'nope', sensitiveConfirmation: 'NONE' },
+        shareDeps(),
+      ),
+    ).rejects.toMatchObject({ reason: 'NOT_FOUND' });
+    useRoadWalletStore.getState().archiveDocument(document.id, shareDeps().ctx());
+    await expect(
+      shareOperationalDocumentVersion(
+        { documentId: document.id, sensitiveConfirmation: 'NONE' },
+        shareDeps(),
+      ),
+    ).rejects.toMatchObject({ reason: 'ARCHIVED' });
+    expect(fileStore.shared).toHaveLength(0);
+  });
+
+  it('re-verifies the physical file first: missing, changed hash and content mismatch never open the sheet', async () => {
+    const { document, version } = await createStandard();
+    fileStore.overwrite(version.relativePath, JPEG2); // same kind, different bytes
+    await expect(
+      shareOperationalDocumentVersion(
+        { documentId: document.id, sensitiveConfirmation: 'NONE' },
+        shareDeps(),
+      ),
+    ).rejects.toMatchObject({ reason: 'FILE_UNAVAILABLE', fileError: 'HASH_MISMATCH' });
+
+    fileStore.overwrite(version.relativePath, PDF); // wrong kind entirely
+    await expect(
+      shareOperationalDocumentVersion(
+        { documentId: document.id, sensitiveConfirmation: 'NONE' },
+        shareDeps(),
+      ),
+    ).rejects.toMatchObject({ reason: 'FILE_UNAVAILABLE', fileError: 'CONTENT_MISMATCH' });
+
+    await fileStore.remove(version.relativePath);
+    await expect(
+      shareOperationalDocumentVersion(
+        { documentId: document.id, sensitiveConfirmation: 'NONE' },
+        shareDeps(),
+      ),
+    ).rejects.toMatchObject({ reason: 'FILE_UNAVAILABLE', fileError: 'MISSING' });
+
+    expect(fileStore.shared).toHaveLength(0);
+    const v = useRoadWalletStore.getState().versions[0];
+    expect(v.fileCache.state).toBe('ERROR');
+    expect(v.sha256).toBe(version.sha256); // never recomputed
+  });
+
+  it('a successful share records fresh READY verification and re-checks owner/entitlement immediately before the effect', async () => {
+    const { document, version } = await createStandard();
+    useRoadWalletStore.getState().setVersionFileCache(version.id, {
+      ...version.fileCache,
+      state: 'NOT_CACHED',
+      verifiedAt: null,
+    });
+
+    const ok = shareDeps();
+    await shareOperationalDocumentVersion(
+      { documentId: document.id, sensitiveConfirmation: 'NONE' },
+      ok,
+    );
+    expect(useRoadWalletStore.getState().versions[0].fileCache).toMatchObject({
+      state: 'READY',
+      verifiedAt: 9_000,
+    });
+    expect(fileStore.shared).toHaveLength(1);
+
+    // Entitlement lapses between verification and the share effect.
+    const lapsing = shareDeps();
+    lapsing.beforeShare = () => lapsing.set({ tier: 'free' });
+    await expect(
+      shareOperationalDocumentVersion(
+        { documentId: document.id, sensitiveConfirmation: 'NONE' },
+        lapsing,
+      ),
+    ).rejects.toMatchObject({ reason: 'NOT_ENTITLED' });
+    // Account switches between verification and the share effect.
+    const switching = shareDeps();
+    switching.beforeShare = () => switching.set({ userId: 'user-b' });
+    await expect(
+      shareOperationalDocumentVersion(
+        { documentId: document.id, sensitiveConfirmation: 'NONE' },
+        switching,
+      ),
+    ).rejects.toMatchObject({ reason: 'NOT_VISIBLE' });
+    expect(fileStore.shared).toHaveLength(1);
+  });
+
+  it('PERSONAL requires acknowledgement, FINANCIAL requires the stronger one, STANDARD needs none', async () => {
+    const cdl = await createOperationalDocumentFromFile(
+      { uri: 'file:///tmp/picker/cab-card-2.jpg', mimeType: 'image/jpeg' },
+      { documentKind: 'CDL', title: 'CDL' },
+      deps({ tier: 'driver_pro' }),
+    );
+    await expect(
+      shareOperationalDocumentVersion(
+        { documentId: cdl.document.id, sensitiveConfirmation: 'NONE' },
+        shareDeps(),
+      ),
+    ).rejects.toMatchObject({ reason: 'CONFIRMATION_REQUIRED' });
+    await shareOperationalDocumentVersion(
+      { documentId: cdl.document.id, sensitiveConfirmation: 'PERSONAL_ACKNOWLEDGED' },
+      shareDeps(),
+    );
+
+    const w9 = await createOperationalDocumentFromFile(
+      { uri: 'file:///tmp/picker/coi.pdf', mimeType: 'application/pdf' },
+      { documentKind: 'W9', title: 'W-9' },
+      deps({ tier: 'driver_pro' }),
+    );
+    await expect(
+      shareOperationalDocumentVersion(
+        { documentId: w9.document.id, sensitiveConfirmation: 'PERSONAL_ACKNOWLEDGED' },
+        shareDeps(),
+      ),
+    ).rejects.toMatchObject({ reason: 'CONFIRMATION_REQUIRED' });
+    await shareOperationalDocumentVersion(
+      { documentId: w9.document.id, sensitiveConfirmation: 'FINANCIAL_ACKNOWLEDGED' },
+      shareDeps(),
+    );
+    // PDF goes through Share/Export only, as a PDF.
+    expect(fileStore.shared.at(-1)).toEqual({
+      relativePath: w9.version.relativePath,
+      mimeType: 'application/pdf',
+    });
+    expect(fileStore.shared).toHaveLength(2);
+  });
+
+  it('denies when the platform share sheet is unavailable, and can target an explicit prior version', async () => {
+    const { document, version } = await createStandard();
+    fileStore.shareAvailable = false;
+    await expect(
+      shareOperationalDocumentVersion(
+        { documentId: document.id, sensitiveConfirmation: 'NONE' },
+        shareDeps(),
+      ),
+    ).rejects.toMatchObject({ reason: 'SHARE_UNAVAILABLE' });
+    fileStore.shareAvailable = true;
+
+    await replaceOperationalDocumentFile(
+      document.id,
+      { uri: 'file:///tmp/picker/cab-card-2.jpg', mimeType: 'image/jpeg' },
+      deps(),
+    );
+    await shareOperationalDocumentVersion(
+      { documentId: document.id, versionId: version.id, sensitiveConfirmation: 'NONE' },
+      shareDeps(),
+    );
+    expect(fileStore.shared.at(-1)?.relativePath).toBe(version.relativePath);
   });
 });
 

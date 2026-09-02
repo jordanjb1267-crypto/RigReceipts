@@ -477,6 +477,29 @@ describe('documents', () => {
     expect(d.lifecycle).toBe('ACTIVE');
   });
 
+  it('restores an archived document to ACTIVE, preserving identity, ownership and versions', () => {
+    useRoadWalletStore.getState().addDocument(doc({ cloudStatus: 'synced' }));
+    useRoadWalletStore.getState().addVersion(version());
+    useRoadWalletStore.getState().archiveDocument(DOC_A, ctx(), 700);
+    useRoadWalletStore.getState().restoreDocument(DOC_A, ctx(), 800);
+    const s = useRoadWalletStore.getState();
+    const d = s.documents[0];
+    expect(d).toMatchObject({
+      id: DOC_A,
+      accountOwnerId: 'user-a',
+      lifecycle: 'ACTIVE',
+      updatedAt: 800,
+    });
+    expect(d.cloudStatus).toBe('pending_sync');
+    expect(selectVersionsForDocument(s, DOC_A)).toHaveLength(1);
+    expect(selectActiveVisibleDocuments(s, 'user-a')).toHaveLength(1);
+
+    useRoadWalletStore.getState().archiveDocument(DOC_A, ctx({ tier: 'free' }), 900);
+    useRoadWalletStore.getState().restoreDocument(DOC_A, ctx({ tier: 'free' }), 1000);
+    expect(useRoadWalletStore.getState().documents[0].cloudStatus).toBe('local_only');
+    expect(() => useRoadWalletStore.getState().restoreDocument(DOC_B, ctx())).toThrow(/not found/);
+  });
+
   it('archives a document without deleting it', () => {
     useRoadWalletStore.getState().addDocument(doc({ cloudStatus: 'synced' }));
     useRoadWalletStore.getState().archiveDocument(DOC_A, ctx(), 700);
@@ -517,6 +540,7 @@ describe('versions', () => {
       useRoadWalletStore.getState().addVersion(version({ id: V2, versionNumber: 1 })),
     ).toThrow(/duplicate versionNumber/);
     useRoadWalletStore.getState().addDocument(doc({ id: DOC_B }));
+    // A first version for DOC_B may not "supersede" a version of DOC_A.
     expect(() =>
       useRoadWalletStore.getState().addVersion(
         version({
@@ -526,13 +550,31 @@ describe('versions', () => {
           supersedesVersionId: V1,
         }),
       ),
-    ).toThrow(/same document/);
+    ).toThrow(/must not supersede/);
     expect(() =>
       useRoadWalletStore
         .getState()
         .addVersion(version({ id: V2, operationalDocumentId: fixedId(50) })),
     ).toThrow(/not found/);
     expect(useRoadWalletStore.getState().versions).toHaveLength(1);
+  });
+
+  it('Pass 1B-H0: addVersion enforces contiguous numbering and immediate-predecessor supersession', () => {
+    useRoadWalletStore.getState().addVersion(version());
+    expect(() =>
+      useRoadWalletStore
+        .getState()
+        .addVersion(version({ id: V2, versionNumber: 5, supersedesVersionId: V1, sha256: SHA_B })),
+    ).toThrow(/replacement must be version 2/);
+    useRoadWalletStore
+      .getState()
+      .addVersion(version({ id: V2, versionNumber: 2, supersedesVersionId: V1, sha256: SHA_B }));
+    expect(() =>
+      useRoadWalletStore
+        .getState()
+        .addVersion(version({ id: fixedId(6), versionNumber: 3, supersedesVersionId: V1 })),
+    ).toThrow(/supersede the current version/);
+    expect(useRoadWalletStore.getState().versions.map((v) => v.versionNumber)).toEqual([1, 2]);
   });
 
   it('exposes only cache/cloud mutations and guards the immutable core', () => {
