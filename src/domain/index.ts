@@ -18,7 +18,14 @@ export {
   TIER_DATA_ENTITLEMENTS,
   hasDataEntitlement,
 } from './entitlements';
-export type { Tier, DataEntitlement } from './entitlements';
+export type { Tier, Feature, DataEntitlement } from './entitlements';
+export {
+  PAYWALL_TRIGGERS,
+  PAYWALL_TRIGGER_COPY,
+  DEFAULT_PAYWALL_TRIGGER,
+  resolvePaywallTrigger,
+} from './paywallTriggers';
+export type { PaywallTrigger } from './paywallTriggers';
 export { EQUIPMENT_TYPES, equipmentLabel } from './equipment';
 export type { EquipmentType } from './equipment';
 export {
