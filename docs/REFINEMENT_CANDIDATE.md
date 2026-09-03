@@ -826,6 +826,37 @@ packages. Migrations 00011–00014 unchanged; additive `20260902000015`.
   RECOVERY and **REAL_DEVICE_QUICK_PRESENT** remain gaps. Airplane-mode
   procedure is recorded in `docs/ROAD_WALLET.md` §37.
 
+## Pass 2.1 — Quick Present integrity hardening
+
+Authorized pre-Pass-3 hardening only. No Carrier Profile, Carrier Packets,
+external APIs, Freight Intelligence, or production flag enablement.
+Migration `20260902000015_quick_present_sets.sql` is unchanged; no 00016.
+
+- **H1/H1A/H1B:** stable membership identity + `included=false` tombstones
+  locally and remotely. `applySelectionToMembership` /
+  `applyPresentationSetSelection`. Hydration uniqueness. Parent stays
+  `pending_sync` until every membership upsert (including tombstones)
+  succeeds.
+- **H2:** `setWriteSafe` independent of Road Wallet `writeSafe`. Set writes
+  require both. Set-recovery failure does not block Road Wallet writes.
+- **H3:** signed-out / not-configured cycles reconcile both stores; no
+  remote I/O; no false `pending_sync` on local-only sets.
+- **H4:** preflight captures starting session and re-proves it before each
+  file read and after each await (`PREFLIGHT_SESSION_CHANGED`).
+- **H5:** live final authorization immediately before minting the ephemeral
+  session; current version re-resolved and reverified; stale v1 cannot be
+  minted after a v2 replacement.
+- **H6:** AppState `active` required before and after build; listener
+  always destroys the held session when leaving `active`.
+- **H7:** PERSONAL PDF Share/Export uses the existing personal share
+  warning; presentation ack ≠ share ack.
+- **H8:** `QuickPresentGate` requires `quickPresent` on the live tier
+  (current tiers all receive it; no new paywall).
+- **H9:** archived custom sets cannot be presented (data-layer + stale
+  route).
+- **H10:** PresentationSession remains in-memory only; no new persistent
+  session table.
+
 ## Evidence gaps (open)
 
 - Clean Supabase bootstrap of all migrations and two-user RLS verification

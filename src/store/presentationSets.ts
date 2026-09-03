@@ -41,8 +41,16 @@ interface PresentationSetsState {
   ) => void;
   archiveSet: (id: string, ctx: CloudSyncContext, now?: number) => void;
   setCloudStatus: (id: string, status: CloudSyncStatus) => void;
-  /** Replaces the item list for one set. Caller has already validated entitlement. */
-  replaceItems: (setId: string, next: PresentationSetItem[], ctx: CloudSyncContext, now?: number) => void;
+  /**
+   * Applies the full membership for one set, including included=false
+   * tombstones. Never a generic item-delete. Caller has validated entitlement.
+   */
+  applyPresentationSetSelection: (
+    setId: string,
+    next: PresentationSetItem[],
+    ctx: CloudSyncContext,
+    now?: number,
+  ) => void;
   importRecoveredSet: (set: PresentationSet) => void;
   replaceSyncedSetMetadata: (remote: PresentationSet) => void;
   /**
@@ -93,7 +101,14 @@ function sanitizeItem(raw: unknown, parent: PresentationSet): PresentationSetIte
   }
   const accountOwnerId = typeof raw.accountOwnerId === 'string' ? raw.accountOwnerId : null;
   if (accountOwnerId !== parent.accountOwnerId) return null;
-  if (!Number.isInteger(raw.position) || (raw.position as number) < 0) return null;
+  if (
+    typeof raw.position !== 'number' ||
+    !Number.isInteger(raw.position) ||
+    !Number.isSafeInteger(raw.position) ||
+    raw.position < 0
+  ) {
+    return null;
+  }
   if (typeof raw.included !== 'boolean') return null;
   const item: PresentationSetItem = {
     id: raw.id,
@@ -121,7 +136,7 @@ export function normalizePresentationSetsState(persisted: unknown): {
     .filter((s): s is PresentationSet => s !== null);
   const byId = new Map(sets.map((s) => [s.id, s]));
   const seenItemIds = new Set<string>();
-  const items: PresentationSetItem[] = [];
+  const sanitized: PresentationSetItem[] = [];
   for (const raw of Array.isArray(state.items) ? state.items : []) {
     if (!isRecord(raw) || typeof raw.presentationSetId !== 'string') continue;
     if (typeof raw.id === 'string' && seenItemIds.has(raw.id)) continue;
@@ -130,7 +145,31 @@ export function normalizePresentationSetsState(persisted: unknown): {
     const item = sanitizeItem(raw, parent);
     if (!item) continue;
     seenItemIds.add(item.id);
-    items.push(item);
+    sanitized.push(item);
+  }
+
+  // H1A: at most one item per (presentationSetId, operationalDocumentId).
+  // Never mint an id during hydration. Prefer a single included=true row;
+  // drop conflicting duplicates when a canonical row cannot be established.
+  const groups = new Map<string, PresentationSetItem[]>();
+  for (const item of sanitized) {
+    const key = `${item.presentationSetId}\0${item.operationalDocumentId}`;
+    const list = groups.get(key) ?? [];
+    list.push(item);
+    groups.set(key, list);
+  }
+  const items: PresentationSetItem[] = [];
+  for (const group of groups.values()) {
+    if (group.length === 1) {
+      items.push(group[0]!);
+      continue;
+    }
+    const included = group.filter((i) => i.included);
+    if (included.length === 1) {
+      items.push(included[0]!);
+      continue;
+    }
+    // Unsafe conflict (multiple live rows or multiple distinct tombstones).
   }
   return { sets, items };
 }
@@ -182,7 +221,7 @@ export const usePresentationSetsStore = create<PresentationSetsState>()(
           sets: s.sets.map((x) => (x.id === id ? { ...x, cloudStatus: status } : x)),
         })),
 
-      replaceItems: (setId, next, ctx, now = Date.now()) => {
+      applyPresentationSetSelection: (setId, next, ctx, now = Date.now()) => {
         const existing = get().sets.find((s) => s.id === setId);
         if (!existing) throw new Error('presentation set not found');
         for (const item of next) {
@@ -246,6 +285,10 @@ export const usePresentationSetsStore = create<PresentationSetsState>()(
           if (item.accountOwnerId !== local.accountOwnerId) throw new Error('item owner mismatch');
           validatePresentationSetItem(item);
         }
+        const ids = new Set(next.map((i) => i.id));
+        if (ids.size !== next.length) throw new Error('duplicate item id');
+        const docs = new Set(next.map((i) => i.operationalDocumentId));
+        if (docs.size !== next.length) throw new Error('duplicate document in set');
         set((s) => ({
           items: [...s.items.filter((i) => i.presentationSetId !== setId), ...next],
         }));
@@ -254,6 +297,15 @@ export const usePresentationSetsStore = create<PresentationSetsState>()(
       importRecoveredItem: (item) => {
         validatePresentationSetItem(item);
         if (get().items.some((i) => i.id === item.id)) return;
+        if (
+          get().items.some(
+            (i) =>
+              i.presentationSetId === item.presentationSetId &&
+              i.operationalDocumentId === item.operationalDocumentId,
+          )
+        ) {
+          throw new Error('duplicate document in set');
+        }
         set((s) => ({ items: [...s.items, item] }));
       },
 

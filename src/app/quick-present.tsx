@@ -40,6 +40,7 @@ import {
   PresentationSet,
   preflightStateCopy,
   QUICK_PRESENT_DISCLAIMER,
+  SHARE_CONFIRMATION_COPY,
   suggestSystemSetItems,
   SystemPresentationSetCode,
   systemSetLabel,
@@ -124,6 +125,12 @@ function QuickPresentScreen() {
         router.push({ pathname: '/paywall', params: { trigger: 'saved_presentation_sets' } });
         return;
       }
+      const live = usePresentationSetsStore.getState().sets.find((s) => s.id === id);
+      if (!live || live.accountOwnerId !== userId || live.lifecycle !== 'ACTIVE') {
+        setNotice('This saved set is archived and cannot be presented.');
+        setStage('landing');
+        return;
+      }
       setCustomSetId(id);
       setCode(null);
       setSelectedIds(selectedIdsForCustomSet(id));
@@ -132,7 +139,7 @@ function QuickPresentScreen() {
       setSession(null);
       setStage('review');
     },
-    [canSaveSets, router],
+    [canSaveSets, router, userId],
   );
 
   useFocusEffect(
@@ -152,9 +159,10 @@ function QuickPresentScreen() {
 
   useEffect(() => {
     const onChange = (next: AppStateStatus) => {
-      if (next !== 'active' && stage === 'presenting') {
-        destroyPresentationSession();
-        setSession(null);
+      if (next === 'active') return;
+      destroyPresentationSession();
+      setSession(null);
+      if (stage === 'presenting') {
         setStage('landing');
         setNotice('Presentation ended when the app left the foreground. Rebuild to present again.');
       }
@@ -182,6 +190,13 @@ function QuickPresentScreen() {
       const result = await runPresentationPreflight(selectedIds);
       setPreflight(result);
       setStage('preflight');
+    } catch (err) {
+      if (err instanceof PresentationSetDeniedError && err.reason === 'PREFLIGHT_SESSION_CHANGED') {
+        setNotice('Account changed. Check these copies again in this session.');
+        setPreflight(null);
+      } else {
+        setNotice('Could not check these copies. Try again.');
+      }
     } finally {
       setBusy(false);
     }
@@ -189,6 +204,11 @@ function QuickPresentScreen() {
 
   const presentReady = async () => {
     if (!preflight || preflight.readyCount === 0) return;
+    if (AppState.currentState !== 'active') {
+      destroyPresentationSession();
+      setNotice('Presentation is only available while the app is in the foreground.');
+      return;
+    }
     setBusy(true);
     setNotice(null);
     try {
@@ -197,16 +217,26 @@ function QuickPresentScreen() {
         setId: identity.id,
         setKind: identity.setKind,
         setName: identity.name,
-        documentIds: selectedIds,
+        documentIds: preflight.items.filter((i) => i.state === 'READY').map((i) => i.logicalDocumentId),
         personalAcknowledged: personalAck,
       });
+      if (AppState.currentState !== 'active') {
+        destroyPresentationSession();
+        setNotice('Presentation ended when the app left the foreground. Rebuild to present again.');
+        return;
+      }
       setSession(built);
       setStage('presenting');
     } catch (err) {
+      destroyPresentationSession();
       if (err instanceof PresentationSetDeniedError && err.reason === 'PERSONAL_ACK_REQUIRED') {
         setNotice(PERSONAL_PRESENT_ACK_COPY.body);
       } else if (err instanceof PresentationSetDeniedError && err.reason === 'NOT_ENTITLED') {
         router.push({ pathname: '/paywall', params: { trigger: 'saved_presentation_sets' } });
+      } else if (err instanceof PresentationSetDeniedError && err.reason === 'SET_ARCHIVED') {
+        setNotice('This saved set is archived and cannot be presented.');
+      } else if (err instanceof PresentationSetDeniedError && err.reason === 'APP_BACKGROUNDED') {
+        setNotice('Presentation ended when the app left the foreground. Rebuild to present again.');
       } else {
         setNotice('Could not start presentation. Check the files on this device and try again.');
       }
@@ -268,11 +298,11 @@ function QuickPresentScreen() {
                 setBusy(false);
               }
             }}
-            onSharePdf={async () => {
+            onSharePdf={async (confirmation) => {
               try {
                 await shareOperationalDocumentVersion({
                   documentId: item.logicalDocumentId,
-                  sensitiveConfirmation: 'NONE',
+                  sensitiveConfirmation: confirmation,
                 });
               } catch (err) {
                 if (err instanceof ShareDeniedError && err.reason === 'NOT_ENTITLED') {
@@ -478,11 +508,13 @@ function PreflightRow({
 }: {
   item: PreflightItem;
   onRestore: () => void;
-  onSharePdf: () => void;
+  onSharePdf: (confirmation: 'NONE' | 'PERSONAL_ACKNOWLEDGED') => void;
   canShare: boolean;
 }) {
+  const [shareAck, setShareAck] = useState(false);
   const tone: Tone =
     item.state === 'READY' ? 'green' : item.state === 'FINANCIAL_BLOCKED' ? 'rust' : 'amber';
+  const personalShare = SHARE_CONFIRMATION_COPY.PERSONAL_ACKNOWLEDGED;
   return (
     <Card style={styles.block}>
       <View style={styles.preflightHead}>
@@ -497,11 +529,25 @@ function PreflightRow({
             <Button label="Prepare offline" variant="secondary" onPress={onRestore} />
           </View>
         )}
-      {item.state === 'PDF_EXTERNAL_ONLY' && canShare && (
+      {item.state === 'PDF_EXTERNAL_ONLY' && canShare && item.personalSensitive && !shareAck && (
         <View style={styles.rowGap}>
-          <Button label="Share / Export this PDF" variant="secondary" onPress={onSharePdf} />
+          <Text style={styles.muted}>{personalShare.body}</Text>
+          <Button label={personalShare.confirm} variant="secondary" onPress={() => setShareAck(true)} />
         </View>
       )}
+      {item.state === 'PDF_EXTERNAL_ONLY' &&
+        canShare &&
+        (!item.personalSensitive || shareAck) && (
+          <View style={styles.rowGap}>
+            <Button
+              label="Share / Export this PDF"
+              variant="secondary"
+              onPress={() =>
+                onSharePdf(item.personalSensitive ? 'PERSONAL_ACKNOWLEDGED' : 'NONE')
+              }
+            />
+          </View>
+        )}
       {item.state === 'PDF_EXTERNAL_ONLY' && !canShare && (
         <Text style={styles.muted}>
           This PDF cannot be shown in a swipe session. Other ready images can still be presented.

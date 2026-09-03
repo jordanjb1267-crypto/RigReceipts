@@ -169,6 +169,11 @@ export async function recoverPresentationSetsFromCloud(
       // Keep local items; do not overwrite unsynced edits.
       continue;
     }
+    const uniqueDocs = new Set(mapped.map((i) => i.operationalDocumentId));
+    if (uniqueDocs.size !== mapped.length) {
+      result.integrityConflicts++;
+      continue;
+    }
     try {
       store.replaceSyncedSetItems(live.id, mapped);
       result.itemsRecovered += mapped.length;
@@ -199,16 +204,10 @@ export async function syncPendingPresentationSets(
   for (const set of usePresentationSetsStore.getState().sets) {
     const decision = authorizePresentationSetCloudWrite(deps.ctx(), set.accountOwnerId);
     if (!decision.allowed) continue;
-    const pendingItems = usePresentationSetsStore
+    const membership = usePresentationSetsStore
       .getState()
       .items.filter((i) => i.presentationSetId === set.id);
-    const setNeedsSync = set.cloudStatus === 'pending_sync';
-    if (!setNeedsSync && pendingItems.every((i) => set.cloudStatus === 'synced')) {
-      // Items ride with the parent set's cloud status; if the set is synced
-      // and was not mutated, skip. A pending set always upserts items too.
-      continue;
-    }
-    if (!setNeedsSync) continue;
+    if (set.cloudStatus !== 'pending_sync') continue;
 
     try {
       assertRemoteEffectAuthorized(
@@ -222,7 +221,9 @@ export async function syncPendingPresentationSets(
       await deps.remote.upsertSet(
         toRemotePresentationSetRow(set, decision.userId) as unknown as Record<string, unknown>,
       );
-      for (const item of pendingItems) {
+      // H1B: every membership row, including included=false tombstones,
+      // must land remotely before the parent may be marked synced.
+      for (const item of membership) {
         assertRemoteEffectAuthorized(
           PRESENTATION_SET_CLOUD_CAPABILITY,
           item.accountOwnerId,
@@ -239,6 +240,7 @@ export async function syncPendingPresentationSets(
       usePresentationSetsStore.getState().setCloudStatus(set.id, 'synced');
       result.setsSynced++;
     } catch (err) {
+      // Partial failure: parent stays pending_sync. Do not mark synced.
       if (err instanceof CloudSyncDeniedError) {
         usePresentationSetsStore.getState().reconcileCloudStatuses(deps.ctx());
       }

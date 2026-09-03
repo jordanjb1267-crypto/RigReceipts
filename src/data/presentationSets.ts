@@ -1,4 +1,5 @@
 import {
+  applySelectionToMembership,
   canMutateCustomPresentationSets,
   canUseFeature,
   CloudSyncContext,
@@ -14,7 +15,6 @@ import {
   PreflightItem,
   PreflightResult,
   sessionItemFromReady,
-  sessionNeedsPersonalAck,
   summarizePreflight,
   SYSTEM_PRESENTATION_SET_KIND,
   SystemPresentationSetCode,
@@ -45,7 +45,12 @@ export class PresentationSetDeniedError extends Error {
     | 'FINANCIAL_BLOCKED'
     | 'SESSION_DENIED'
     | 'PERSONAL_ACK_REQUIRED'
-    | 'NO_READY_IMAGES';
+    | 'NO_READY_IMAGES'
+    | 'PREFLIGHT_SESSION_CHANGED'
+    | 'SESSION_CHANGED'
+    | 'SET_ARCHIVED'
+    | 'ARCHIVED'
+    | 'APP_BACKGROUNDED';
   constructor(
     reason: PresentationSetDeniedError['reason'],
     detail?: string,
@@ -61,6 +66,8 @@ export interface PresentationSetDeps {
   ctx: () => CloudSyncContext;
   now: () => number;
   newId: () => string;
+  /** Pass 2.1 H6 — injectable AppState. Defaults to active in tests. */
+  appActivity?: () => 'active' | 'inactive' | 'background' | 'unknown';
 }
 
 export const defaultPresentationSetDeps = (): PresentationSetDeps => ({
@@ -146,10 +153,10 @@ export function archiveCustomPresentationSet(
 }
 
 /**
- * Replaces the item list. Only ACTIVE, session-visible, non-FINANCIAL logical
- * ids are stored. Title/path/hash/bytes are never persisted on the set.
- * Documents that later become archived, financial or missing stay on the set
- * and are reported at preflight — this function does not rewrite them later.
+ * Reconciles membership for one custom set (Pass 2.1 H1). Existing
+ * (set, document) rows keep their item id. Newly selected documents mint one
+ * id. Removed documents stay as included=false tombstones. Re-add restores
+ * the same id. Title/path/hash/bytes are never persisted.
  */
 export function setPresentationSetItems(
   setId: string,
@@ -163,7 +170,7 @@ export function setPresentationSetItems(
     ctx,
   );
   const wallet = useRoadWalletStore.getState();
-  const next: PresentationSetItem[] = [];
+  const selected: string[] = [];
   const seen = new Set<string>();
   for (const docId of documentIds) {
     if (seen.has(docId)) continue;
@@ -175,16 +182,13 @@ export function setPresentationSetItems(
       continue;
     }
     seen.add(docId);
-    next.push({
-      id: deps.newId(),
-      presentationSetId: set.id,
-      accountOwnerId: set.accountOwnerId,
-      operationalDocumentId: doc.id,
-      position: next.length,
-      included: true,
-    });
+    selected.push(doc.id);
   }
-  usePresentationSetsStore.getState().replaceItems(set.id, next, ctx, deps.now());
+  const existing = usePresentationSetsStore
+    .getState()
+    .items.filter((i) => i.presentationSetId === set.id);
+  const next = applySelectionToMembership(existing, selected, set, deps.newId);
+  usePresentationSetsStore.getState().applyPresentationSetSelection(set.id, next, ctx, deps.now());
   return usePresentationSetsStore.getState().items.filter((i) => i.presentationSetId === set.id);
 }
 
@@ -192,14 +196,24 @@ export function setPresentationSetItems(
 // Preflight + session
 // ---------------------------------------------------------------------------
 
+const sessionKey = (ctx: CloudSyncContext): string | null => ctx.userId;
+
 export async function runPresentationPreflight(
   documentIds: string[],
   deps: PresentationSetDeps = defaultPresentationSetDeps(),
 ): Promise<PreflightResult> {
-  const ctx = deps.ctx();
-  const wallet = useRoadWalletStore.getState();
+  const starting = sessionKey(deps.ctx());
+  const assertSameSession = () => {
+    if (sessionKey(deps.ctx()) !== starting) {
+      throw new PresentationSetDeniedError('PREFLIGHT_SESSION_CHANGED');
+    }
+  };
+
   const evaluated: PreflightItem[] = [];
   for (const id of documentIds) {
+    assertSameSession();
+    const wallet = useRoadWalletStore.getState();
+    const ctx = deps.ctx();
     const doc = wallet.documents.find((d) => d.id === id);
     const version = doc ? currentVersion(wallet.versions, doc.id) : null;
     if (
@@ -209,6 +223,7 @@ export async function runPresentationPreflight(
       !isFinancialBlockedFromQuickPresent(doc) &&
       doc.lifecycle === 'ACTIVE'
     ) {
+      assertSameSession();
       const fresh = await reverifyDocumentFile(
         deps.fileStore,
         {
@@ -219,10 +234,12 @@ export async function runPresentationPreflight(
         version.fileKind,
         deps.now,
       );
+      assertSameSession();
       useRoadWalletStore.getState().setVersionFileCache(version.id, fresh);
     }
+    assertSameSession();
     const live = useRoadWalletStore.getState();
-    evaluated.push(evaluatePreflightItem(id, ctx.userId, live.documents, live.versions));
+    evaluated.push(evaluatePreflightItem(id, deps.ctx().userId, live.documents, live.versions));
   }
   return summarizePreflight(evaluated);
 }
@@ -235,64 +252,122 @@ export interface BuildSessionInput {
   personalAcknowledged: boolean;
 }
 
+const activityOf = (deps: PresentationSetDeps): 'active' | 'inactive' | 'background' | 'unknown' =>
+  deps.appActivity?.() ?? 'active';
+
 /**
- * Live re-check immediately before a swipe session. Cached READY is never
- * trusted: every selected IMAGE is re-verified again here. FINANCIAL is
- * refused. PERSONAL_SENSITIVE requires `personalAcknowledged`.
+ * Live final authorization AFTER every await and immediately before minting
+ * the ephemeral session (Pass 2.1 H5). Cached preflight rows are never the
+ * privacy or version decision. The current DocumentVersion is re-resolved.
  */
 export async function buildQuickPresentSession(
   input: BuildSessionInput,
   deps: PresentationSetDeps = defaultPresentationSetDeps(),
 ): Promise<PresentationSession> {
-  const ctx = deps.ctx();
-  if (!canUseFeature(ctx.tier, 'quickPresent')) {
+  if (activityOf(deps) !== 'active') {
+    destroyPresentationSession();
+    throw new PresentationSetDeniedError('APP_BACKGROUNDED');
+  }
+  const startingUserId = deps.ctx().userId;
+  const assertSameSession = (): CloudSyncContext => {
+    const live = deps.ctx();
+    if (live.userId !== startingUserId) {
+      throw new PresentationSetDeniedError('SESSION_CHANGED');
+    }
+    return live;
+  };
+
+  const start = assertSameSession();
+  if (!canUseFeature(start.tier, 'quickPresent')) {
+    throw new PresentationSetDeniedError('SESSION_DENIED', 'quickPresent');
+  }
+
+  // Physical re-verification (session-safe). Results are not trusted as the
+  // final privacy/version decision — that happens after this loop.
+  await runPresentationPreflight(input.documentIds, deps);
+
+  const live = assertSameSession();
+  if (!canUseFeature(live.tier, 'quickPresent')) {
     throw new PresentationSetDeniedError('SESSION_DENIED', 'quickPresent');
   }
   if (input.setKind === 'CUSTOM') {
-    if (!canUseFeature(ctx.tier, 'savedPresentationSets')) {
+    if (!canUseFeature(live.tier, 'savedPresentationSets')) {
       throw new PresentationSetDeniedError('NOT_ENTITLED');
     }
     const set = usePresentationSetsStore.getState().sets.find((s) => s.id === input.setId);
-    if (!set || set.accountOwnerId !== ctx.userId) {
+    if (!set) throw new PresentationSetDeniedError('NOT_FOUND');
+    if (set.accountOwnerId !== live.userId) throw new PresentationSetDeniedError('NOT_VISIBLE');
+    if (set.lifecycle !== 'ACTIVE') throw new PresentationSetDeniedError('SET_ARCHIVED');
+  }
+
+  const items: PresentationSession['items'] = [];
+  let needsPersonalAck = false;
+  for (const docId of input.documentIds) {
+    const ctxNow = assertSameSession();
+    const wallet = useRoadWalletStore.getState();
+    const doc = wallet.documents.find((d) => d.id === docId);
+    if (!doc || !isVisibleInSession(doc, ctxNow.userId)) {
       throw new PresentationSetDeniedError('NOT_VISIBLE');
     }
-  }
+    if (doc.lifecycle !== 'ACTIVE') throw new PresentationSetDeniedError('ARCHIVED');
+    if (isFinancialBlockedFromQuickPresent(doc)) {
+      throw new PresentationSetDeniedError('FINANCIAL_BLOCKED');
+    }
 
-  const preflight = await runPresentationPreflight(input.documentIds, deps);
-  const ready = preflight.items.filter((i) => i.state === 'READY');
-  if (ready.length === 0) throw new PresentationSetDeniedError('NO_READY_IMAGES');
-  if (sessionNeedsPersonalAck(ready) && !input.personalAcknowledged) {
-    throw new PresentationSetDeniedError('PERSONAL_ACK_REQUIRED');
-  }
-
-  const wallet = useRoadWalletStore.getState();
-  const items = [];
-  for (const row of ready) {
-    const doc = wallet.documents.find((d) => d.id === row.logicalDocumentId);
-    const version = row.exactVersionId
-      ? wallet.versions.find((v) => v.id === row.exactVersionId)
-      : null;
-    if (!doc || !version) continue;
-    if (!isVisibleInSession(doc, ctx.userId) || doc.lifecycle !== 'ACTIVE') continue;
-    if (isFinancialBlockedFromQuickPresent(doc)) continue;
-    if (version.fileKind !== 'IMAGE' || version.fileCache.state !== 'READY') continue;
-    if (version.accountOwnerId !== doc.accountOwnerId) continue;
-    // Live re-verify once more immediately before minting the session URI.
-    const again = await reverifyDocumentFile(
-      deps.fileStore,
-      {
-        ...version.fileCache,
-        relativePath: version.relativePath,
-        sha256: version.sha256,
-      },
-      version.fileKind,
-      deps.now,
-    );
-    useRoadWalletStore.getState().setVersionFileCache(version.id, again);
-    if (again.state !== 'READY') continue;
+    // Resolve the LIVE current version (never a preflight snapshot) and
+    // reverify it. If a replacement lands mid-await, resolve the new current
+    // and verify that — never mint stale v1.
+    let version = currentVersion(wallet.versions, doc.id);
+    let verified: Awaited<ReturnType<typeof reverifyDocumentFile>> | null = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (!version) break;
+      if (version.accountOwnerId !== doc.accountOwnerId) {
+        throw new PresentationSetDeniedError('NOT_VISIBLE');
+      }
+      if (version.fileKind !== 'IMAGE') {
+        version = null;
+        break;
+      }
+      assertSameSession();
+      const again = await reverifyDocumentFile(
+        deps.fileStore,
+        {
+          ...version.fileCache,
+          relativePath: version.relativePath,
+          sha256: version.sha256,
+        },
+        version.fileKind,
+        deps.now,
+      );
+      assertSameSession();
+      useRoadWalletStore.getState().setVersionFileCache(version.id, again);
+      const liveCurrent = currentVersion(useRoadWalletStore.getState().versions, doc.id);
+      if (!liveCurrent) {
+        version = null;
+        break;
+      }
+      if (liveCurrent.id !== version.id) {
+        version = liveCurrent;
+        continue;
+      }
+      verified = again;
+      break;
+    }
+    if (!version || !verified || verified.state !== 'READY' || version.fileKind !== 'IMAGE') {
+      continue;
+    }
+    const liveDoc = useRoadWalletStore.getState().documents.find((d) => d.id === doc.id);
+    if (!liveDoc || !isVisibleInSession(liveDoc, assertSameSession().userId)) {
+      throw new PresentationSetDeniedError('NOT_VISIBLE');
+    }
+    if (liveDoc.lifecycle !== 'ACTIVE') throw new PresentationSetDeniedError('ARCHIVED');
+    if (isFinancialBlockedFromQuickPresent(liveDoc)) {
+      throw new PresentationSetDeniedError('FINANCIAL_BLOCKED');
+    }
+    if (liveDoc.sensitivity === 'PERSONAL_SENSITIVE') needsPersonalAck = true;
     items.push(
       sessionItemFromReady(
-        doc,
+        liveDoc,
         version,
         deps.fileStore.uriFor(version.relativePath),
         new Date(deps.now()),
@@ -300,6 +375,49 @@ export async function buildQuickPresentSession(
     );
   }
   if (items.length === 0) throw new PresentationSetDeniedError('NO_READY_IMAGES');
+
+  // Final authorization boundary AFTER every await, immediately before mint.
+  const finalCtx = assertSameSession();
+  if (!canUseFeature(finalCtx.tier, 'quickPresent')) {
+    throw new PresentationSetDeniedError('SESSION_DENIED', 'quickPresent');
+  }
+  if (input.setKind === 'CUSTOM') {
+    if (!canUseFeature(finalCtx.tier, 'savedPresentationSets')) {
+      throw new PresentationSetDeniedError('NOT_ENTITLED');
+    }
+    const set = usePresentationSetsStore.getState().sets.find((s) => s.id === input.setId);
+    if (!set) throw new PresentationSetDeniedError('NOT_FOUND');
+    if (set.accountOwnerId !== finalCtx.userId) throw new PresentationSetDeniedError('NOT_VISIBLE');
+    if (set.lifecycle !== 'ACTIVE') throw new PresentationSetDeniedError('SET_ARCHIVED');
+  }
+  needsPersonalAck = false;
+  for (const item of items) {
+    const liveDoc = useRoadWalletStore.getState().documents.find((d) => d.id === item.logicalDocumentId);
+    if (!liveDoc || !isVisibleInSession(liveDoc, finalCtx.userId)) {
+      throw new PresentationSetDeniedError('NOT_VISIBLE');
+    }
+    if (liveDoc.lifecycle !== 'ACTIVE') throw new PresentationSetDeniedError('ARCHIVED');
+    if (isFinancialBlockedFromQuickPresent(liveDoc)) {
+      throw new PresentationSetDeniedError('FINANCIAL_BLOCKED');
+    }
+    if (liveDoc.sensitivity === 'PERSONAL_SENSITIVE') needsPersonalAck = true;
+    const liveVersion = currentVersion(useRoadWalletStore.getState().versions, liveDoc.id);
+    if (
+      !liveVersion ||
+      liveVersion.id !== item.exactVersionId ||
+      liveVersion.fileKind !== 'IMAGE' ||
+      liveVersion.accountOwnerId !== liveDoc.accountOwnerId
+    ) {
+      throw new PresentationSetDeniedError('SESSION_DENIED', 'current_version_changed');
+    }
+  }
+  if (needsPersonalAck && !input.personalAcknowledged) {
+    throw new PresentationSetDeniedError('PERSONAL_ACK_REQUIRED');
+  }
+  if (activityOf(deps) !== 'active') {
+    destroyPresentationSession();
+    throw new PresentationSetDeniedError('APP_BACKGROUNDED');
+  }
 
   const session: PresentationSession = {
     id: deps.newId(),

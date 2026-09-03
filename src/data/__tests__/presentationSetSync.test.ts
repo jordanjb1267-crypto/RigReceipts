@@ -1,4 +1,10 @@
-import { newOpaqueId, PresentationSet, toRemotePresentationSetRow } from '@/domain';
+import {
+  newOpaqueId,
+  PresentationSet,
+  PresentationSetItem,
+  toRemotePresentationSetItemRow,
+  toRemotePresentationSetRow,
+} from '@/domain';
 import { useAuthStore } from '@/store/auth';
 import { usePresentationSetsStore } from '@/store/presentationSets';
 import { useSubscriptionStore } from '@/store/subscription';
@@ -14,6 +20,7 @@ class FakeSetRemote implements PresentationSetRemote {
   items: Record<string, unknown>[] = [];
   upserts: { table: string; row: Record<string, unknown> }[] = [];
   failFetch = false;
+  failIncludedFalseOnce = false;
 
   async fetchSets(userId: string) {
     if (this.failFetch) throw new Error('network');
@@ -29,6 +36,17 @@ class FakeSetRemote implements PresentationSetRemote {
     this.sets.push(row);
   }
   async upsertItem(row: Record<string, unknown>) {
+    const clash = this.items.find(
+      (i) =>
+        i.presentation_set_id === row.presentation_set_id &&
+        i.operational_document_id === row.operational_document_id &&
+        i.id !== row.id,
+    );
+    if (clash) throw new Error('unique(set,document) violated');
+    if (this.failIncludedFalseOnce && row.included === false) {
+      this.failIncludedFalseOnce = false;
+      throw new Error('tombstone upsert failed');
+    }
     this.upserts.push({ table: 'presentation_set_items', row });
     this.items = this.items.filter((s) => s.id !== row.id);
     this.items.push(row);
@@ -151,5 +169,117 @@ describe('presentation set writes', () => {
     expect(usePresentationSetsStore.getState().sets.find((s) => s.id === created.id)?.cloudStatus).toBe(
       'synced',
     );
+  });
+
+  it('H1B writes included=false tombstones, retries after a crash, and never violates unique(set,document)', async () => {
+    const setId = id(4);
+    const docA = id(40);
+    const docB = id(41);
+    const itemA: PresentationSetItem = {
+      id: id(42),
+      presentationSetId: setId,
+      accountOwnerId: 'user-a',
+      operationalDocumentId: docA,
+      position: 0,
+      included: true,
+    };
+    const itemB: PresentationSetItem = {
+      id: id(43),
+      presentationSetId: setId,
+      accountOwnerId: 'user-a',
+      operationalDocumentId: docB,
+      position: 1,
+      included: true,
+    };
+    const created: PresentationSet = {
+      id: setId,
+      accountOwnerId: 'user-a',
+      setKind: 'CUSTOM',
+      name: 'Pack',
+      lifecycle: 'ACTIVE',
+      cloudStatus: 'pending_sync',
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    usePresentationSetsStore.getState().addSet(created);
+    usePresentationSetsStore.getState().applyPresentationSetSelection(
+      setId,
+      [itemA, itemB],
+      {
+        userId: 'user-a',
+        tier: 'driver_pro',
+        supabaseConfigured: true,
+      },
+    );
+    await syncPendingPresentationSets(deps());
+    expect(remote.items).toHaveLength(2);
+    expect(remote.items.every((i) => i.included === true)).toBe(true);
+
+    usePresentationSetsStore.getState().applyPresentationSetSelection(
+      setId,
+      [itemA, { ...itemB, included: false }],
+      {
+        userId: 'user-a',
+        tier: 'driver_pro',
+        supabaseConfigured: true,
+      },
+    );
+    remote.failIncludedFalseOnce = true;
+    const crashed = await syncPendingPresentationSets(deps());
+    expect(crashed.setsSynced).toBe(0);
+    expect(usePresentationSetsStore.getState().sets.find((s) => s.id === setId)?.cloudStatus).toBe(
+      'pending_sync',
+    );
+    expect(remote.items.find((i) => i.id === itemB.id)?.included).not.toBe(false);
+
+    const retried = await syncPendingPresentationSets(deps());
+    expect(retried.setsSynced).toBe(1);
+    expect(remote.items.find((i) => i.id === itemB.id)).toMatchObject({
+      id: itemB.id,
+      included: false,
+      operational_document_id: docB,
+    });
+    expect(usePresentationSetsStore.getState().sets.find((s) => s.id === setId)?.cloudStatus).toBe(
+      'synced',
+    );
+
+    usePresentationSetsStore.getState().clear();
+    const recovered = await recoverPresentationSetsFromCloud(deps());
+    expect(recovered.outcome).toBe('completed');
+    const localB = usePresentationSetsStore
+      .getState()
+      .items.find((i) => i.operationalDocumentId === docB);
+    expect(localB).toMatchObject({ id: itemB.id, included: false });
+  });
+
+  it('recovery of duplicate set/document rows is an integrity conflict, not a write', async () => {
+    const setId = id(50);
+    const docId = id(51);
+    const parent: PresentationSet = {
+      id: setId,
+      accountOwnerId: 'user-a',
+      setKind: 'CUSTOM',
+      name: 'Dupes',
+      lifecycle: 'ACTIVE',
+      cloudStatus: 'synced',
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    remote.sets.push(toRemotePresentationSetRow(parent, 'user-a') as unknown as Record<string, unknown>);
+    const item = (seed: number): PresentationSetItem => ({
+      id: id(seed),
+      presentationSetId: setId,
+      accountOwnerId: 'user-a',
+      operationalDocumentId: docId,
+      position: 0,
+      included: true,
+    });
+    remote.items.push(
+      toRemotePresentationSetItemRow(item(52), 'user-a') as unknown as Record<string, unknown>,
+      toRemotePresentationSetItemRow(item(53), 'user-a') as unknown as Record<string, unknown>,
+    );
+    const result = await recoverPresentationSetsFromCloud(deps());
+    expect(result.integrityConflicts).toBeGreaterThan(0);
+    expect(usePresentationSetsStore.getState().items).toHaveLength(0);
   });
 });

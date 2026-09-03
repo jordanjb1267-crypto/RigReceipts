@@ -196,6 +196,8 @@ export {
   mergeRecoveredPresentationSet,
   emptyPresentationSetRecoveryResult,
   finalizePresentationSetRecovery,
+  writeSafeFromSetRecovery,
+  applySelectionToMembership,
   evaluatePreflightItem,
   summarizePreflight,
   sessionNeedsPersonalAck,

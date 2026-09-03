@@ -12,6 +12,7 @@ import {
   toRemoteVersionRow,
   PresentationSetRecoveryResult,
   writeSafeFromRecovery,
+  writeSafeFromSetRecovery,
 } from '@/domain';
 import { getSupabaseClient } from '@/lib/supabase';
 import { usePresentationSetsStore } from '@/store/presentationSets';
@@ -238,6 +239,7 @@ export async function syncPendingRoadWallet(d: SyncDeps = deps()): Promise<RoadW
 export interface RoadWalletCloudCycleResult {
   recovery: RoadWalletRecoveryResult;
   writeSafe: boolean;
+  setWriteSafe: boolean;
   writes: RoadWalletSyncResult | null;
   setRecovery: PresentationSetRecoveryResult | null;
   setWrites: PresentationSetSyncResult | null;
@@ -255,7 +257,8 @@ let cycleRerunRequested = false;
 
 const emptyCycle = (recovery: RoadWalletRecoveryResult): RoadWalletCloudCycleResult => ({
   recovery,
-  writeSafe: writeSafeFromRecovery(recovery),
+  writeSafe: false,
+  setWriteSafe: false,
   writes: null,
   setRecovery: null,
   setWrites: null,
@@ -271,11 +274,12 @@ const emptyCycle = (recovery: RoadWalletRecoveryResult): RoadWalletCloudCycleRes
  *   5. recover custom presentation sets (failure does not mutate versions or
  *      overwrite local unsynced sets);
  *   6. reconcile local cloud states;
- *   7. pending WRITE sync only when writeSafe AND the relevant capability
- *      authorizes it (Road Wallet: cloudDocumentBackup; sets: that plus
- *      savedPresentationSets).
+ *   7. Road Wallet writes only when writeSafe; presentation-set writes only
+ *      when writeSafe AND setWriteSafe (set recovery completed with zero
+ *      integrity conflicts). Set-recovery failure does not block Road Wallet
+ *      document/version writes.
  * fetch_failed, cancelled, session change, or unresolved integrity conflicts
- * skip remote writes. Concurrent cycles coalesce.
+ * skip the affected write plane. Concurrent cycles coalesce.
  */
 export function runRoadWalletCloudCycle(
   extras: CloudCycleDeps = {},
@@ -293,7 +297,9 @@ export function runRoadWalletCloudCycle(
     try {
       const ctx = currentCloudSyncContext();
       if (!ctx.userId || !ctx.supabaseConfigured) {
-        await syncRw();
+        // H3: local-only reconcile of BOTH stores. No remote recovery or write.
+        useRoadWalletStore.getState().reconcileCloudStatuses(ctx);
+        usePresentationSetsStore.getState().reconcileCloudStatuses(ctx);
         return emptyCycle(emptyRecoveryResult(ctx.userId ? 'not_configured' : 'signed_out'));
       }
 
@@ -317,6 +323,7 @@ export function runRoadWalletCloudCycle(
           outcome: 'fetch_failed',
         };
       }
+      const setWriteSafe = writeSafeFromSetRecovery(setRecovery);
 
       useRoadWalletStore.getState().reconcileCloudStatuses(currentCloudSyncContext());
       usePresentationSetsStore.getState().reconcileCloudStatuses(currentCloudSyncContext());
@@ -325,10 +332,12 @@ export function runRoadWalletCloudCycle(
       let setWrites: PresentationSetSyncResult | null = null;
       if (writeSafe) {
         writes = await syncRw();
+      }
+      if (writeSafe && setWriteSafe) {
         setWrites = await syncSets();
       }
 
-      return { recovery, writeSafe, writes, setRecovery, setWrites };
+      return { recovery, writeSafe, setWriteSafe, writes, setRecovery, setWrites };
     } finally {
       cycleInFlight = null;
       if (cycleRerunRequested) {

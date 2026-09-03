@@ -1,6 +1,7 @@
 import { CloudSyncContext, emptyRecoveryResult, newOpaqueId, sha256Hex } from '@/domain';
 import * as supabaseMock from '@/lib/supabase';
 import { useAuthStore } from '@/store/auth';
+import { usePresentationSetsStore } from '@/store/presentationSets';
 import { useRoadWalletStore } from '@/store/roadWallet';
 import { useSubscriptionStore } from '@/store/subscription';
 
@@ -197,6 +198,7 @@ beforeEach(() => {
   remote.reset();
   __resetDocumentSyncForTests();
   useRoadWalletStore.getState().clear();
+  usePresentationSetsStore.getState().clear();
   fileStore = new MemoryDocumentFileStore();
   fileStore.addSource('file:///tmp/picker/cab-card.jpg', JPEG, 'image/jpeg');
   fileStore.addSource('file:///tmp/picker/coi.pdf', PDF, 'application/pdf');
@@ -671,6 +673,7 @@ describe('Pass 2 H0 — writeSafe read-before-write', () => {
       syncPendingPresentationSets: async () => ({ setsSynced: 0, itemsSynced: 0 }),
     });
     expect(result.writeSafe).toBe(true);
+    expect(result.setWriteSafe).toBe(true);
     expect(writes).toBe(1);
   });
 
@@ -727,6 +730,7 @@ describe('Pass 2 H0 — writeSafe read-before-write', () => {
       syncPendingPresentationSets: async () => ({ setsSynced: 0, itemsSynced: 0 }),
     });
     expect(result.writeSafe).toBe(true);
+    expect(result.setWriteSafe).toBe(true);
     expect(writes).toBe(1);
   });
 
@@ -770,9 +774,200 @@ describe('Pass 2 H0 — writeSafe read-before-write', () => {
       }),
     });
     expect(result.writeSafe).toBe(true);
+    expect(result.setWriteSafe).toBe(true);
     expect(remote.uploads).toHaveLength(0);
     expect(remote.upserts).toHaveLength(0);
     expect(doc(document.id).cloudStatus).toBe('local_only');
+  });
+});
+
+describe('Pass 2.1 H2/H3 — setWriteSafe + signed-out reconcile', () => {
+  const recoverOk = async () => emptyRecoveryResult('completed');
+  const recoverFail = async () => emptyRecoveryResult('fetch_failed');
+  const setOk = async () => ({
+    setsRecovered: 0,
+    itemsRecovered: 0,
+    integrityConflicts: 0,
+    skippedLocalChanges: 0,
+    outcome: 'completed' as const,
+  });
+  const setFail = async () => ({
+    setsRecovered: 0,
+    itemsRecovered: 0,
+    integrityConflicts: 0,
+    skippedLocalChanges: 0,
+    outcome: 'fetch_failed' as const,
+  });
+  const setConflict = async () => ({
+    setsRecovered: 0,
+    itemsRecovered: 0,
+    integrityConflicts: 1,
+    skippedLocalChanges: 0,
+    outcome: 'completed' as const,
+  });
+
+  it('RW good + set good → both write planes run', async () => {
+    signIn('user-a');
+    setTier('driver_pro');
+    let rw = 0;
+    let sets = 0;
+    const result = await runRoadWalletCloudCycle({
+      recoverRoadWallet: recoverOk,
+      syncPendingRoadWallet: async () => {
+        rw++;
+        return { documentsSynced: 0, versionsSynced: 0, integrityFailures: 0 };
+      },
+      recoverPresentationSets: setOk,
+      syncPendingPresentationSets: async () => {
+        sets++;
+        return { setsSynced: 0, itemsSynced: 0 };
+      },
+    });
+    expect(result.writeSafe).toBe(true);
+    expect(result.setWriteSafe).toBe(true);
+    expect(rw).toBe(1);
+    expect(sets).toBe(1);
+  });
+
+  it('RW recovery failed → neither write plane runs', async () => {
+    signIn('user-a');
+    setTier('driver_pro');
+    let rw = 0;
+    let sets = 0;
+    const result = await runRoadWalletCloudCycle({
+      recoverRoadWallet: recoverFail,
+      syncPendingRoadWallet: async () => {
+        rw++;
+        return { documentsSynced: 0, versionsSynced: 0, integrityFailures: 0 };
+      },
+      recoverPresentationSets: setOk,
+      syncPendingPresentationSets: async () => {
+        sets++;
+        return { setsSynced: 0, itemsSynced: 0 };
+      },
+    });
+    expect(result.writeSafe).toBe(false);
+    expect(result.setWriteSafe).toBe(true);
+    expect(rw).toBe(0);
+    expect(sets).toBe(0);
+  });
+
+  it('RW good + set fetch_failed → RW writes run, set writes do not', async () => {
+    signIn('user-a');
+    setTier('driver_pro');
+    let rw = 0;
+    let sets = 0;
+    const result = await runRoadWalletCloudCycle({
+      recoverRoadWallet: recoverOk,
+      syncPendingRoadWallet: async () => {
+        rw++;
+        return { documentsSynced: 0, versionsSynced: 0, integrityFailures: 0 };
+      },
+      recoverPresentationSets: setFail,
+      syncPendingPresentationSets: async () => {
+        sets++;
+        return { setsSynced: 0, itemsSynced: 0 };
+      },
+    });
+    expect(result.writeSafe).toBe(true);
+    expect(result.setWriteSafe).toBe(false);
+    expect(rw).toBe(1);
+    expect(sets).toBe(0);
+  });
+
+  it('RW good + set integrity conflict → RW writes run, set writes do not', async () => {
+    signIn('user-a');
+    setTier('driver_pro');
+    let rw = 0;
+    let sets = 0;
+    const result = await runRoadWalletCloudCycle({
+      recoverRoadWallet: recoverOk,
+      syncPendingRoadWallet: async () => {
+        rw++;
+        return { documentsSynced: 0, versionsSynced: 0, integrityFailures: 0 };
+      },
+      recoverPresentationSets: setConflict,
+      syncPendingPresentationSets: async () => {
+        sets++;
+        return { setsSynced: 0, itemsSynced: 0 };
+      },
+    });
+    expect(result.writeSafe).toBe(true);
+    expect(result.setWriteSafe).toBe(false);
+    expect(rw).toBe(1);
+    expect(sets).toBe(0);
+  });
+
+  it('later clean set recovery permits pending set writes', async () => {
+    signIn('user-a');
+    setTier('driver_pro');
+    let sets = 0;
+    const syncSets = async () => {
+      sets++;
+      return { setsSynced: 0, itemsSynced: 0 };
+    };
+    const rw = {
+      recoverRoadWallet: recoverOk,
+      syncPendingRoadWallet: async () => ({
+        documentsSynced: 0,
+        versionsSynced: 0,
+        integrityFailures: 0,
+      }),
+    };
+    await runRoadWalletCloudCycle({ ...rw, recoverPresentationSets: setFail, syncPendingPresentationSets: syncSets });
+    expect(sets).toBe(0);
+    __resetDocumentSyncForTests();
+    await runRoadWalletCloudCycle({ ...rw, recoverPresentationSets: setOk, syncPendingPresentationSets: syncSets });
+    expect(sets).toBe(1);
+  });
+
+  it('Free recovery does not create new set writes', async () => {
+    signIn('user-a');
+    setTier('free');
+    let sets = 0;
+    await runRoadWalletCloudCycle({
+      recoverRoadWallet: recoverOk,
+      recoverPresentationSets: setOk,
+      syncPendingPresentationSets: async () => {
+        sets++;
+        return { setsSynced: 0, itemsSynced: 0 };
+      },
+    });
+    expect(remote.upserts).toHaveLength(0);
+    expect(remote.uploads).toHaveLength(0);
+    expect(sets).toBe(1);
+  });
+
+  it('signed-out reconciles both stores locally and calls no remote recovery or write', async () => {
+    signIn('user-a');
+    setTier('driver_pro');
+    usePresentationSetsStore.getState().addSet({
+      id: nextId(),
+      accountOwnerId: 'user-a',
+      setKind: 'CUSTOM',
+      name: 'Pending',
+      lifecycle: 'ACTIVE',
+      cloudStatus: 'pending_sync',
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    signIn(null);
+    let remoteCalled = false;
+    const boom = async () => {
+      remoteCalled = true;
+      throw new Error('remote must not run');
+    };
+    const result = await runRoadWalletCloudCycle({
+      recoverRoadWallet: boom,
+      syncPendingRoadWallet: boom,
+      recoverPresentationSets: boom,
+      syncPendingPresentationSets: boom,
+    });
+    expect(remoteCalled).toBe(false);
+    expect(result.writeSafe).toBe(false);
+    expect(result.setWriteSafe).toBe(false);
+    expect(result.recovery.outcome).toBe('signed_out');
+    expect(usePresentationSetsStore.getState().sets[0]?.cloudStatus).toBe('local_only');
   });
 });
 

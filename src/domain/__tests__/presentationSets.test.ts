@@ -16,6 +16,8 @@ import {
   validatePresentationSet,
   validatePresentationSetItem,
   validatePresentationSetName,
+  applySelectionToMembership,
+  writeSafeFromSetRecovery,
 } from '@/domain/presentationSets';
 import { DocumentVersion, OperationalDocument } from '@/domain/operationalDocuments';
 
@@ -251,6 +253,93 @@ describe('remote mapping + merge', () => {
     expect(
       mergeRecoveredPresentationSet({ ...remote, name: 'Old', updatedAt: 10 }, remote).action,
     ).toBe('replace_metadata');
+  });
+});
+
+describe('H1 stable membership + tombstones', () => {
+  const custom = {
+    id: SET,
+    accountOwnerId: 'user-a' as const,
+    setKind: 'CUSTOM' as const,
+    name: 'Pack',
+    lifecycle: 'ACTIVE' as const,
+    cloudStatus: 'local_only' as const,
+    createdAt: 1,
+    updatedAt: 1,
+  };
+  const a = id(20);
+  const b = id(21);
+  const itemA = {
+    id: ITEM,
+    presentationSetId: SET,
+    accountOwnerId: 'user-a' as const,
+    operationalDocumentId: a,
+    position: 0,
+    included: true,
+  };
+  const itemB = {
+    id: id(22),
+    presentationSetId: SET,
+    accountOwnerId: 'user-a' as const,
+    operationalDocumentId: b,
+    position: 1,
+    included: true,
+  };
+  const mint = () => id(99);
+
+  it('remove keeps a tombstone, re-add and reorder reuse ids, identical selection is idempotent', () => {
+    const afterRemove = applySelectionToMembership([itemA, itemB], [a], custom, mint);
+    expect(afterRemove.find((i) => i.operationalDocumentId === b)).toMatchObject({
+      id: itemB.id,
+      included: false,
+    });
+    const afterReadd = applySelectionToMembership(afterRemove, [a, b], custom, mint);
+    expect(afterReadd.find((i) => i.operationalDocumentId === b)?.id).toBe(itemB.id);
+    expect(afterReadd.find((i) => i.operationalDocumentId === b)?.included).toBe(true);
+    const reordered = applySelectionToMembership(afterReadd, [b, a], custom, mint);
+    expect(reordered.map((i) => i.operationalDocumentId)).toEqual([b, a]);
+    expect(reordered.map((i) => i.id).sort()).toEqual([itemA.id, itemB.id].sort());
+    const again = applySelectionToMembership(reordered, [b, a], custom, mint);
+    expect(again.map((i) => i.id)).toEqual(reordered.map((i) => i.id));
+  });
+
+  it('rejects an unsafe position', () => {
+    expect(() =>
+      validatePresentationSetItem({ ...itemA, position: Number.MAX_SAFE_INTEGER + 1 }),
+    ).toThrow(/safe integer/);
+  });
+});
+
+describe('H2 setWriteSafe', () => {
+  it('requires completed recovery with zero integrity conflicts', () => {
+    expect(
+      writeSafeFromSetRecovery({
+        setsRecovered: 0,
+        itemsRecovered: 0,
+        integrityConflicts: 0,
+        skippedLocalChanges: 0,
+        outcome: 'completed',
+      }),
+    ).toBe(true);
+    expect(
+      writeSafeFromSetRecovery({
+        setsRecovered: 0,
+        itemsRecovered: 0,
+        integrityConflicts: 1,
+        skippedLocalChanges: 0,
+        outcome: 'completed',
+      }),
+    ).toBe(false);
+    expect(
+      writeSafeFromSetRecovery({
+        setsRecovered: 0,
+        itemsRecovered: 0,
+        integrityConflicts: 0,
+        skippedLocalChanges: 0,
+        outcome: 'fetch_failed',
+      }),
+    ).toBe(false);
+    expect(writeSafeFromSetRecovery(null)).toBe(false);
   });
 });
 

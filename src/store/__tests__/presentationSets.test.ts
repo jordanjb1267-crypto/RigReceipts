@@ -73,13 +73,42 @@ describe('account scope + persist', () => {
 });
 
 describe('mutations', () => {
-  it('replaceItems rejects financial-unrelated duplicates and marks pending when entitled', () => {
+  it('applyPresentationSetSelection rejects duplicate document relations and marks pending when entitled', () => {
     usePresentationSetsStore.getState().addSet(set());
-    usePresentationSetsStore.getState().replaceItems(SET, [item()], ctx());
+    usePresentationSetsStore.getState().applyPresentationSetSelection(SET, [item()], ctx());
     expect(usePresentationSetsStore.getState().sets[0]?.cloudStatus).toBe('pending_sync');
     expect(() =>
-      usePresentationSetsStore.getState().replaceItems(SET, [item(), item({ id: id(8) })], ctx()),
+      usePresentationSetsStore
+        .getState()
+        .applyPresentationSetSelection(SET, [item(), item({ id: id(8) })], ctx()),
     ).toThrow(/duplicate document/);
+  });
+
+  it('H1A hydration keeps at most one membership row per set/document and drops unsafe positions', () => {
+    const dupA = item({ included: true, position: 0 });
+    const dupB = item({ id: id(11), included: false, position: 1 });
+    const unsafe = item({ id: id(12), operationalDocumentId: id(20), position: 1.5 });
+    const huge = item({
+      id: id(13),
+      operationalDocumentId: id(21),
+      position: Number.MAX_SAFE_INTEGER + 1,
+    });
+    const normalized = normalizePresentationSetsState({
+      sets: [set()],
+      items: [dupA, dupB, unsafe, huge],
+    });
+    expect(normalized.items).toHaveLength(1);
+    expect(normalized.items[0]?.id).toBe(dupA.id);
+    expect(normalized.items[0]?.included).toBe(true);
+
+    const twoLive = normalizePresentationSetsState({
+      sets: [set()],
+      items: [
+        item({ included: true, position: 0 }),
+        item({ id: id(14), included: true, position: 1 }),
+      ],
+    });
+    expect(twoLive.items).toHaveLength(0);
   });
 
   it('recovery import requires synced and replaceSynced refuses unsynced local', () => {

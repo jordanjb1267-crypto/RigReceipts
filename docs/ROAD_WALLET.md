@@ -257,15 +257,36 @@ Present → privacy-bounded IMAGE session → EXIT.
   Free sees a soft `saved_presentation_sets` paywall. Downgrade does not
   delete recovered sets; they stay locked until the owner is re-entitled.
 - **Flags:** `road_wallet_enabled` **and** `quick_present_enabled` (both
-  default OFF).
+  default OFF). The route gate also requires the live `quickPresent`
+  software entitlement. Current tiers all receive it; a future tier without
+  it redirects to Reports. The data-layer session builder remains the final
+  effect boundary.
+- **Custom-set membership (Pass 2.1):** one stable item id per
+  `(presentationSetId, operationalDocumentId)`. Editing a custom set keeps
+  existing ids, sets `included=true` for the selected list, and keeps omitted
+  rows as `included=false` tombstones. Re-add restores the same id. Hydration
+  keeps at most one row per relation and never mints ids. Cloud sync writes
+  every membership row, including tombstones, before the parent may be marked
+  `synced`.
+- **Write safety (Pass 2.1):** Road Wallet writes require `writeSafe`.
+  Presentation-set writes require `writeSafe` **and** `setWriteSafe` (set
+  recovery completed with zero integrity conflicts). Set-recovery failure
+  does not block safe Road Wallet document/version writes. Signed-out /
+  not-configured cycles reconcile **both** stores to local-only and make no
+  remote calls.
 - **FINANCIAL_SENSITIVE is prohibited** (W-9, factoring NOA, banking, lease,
   and CUSTOM classified financial). Preflight state `FINANCIAL_BLOCKED`.
   Individual Share/Export is still allowed separately.
 - **PERSONAL_SENSITIVE** may be selected; the session builder requires an
   acknowledgement (not UI-only).
 - **PDF** that verifies is `PDF_EXTERNAL_ONLY` — never a swipe session.
-  Entitled users may Share/Export via the existing boundary. Free can still
-  present other ready images (no forced paywall).
+  Entitled users may Share/Export via the existing boundary: STANDARD PDF
+  uses `sensitiveConfirmation: 'NONE'`; PERSONAL PDF shows the existing
+  personal share warning and requires a **separate** Share/Export
+  acknowledgement (`PERSONAL_ACKNOWLEDGED`). Presentation acknowledgement
+  is not share permission. FINANCIAL PDFs never enter Quick Present. Free
+  still cannot Share/Export without `documentShareExport`. Other ready
+  images can still be presented (no forced paywall).
 - **READY** means every selected item is a **freshly verified IMAGE**. Cached
   READY is never trusted. Sets store logical document ids, so a replacement
   v1→v2 automatically preflights v2.
@@ -275,9 +296,21 @@ Present → privacy-bounded IMAGE session → EXIT.
   `restoreDocumentVersionToDevice` (tier-independent). No silent FINANCIAL or
   PDF auto-download.
 - Presentation is full-screen horizontal paging, one image, swipe, page
-  indicator, title/kind/expiry, obvious EXIT. Leaving `AppState` `active`
-  while presenting **destroys** the session. Resume requires a rebuild. This
+  indicator, title/kind/expiry, obvious EXIT. A session may be **activated**
+  only while `AppState.currentState === 'active'` (checked before build and
+  after the await). Leaving `active` always destroys `activePresentationSession()`,
+  not only when the UI is already presenting. Resume requires a rebuild. This
   candidate does **not** claim screenshot, recording or biometric protection.
+- **Live final authorization (Pass 2.1):** `buildQuickPresentSession` re-reads
+  CloudSyncContext, entitlement, the live custom set (`ACTIVE` + owner),
+  every live OperationalDocument, and the **current** DocumentVersion after
+  every await and immediately before minting. A v1→v2 replacement cannot
+  produce a stale v1 session. STANDARD→PERSONAL without a current
+  acknowledgement, STANDARD→FINANCIAL, archive of the document or custom
+  set, tier loss on CUSTOM, or an account switch all fail closed.
+  `runPresentationPreflight` aborts with `PREFLIGHT_SESSION_CHANGED` if the
+  account changes during file verification and does not apply the prior
+  account's file cache.
 - Custom-set cloud write requires **both** `savedPresentationSets` and
   `cloudDocumentBackup`. Recovery of already-backed-up set metadata is
   tier-independent (same data-rights rule as Road Wallet).

@@ -236,8 +236,13 @@ export function validatePresentationSetItem(item: PresentationSetItem): void {
   if (item.accountOwnerId !== null && typeof item.accountOwnerId !== 'string') {
     throw new Error('invalid account owner');
   }
-  if (!Number.isInteger(item.position) || item.position < 0) {
-    throw new Error('position must be an integer ≥ 0');
+  if (
+    typeof item.position !== 'number' ||
+    !Number.isInteger(item.position) ||
+    !Number.isSafeInteger(item.position) ||
+    item.position < 0
+  ) {
+    throw new Error('position must be a safe integer ≥ 0');
   }
   if (typeof item.included !== 'boolean') throw new Error('included must be boolean');
 }
@@ -451,6 +456,67 @@ export const emptyPresentationSetRecoveryResult = (
 export const finalizePresentationSetRecovery = (
   result: PresentationSetRecoveryResult,
 ): PresentationSetRecoveryResult => result;
+
+/** Pass 2.1 H2 — set writes need their own completed, conflict-free recovery. */
+export function writeSafeFromSetRecovery(
+  result: PresentationSetRecoveryResult | null | undefined,
+): boolean {
+  return !!result && result.outcome === 'completed' && result.integrityConflicts === 0;
+}
+
+/**
+ * Stable membership identity for one set + document (Pass 2.1 H1).
+ * Selected documents keep/create an included=true row; omitted documents keep
+ * their existing row as included=false. Never mints a replacement id for
+ * reorder, remove, or re-add.
+ */
+export function applySelectionToMembership(
+  existing: PresentationSetItem[],
+  selectedDocumentIds: string[],
+  set: PresentationSet,
+  newId: () => string,
+): PresentationSetItem[] {
+  const byDoc = new Map<string, PresentationSetItem>();
+  for (const item of existing) {
+    if (item.presentationSetId !== set.id) continue;
+    if (!byDoc.has(item.operationalDocumentId)) byDoc.set(item.operationalDocumentId, item);
+  }
+  const seen = new Set<string>();
+  const next: PresentationSetItem[] = [];
+  let position = 0;
+  for (const docId of selectedDocumentIds) {
+    if (seen.has(docId)) continue;
+    seen.add(docId);
+    const prev = byDoc.get(docId);
+    if (prev) {
+      next.push({
+        ...prev,
+        accountOwnerId: set.accountOwnerId,
+        included: true,
+        position,
+      });
+    } else {
+      next.push({
+        id: newId(),
+        presentationSetId: set.id,
+        accountOwnerId: set.accountOwnerId,
+        operationalDocumentId: docId,
+        position,
+        included: true,
+      });
+    }
+    position++;
+  }
+  for (const [docId, prev] of byDoc) {
+    if (seen.has(docId)) continue;
+    next.push({
+      ...prev,
+      accountOwnerId: set.accountOwnerId,
+      included: false,
+    });
+  }
+  return next;
+}
 
 // ---------------------------------------------------------------------------
 // Preflight (pure evaluation of an already-reverified cache)

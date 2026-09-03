@@ -291,9 +291,10 @@ describe('Pass 2 — Quick Present surface', () => {
     'Required documents',
   ];
 
-  it('gates Quick Present on both flags and registers no sixth tab', () => {
+  it('gates Quick Present on both flags and the live quickPresent entitlement', () => {
     expect(qpGate).toMatch(/road_wallet_enabled/);
     expect(qpGate).toMatch(/quick_present_enabled/);
+    expect(qpGate).toMatch(/canUseFeature\(tier, 'quickPresent'\)/);
     expect(present).toMatch(/<QuickPresentGate>/);
     expect(editor).toMatch(/<QuickPresentGate>/);
     expect(count(tabsLayout, /<Tabs\.Screen/g)).toBe(5);
@@ -318,8 +319,22 @@ describe('Pass 2 — Quick Present surface', () => {
       expect(src).not.toMatch(/track\(/);
     }
     expect(present).toMatch(/AppState/);
+    expect(present).toMatch(/AppState\.currentState/);
     expect(present).toMatch(/destroyPresentationSession/);
     expect(present).toMatch(/saved_presentation_sets/);
     expect(present).not.toMatch(/Share \/ Export this PDF[\s\S]{0,80}FINANCIAL/);
+  });
+
+  it('personal PDF share confirmation is independent of presentation acknowledgement', () => {
+    expect(present).toMatch(/SHARE_CONFIRMATION_COPY/);
+    expect(present).toMatch(/shareAck/);
+    expect(present).not.toMatch(/personalAcknowledged \? 'PERSONAL_ACKNOWLEDGED' : 'NONE'/);
+    expect(present).toMatch(/item\.personalSensitive \? 'PERSONAL_ACKNOWLEDGED' : 'NONE'/);
+    expect(present).toMatch(/PERSONAL_PRESENT_ACK_COPY/);
+    expect(present).toMatch(/documentShareExport/);
+    expect(present).not.toMatch(/sensitiveConfirmation: 'FINANCIAL_ACKNOWLEDGED'/);
+    const pager = present.slice(present.indexOf('function PresentationPager'));
+    expect(pager).not.toMatch(/Share \/ Export/);
+    expect(pager).not.toMatch(/shareOperationalDocumentVersion/);
   });
 });
