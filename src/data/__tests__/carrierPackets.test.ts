@@ -180,9 +180,15 @@ describe('status + share + mark shared', () => {
     ).toThrow(/NOT_READY/);
     const ready = markCarrierPacketReady(packet.id, packetDeps());
     expect(ready.status).toBe('READY');
+    const beforeReturn = useCarrierPacketsStore.getState().packets.find((p) => p.id === ready.id)!;
+    const readyItems = packetItems(ready.id);
     const draft = returnCarrierPacketToDraft(ready.id, packetDeps());
     expect(draft.status).toBe('DRAFT');
     expect(draft.readyAt).toBeNull();
+    const proof = useCarrierPacketsStore.getState().readyReturnProofFor(ready.id, 'user-a');
+    expect(proof?.readyPacketEvidence.status).toBe('READY');
+    expect(proof?.readyPacketEvidence.readyAt).toBe(beforeReturn.readyAt);
+    expect(proof?.readyItemsEvidence).toHaveLength(readyItems.length);
     const readyAgain = markCarrierPacketReady(draft.id, packetDeps());
     expect(() =>
       markCarrierPacketShared({ packetId: readyAgain.id, confirmed: false }, packetDeps()),

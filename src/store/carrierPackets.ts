@@ -15,18 +15,21 @@ import {
   isOpaqueId,
   itemsForPacket,
   reconcileCarrierCloudStatus,
+  sanitizeReadyReturnProof,
   validateCarrierPacket,
   validateCarrierPacketItem,
   validateCarrierPacketTemplate,
   visiblePacketsForSession,
+  CarrierReadyReturnProof,
 } from '@/domain';
 
-export const CARRIER_PACKETS_PERSIST_VERSION = 1;
+export const CARRIER_PACKETS_PERSIST_VERSION = 2;
 
 interface CarrierPacketsState {
   templates: CarrierPacketTemplate[];
   packets: CarrierPacket[];
   items: CarrierPacketItem[];
+  readyReturnProofs: CarrierReadyReturnProof[];
   hydrated: boolean;
   upsertTemplate: (template: CarrierPacketTemplate) => void;
   archiveTemplate: (id: string, now: number, cloudStatus: CloudSyncStatus) => void;
@@ -69,6 +72,10 @@ interface CarrierPacketsState {
   importRecoveredPacket: (packet: CarrierPacket, items: CarrierPacketItem[]) => void;
   replaceSyncedPacketMetadata: (packet: CarrierPacket) => void;
   replaceSyncedPacketItems: (packetId: string, items: CarrierPacketItem[]) => void;
+  applySyncedPacketAndItems: (packet: CarrierPacket, items: CarrierPacketItem[]) => void;
+  upsertReadyReturnProof: (proof: CarrierReadyReturnProof) => void;
+  clearReadyReturnProof: (packetId: string) => void;
+  readyReturnProofFor: (packetId: string, accountOwnerId: string) => CarrierReadyReturnProof | null;
   reconcileCloudStatuses: (ctx: CloudSyncContext) => number;
   clear: () => void;
 }
@@ -135,6 +142,7 @@ export function normalizeCarrierPacketsState(persisted: unknown): {
   templates: CarrierPacketTemplate[];
   packets: CarrierPacket[];
   items: CarrierPacketItem[];
+  readyReturnProofs: CarrierReadyReturnProof[];
 } {
   const state = isRecord(persisted) ? persisted : {};
   const templates = (Array.isArray(state.templates) ? state.templates : [])
@@ -159,7 +167,18 @@ export function normalizeCarrierPacketsState(persisted: unknown): {
     rel.add(key);
     items.push(item);
   }
-  return { templates, packets, items };
+  const seenProof = new Set<string>();
+  const readyReturnProofs: CarrierReadyReturnProof[] = [];
+  for (const raw of Array.isArray(state.readyReturnProofs) ? state.readyReturnProofs : []) {
+    const proof = sanitizeReadyReturnProof(raw);
+    if (!proof || seenProof.has(proof.packetId)) continue;
+    const parent = byId.get(proof.packetId);
+    if (!parent) continue;
+    if (parent.accountOwnerId !== proof.accountOwnerId) continue;
+    seenProof.add(proof.packetId);
+    readyReturnProofs.push(proof);
+  }
+  return { templates, packets, items, readyReturnProofs };
 }
 
 export const useCarrierPacketsStore = create<CarrierPacketsState>()(
@@ -168,6 +187,7 @@ export const useCarrierPacketsStore = create<CarrierPacketsState>()(
       templates: [],
       packets: [],
       items: [],
+      readyReturnProofs: [],
       hydrated: false,
 
       upsertTemplate: (next) => {
@@ -283,8 +303,8 @@ export const useCarrierPacketsStore = create<CarrierPacketsState>()(
         const local = get().packets.find((p) => p.id === remote.id);
         if (!local) throw new Error('packet not found');
         if (local.cloudStatus !== 'synced') throw new Error('local packet has unsynced changes');
-        if (local.status === 'SHARED' || local.status === 'SUPERSEDED') {
-          throw new Error('historical packet metadata is immutable');
+        if (local.status !== 'DRAFT') {
+          throw new Error('only DRAFT packet metadata may be replaced');
         }
         validateCarrierPacket(remote);
         set((s) => ({
@@ -296,8 +316,8 @@ export const useCarrierPacketsStore = create<CarrierPacketsState>()(
         const local = get().packets.find((p) => p.id === packetId);
         if (!local) throw new Error('packet not found');
         if (local.cloudStatus !== 'synced') throw new Error('local packet has unsynced changes');
-        if (local.status === 'SHARED' || local.status === 'SUPERSEDED') {
-          throw new Error('historical packet items are immutable');
+        if (local.status !== 'DRAFT') {
+          throw new Error('only DRAFT packet items may be replaced');
         }
         for (const item of items) {
           if (item.carrierPacketId !== packetId) throw new Error('item packet mismatch');
@@ -307,6 +327,46 @@ export const useCarrierPacketsStore = create<CarrierPacketsState>()(
           items: [...s.items.filter((i) => i.carrierPacketId !== packetId), ...items],
         }));
       },
+
+      applySyncedPacketAndItems: (remote, items) => {
+        const local = get().packets.find((p) => p.id === remote.id);
+        if (!local) throw new Error('packet not found');
+        if (local.cloudStatus !== 'synced') throw new Error('local packet has unsynced changes');
+        if (local.status === 'READY' || local.status === 'SHARED' || local.status === 'SUPERSEDED') {
+          throw new Error('READY and historical packets cannot be replaced from remote membership');
+        }
+        validateCarrierPacket(remote);
+        for (const item of items) {
+          if (item.carrierPacketId !== remote.id) throw new Error('item packet mismatch');
+          if (item.accountOwnerId !== remote.accountOwnerId) throw new Error('item owner mismatch');
+          validateCarrierPacketItem(item);
+        }
+        set((s) => ({
+          packets: s.packets.map((p) => (p.id === local.id ? { ...remote, cloudStatus: 'synced' } : p)),
+          items: [...s.items.filter((i) => i.carrierPacketId !== remote.id), ...items],
+        }));
+      },
+
+      upsertReadyReturnProof: (proof) => {
+        const clean = sanitizeReadyReturnProof(proof);
+        if (!clean) throw new Error('invalid return-to-draft proof');
+        set((s) => ({
+          readyReturnProofs: [
+            clean,
+            ...s.readyReturnProofs.filter((p) => p.packetId !== clean.packetId),
+          ],
+        }));
+      },
+
+      clearReadyReturnProof: (packetId) =>
+        set((s) => ({
+          readyReturnProofs: s.readyReturnProofs.filter((p) => p.packetId !== packetId),
+        })),
+
+      readyReturnProofFor: (packetId, accountOwnerId) =>
+        get().readyReturnProofs.find(
+          (p) => p.packetId === packetId && p.accountOwnerId === accountOwnerId,
+        ) ?? null,
 
       reconcileCloudStatuses: (ctx) => {
         let changed = 0;
@@ -332,7 +392,7 @@ export const useCarrierPacketsStore = create<CarrierPacketsState>()(
         return changed;
       },
 
-      clear: () => set({ templates: [], packets: [], items: [] }),
+      clear: () => set({ templates: [], packets: [], items: [], readyReturnProofs: [] }),
     }),
     {
       name: 'rigreceipts.carrierPackets',

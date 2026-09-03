@@ -10,6 +10,7 @@ import {
   CarrierPacketTemplateDefinition,
   carrierStatusAfterMutation,
   CloudSyncContext,
+  createCarrierReadyReturnProof,
   currentVersion,
   freezePacketItem,
   isVisibleInSession,
@@ -410,6 +411,7 @@ export function markCarrierPacketReady(
     cloudStatus: cloudAfter(ctx, true),
     profileSnapshot: live.profileSnapshot,
   });
+  useCarrierPacketsStore.getState().clearReadyReturnProof(live.id);
   return useCarrierPacketsStore.getState().packets.find((p) => p.id === live.id)!;
 }
 
@@ -423,6 +425,10 @@ export function returnCarrierPacketToDraft(
   if (!canTransitionPacket(packet.status, 'DRAFT')) {
     throw new CarrierPacketDeniedError('INVALID_TRANSITION');
   }
+  const membership = itemsForPacket(useCarrierPacketsStore.getState().items, packet.id);
+  useCarrierPacketsStore.getState().upsertReadyReturnProof(
+    createCarrierReadyReturnProof({ packet, items: membership, now: deps.now() }),
+  );
   useCarrierPacketsStore.getState().transitionPacket(packet.id, 'DRAFT', {
     readyAt: null,
     sharedAt: null,

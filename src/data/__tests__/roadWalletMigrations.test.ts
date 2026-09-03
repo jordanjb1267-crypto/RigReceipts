@@ -20,7 +20,9 @@ const carrier = normalize(read('20260902000016_carrier_packets.sql'));
 const carrierHarden = normalize(read('20260902000017_carrier_packet_integrity_hardening.sql'));
 const carrierSnapshot = normalize(read('20260902000018_carrier_packet_snapshot_integrity.sql'));
 const carrierEvidence = normalize(read('20260902000019_carrier_packet_final_evidence_hardening.sql'));
+const irR1 = normalize(read('20260902000020_independent_review_remediation.sql'));
 const deletion = normalize(read('20260719000008_account_deletion.sql'));
+const storage = normalize(read('20260716000003_storage.sql'));
 
 /** Policies declared for a table across the given SQL: [name, command]. */
 function policiesFor(sql: string, table: string): [string, string][] {
@@ -316,6 +318,92 @@ describe('Pass 3.3 — carrier packet final evidence hardening (00019)', () => {
     expect(carrierEvidence).toMatch(/if new.status <> 'draft' and new.status <> 'ready'/);
     expect(carrierEvidence).toMatch(/shared packet may only transition to superseded/);
     expect(carrierEvidence).toMatch(/invalid packet transition/);
+  });
+});
+
+describe('IR-R1 — additive 00020 remediation', () => {
+  it('does not rewrite 00016–00019', () => {
+    expect(read('20260902000016_carrier_packets.sql')).toMatch(
+      /owner_id uuid not null references auth\.users \(id\) on delete cascade/,
+    );
+    expect(read('20260902000016_carrier_packets.sql')).not.toMatch(
+      /drop constraint if exists carrier_packet_items_owner_id_fkey/,
+    );
+    expect(read('20260902000017_carrier_packet_integrity_hardening.sql')).not.toMatch(
+      /documents_owner_select/,
+    );
+    expect(read('20260902000018_carrier_packet_snapshot_integrity.sql')).not.toMatch(
+      /carrier_packet_items_owner_id_fkey/,
+    );
+    expect(read('20260902000019_carrier_packet_final_evidence_hardening.sql')).not.toMatch(
+      /documents_owner_select/,
+    );
+  });
+
+  it('drops only the direct item → auth.users FK and keeps same-owner composites', () => {
+    expect(irR1).toMatch(
+      /alter table public\.carrier_packet_items drop constraint if exists carrier_packet_items_owner_id_fkey/,
+    );
+    expect(irR1).not.toMatch(/drop constraint if exists carrier_packet_items_carrier_packet_id_owner_id_fkey/);
+    expect(irR1).not.toMatch(/drop constraint if exists carrier_packet_items_operational_document_id_owner_id_fkey/);
+    expect(carrier).toMatch(
+      /foreign key \(carrier_packet_id, owner_id\) references carrier_packets \(id, owner_id\) on delete cascade/,
+    );
+    expect(carrier).toMatch(
+      /foreign key \(operational_document_id, owner_id\) references operational_documents \(id, owner_id\)/,
+    );
+    expect(carrier).toMatch(
+      /foreign key \(document_version_id, operational_document_id, owner_id\) references document_versions \(id, operational_document_id, owner_id\)/,
+    );
+    expect(carrier).toMatch(
+      /create table carrier_packets \([\s\S]*owner_id uuid not null references auth\.users \(id\) on delete cascade/,
+    );
+  });
+
+  it('models packet-mediated account-delete cascade for CarrierPacketItems', () => {
+    // Declared architecture only — live PostgreSQL cascade is unproven here.
+    expect(carrier).toMatch(/create table carrier_packets/);
+    expect(carrier).toMatch(
+      /owner_id uuid not null references auth\.users \(id\) on delete cascade/,
+    );
+    expect(carrier).toMatch(
+      /foreign key \(carrier_packet_id, owner_id\) references carrier_packets \(id, owner_id\) on delete cascade/,
+    );
+    expect(carrierHarden).toMatch(/rigreceipts.deleting_carrier_packet/);
+    expect(carrierHarden).toMatch(/create trigger carrier_packets_mark_cascade_delete/);
+    expect(read('20260902000020_independent_review_remediation.sql')).toMatch(
+      /auth\.users\s*→\s*carrier_packets\s*→\s*carrier_packet_items/,
+    );
+    expect(irR1).not.toMatch(/drop column owner_id/);
+  });
+
+  it('refines documents-bucket owner policies for insert-once road-wallet evidence', () => {
+    expect(storage).toMatch(/b \|\| '_owner_access'/);
+    expect(storage).toMatch(/create policy %i on storage\.objects for all to authenticated/);
+    expect(irR1).toMatch(/drop policy if exists "documents_owner_access" on storage\.objects/);
+    expect(irR1).toMatch(/create policy "documents_owner_select"/);
+    expect(irR1).toMatch(/create policy "documents_owner_insert"/);
+    expect(irR1).toMatch(/create policy "documents_owner_update"/);
+    expect(irR1).toMatch(/create policy "documents_owner_delete"/);
+    expect(irR1).toMatch(/for select to authenticated/);
+    expect(irR1).toMatch(/for insert to authenticated/);
+    expect(irR1).toMatch(/\(storage\.foldername\(name\)\)\[2\] is distinct from 'road-wallet'/);
+    expect(irR1).not.toMatch(/on storage\.objects for all to authenticated/);
+    expect(policiesFor(irR1, 'storage.objects').map(([, cmd]) => cmd).sort()).toEqual([
+      'delete',
+      'insert',
+      'select',
+      'update',
+    ]);
+  });
+
+  it('does not change receipts/reports policies or add a DocumentVersion service-role trigger', () => {
+    expect(irR1).not.toMatch(/receipts_owner/);
+    expect(irR1).not.toMatch(/reports_owner/);
+    expect(irR1).not.toMatch(/security definer/);
+    expect(irR1).not.toMatch(/document_versions/);
+    expect(irR1).not.toMatch(/20260902000013|20260902000014/);
+    expect(deletion).toMatch(/bucket_id in \('receipts', 'documents', 'reports'\)/);
   });
 });
 

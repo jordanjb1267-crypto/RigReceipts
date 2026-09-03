@@ -1,5 +1,9 @@
-import { newOpaqueId, STANDARD_BROKER_PACKET } from '@/domain';
-import { normalizeCarrierPacketsState, useCarrierPacketsStore } from '@/store/carrierPackets';
+import { createCarrierReadyReturnProof, newOpaqueId, STANDARD_BROKER_PACKET } from '@/domain';
+import {
+  CARRIER_PACKETS_PERSIST_VERSION,
+  normalizeCarrierPacketsState,
+  useCarrierPacketsStore,
+} from '@/store/carrierPackets';
 import {
   normalizeCarrierProfileState,
   selectVisibleCarrierProfile,
@@ -143,5 +147,52 @@ describe('normalization + SHARED immutability', () => {
     expect(selectVisibleCarrierProfile(useCarrierProfileStore.getState().profiles, 'user-a')?.id).toBe(a);
     expect(selectVisibleCarrierProfile(useCarrierProfileStore.getState().profiles, 'user-b')?.id).toBe(b);
     expect(selectVisibleCarrierProfile(useCarrierProfileStore.getState().profiles, null)).toBeNull();
+  });
+
+  it('persists return-to-draft proofs at v2 and discards invalid / orphan / wrong-owner rows', () => {
+    expect(CARRIER_PACKETS_PERSIST_VERSION).toBe(2);
+    expect(useCarrierPacketsStore.persist.getOptions().version).toBe(2);
+    const packetId = id(20);
+    const draft = {
+      id: packetId,
+      accountOwnerId: 'user-a' as const,
+      status: 'DRAFT' as const,
+      name: 'Pack',
+      templateSourceKind: 'BUILTIN' as const,
+      templateSourceId: null,
+      templateCode: 'STANDARD_BROKER_PACKET' as const,
+      templateSnapshot: STANDARD_BROKER_PACKET,
+      carrierProfileId: null,
+      profileSnapshot: null,
+      recipientLabel: null,
+      shareMethod: null,
+      readyAt: null,
+      sharedAt: null,
+      supersedesPacketId: null,
+      cloudStatus: 'pending_sync' as const,
+      createdAt: 1,
+      updatedAt: 2,
+    };
+    const ready = { ...draft, status: 'READY' as const, readyAt: 2, updatedAt: 2 };
+    const proof = createCarrierReadyReturnProof({ packet: ready, items: [], now: 3 });
+    const foreign = createCarrierReadyReturnProof({
+      packet: { ...ready, accountOwnerId: 'user-b' },
+      items: [],
+      now: 3,
+    });
+    const orphan = createCarrierReadyReturnProof({
+      packet: { ...ready, id: id(21) },
+      items: [],
+      now: 3,
+    });
+    const normalized = normalizeCarrierPacketsState({
+      packets: [draft],
+      items: [],
+      templates: [],
+      readyReturnProofs: [proof, foreign, orphan, { packetId: 'nope' }],
+    });
+    expect(normalized.readyReturnProofs).toHaveLength(1);
+    expect(normalized.readyReturnProofs[0]?.packetId).toBe(packetId);
+    expect(normalized.readyReturnProofs[0]?.readyPacketEvidence.status).toBe('READY');
   });
 });

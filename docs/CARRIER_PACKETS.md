@@ -127,7 +127,7 @@ delete data.
 Zustand + AsyncStorage:
 
 - `rigreceipts.carrierProfile` (v1)
-- `rigreceipts.carrierPackets` (v1)
+- `rigreceipts.carrierPackets` (v2; includes local-only READY→DRAFT proofs)
 
 Hydration never mints replacement ids, never invents ownership, drops
 malformed/orphan rows, and refuses ordinary SHARED mutation.
@@ -260,7 +260,43 @@ titles. No Carrier Packet analytics in Pass 3.
 
 `CLEAN_BOOTSTRAP` and `TWO_USER_RLS` remain evidence gaps.
 
-## Not in Pass 3 / 3.1 / 3.2 / 3.3
+## IR-R1 — independent review remediation
+
+Bounded remediation of the frozen Pass 0–3.3 review (`INDEPENDENT_REVIEW_BLOCK`).
+This is **not** Pass 4. Production flags stay OFF. No merge.
+
+- **IR-01:** Drop the redundant `carrier_packet_items.owner_id → auth.users`
+  FK (`carrier_packet_items_owner_id_fkey`). `owner_id` and all same-owner
+  composite FKs stay. Account deletion for items is packet-mediated:
+  `auth.users → carrier_packets → carrier_packet_items`, so the packet
+  BEFORE DELETE GUC can govern historical item DELETE.
+- **IR-02:** Recovery is per-packet and atomic. READY local/remote is exact
+  evidence only. DRAFT membership is coupled to the packet merge decision.
+  Status disagreement is conservative (integrity conflict, not a skip that
+  later writes).
+- **IR-03:** Explicit local-only `CarrierReadyReturnProof` captured inside
+  `returnCarrierPacketToDraft()` before the READY row mutates. Local DRAFT
+  cannot downgrade remote READY without a proof that matches that READY
+  snapshot exactly. Valid proof first writes the remote base DRAFT
+  projection, then local DRAFT metadata/membership. Proof is never sent to
+  Supabase and clears only after successful convergence (or valid local reset).
+- **IR-04:** Documents-bucket policies are path-aware. `{uid}/road-wallet/…`
+  is SELECT+INSERT only for the authenticated owner. Upload uses
+  `upsert: false`; existing objects are downloaded and verified, never
+  overwritten. Account-deletion SECURITY DEFINER still sweeps storage.
+- **IR-05:** Profile and template remote mappers are strict. No number/object
+  /boolean → null coercion; timestamps must be real strings; equipment_types
+  must be an all-string array; `identity_source` must be `USER_ENTERED`.
+- **IR-06 = DEFERRED_DEFENSE_IN_DEPTH.** No DocumentVersion service-role trigger.
+- **IR-07 = DEPLOYMENT_PREFLIGHT.** 00013/00014 are not modified. Independent
+  runtime review must decide whether any target has 00013-era dirty data.
+
+Additive migration: `20260902000020_independent_review_remediation.sql`.
+
+`CLEAN_BOOTSTRAP` and `TWO_USER_RLS` remain evidence gaps. Live account-delete
+cascade and storage-policy enforcement remain runtime-unproven.
+
+## Not in Pass 3 / 3.1 / 3.2 / 3.3 / IR-R1
 
 FMCSA / DAT / EIA / Parse / ImportYeti / TruckDown / TruckQuote / NWS.
 Email, portal submit, signatures, contract acceptance, freight booking.

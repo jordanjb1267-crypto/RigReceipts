@@ -29,7 +29,7 @@ import {
   currentCloudSyncContext,
   subscribeCloudSyncContext,
 } from './cloudSyncAuth';
-import { DocumentFileStore, reverifyDocumentFile } from './documentFiles';
+import { DocumentFileStore, reverifyDocumentFile, verifyBytes } from './documentFiles';
 import {
   CarrierSyncResult,
   recoverCarrierPacketsFromCloud,
@@ -50,10 +50,13 @@ import { recoverRoadWalletFromCloud } from './roadWalletRecovery';
  * Effect order per document:
  *   1. upsert `operational_documents` metadata (editable; idempotent by id);
  *   2. per version: re-verify the exact local file against the immutable
- *      version's SHA-256 + kind; upload the exact bytes to the private
- *      `documents` bucket at `{uid}/road-wallet/{doc}/{version}.{ext}`;
- *      insert the immutable `document_versions` row (or confirm an identical
- *      existing row); only then mark the version synced.
+ *      version's SHA-256 + kind; INSERT the exact bytes (upsert: false) to
+ *      the private `documents` bucket at `{uid}/road-wallet/{doc}/{version}.{ext}`
+ *      or verify an existing object in place; insert the immutable
+ *      `document_versions` row (or confirm an identical existing row); only
+ *      then mark the version synced. Authenticated clients cannot UPDATE or
+ *      DELETE road-wallet objects (IR-04). Account deletion SECURITY DEFINER
+ *      remains responsible for sweeping owned storage.
  * Authorization is re-asserted immediately before every remote effect. A
  * denial or failure never deletes local content.
  */
@@ -72,6 +75,53 @@ interface SyncDeps {
 const deps = (): SyncDeps => ({ fileStore: roadWalletFileStore() });
 
 const POSTGRES_UNIQUE_VIOLATION = '23505';
+
+type DownloadedBlob = { arrayBuffer: () => Promise<ArrayBuffer> };
+
+const readDownloadedBytes = async (data: DownloadedBlob | null): Promise<Uint8Array | null> => {
+  if (!data) return null;
+  try {
+    const buf = await data.arrayBuffer();
+    return new Uint8Array(buf);
+  } catch {
+    return null;
+  }
+};
+
+const verifyExistingRoadWalletObject = async (
+  path: string,
+  version: DocumentVersion,
+): Promise<'exact' | 'mismatch' | 'unreadable'> => {
+  const downloaded = await getSupabaseClient().storage.from(ROAD_WALLET_REMOTE_BUCKET).download(path);
+  if (downloaded.error || !downloaded.data) return 'unreadable';
+  const bytes = await readDownloadedBytes(downloaded.data as DownloadedBlob);
+  if (!bytes) return 'unreadable';
+  const check = verifyBytes(bytes, {
+    expectedKind: version.fileKind,
+    expectedSha256: version.sha256,
+  });
+  if (!check.ok || check.byteSize !== version.byteSize) return 'mismatch';
+  return 'exact';
+};
+
+const satisfyImmutableRoadWalletObject = async (
+  path: string,
+  bytes: Uint8Array,
+  version: DocumentVersion,
+): Promise<void> => {
+  const upload = await getSupabaseClient()
+    .storage.from(ROAD_WALLET_REMOTE_BUCKET)
+    .upload(path, bytes, { contentType: version.mimeType, upsert: false });
+  if (!upload.error) return;
+  const verified = await verifyExistingRoadWalletObject(path, version);
+  if (verified === 'exact') return;
+  if (verified === 'mismatch') {
+    throw new VersionIntegrityError(
+      'a remote storage object with this path carries different immutable bytes; refusing to overwrite',
+    );
+  }
+  throw upload.error;
+};
 
 /** Upserts editable metadata; marks the document synced on success. */
 export async function syncOperationalDocument(doc: OperationalDocument): Promise<void> {
@@ -126,15 +176,9 @@ export async function syncDocumentVersion(
     version.extension,
   );
 
-  // 3. Upload. Effect boundary re-checked immediately before.
+  // 3. Immutable object INSERT (or verify an existing exact object). Never upsert.
   assertRemoteEffectAuthorized(ROAD_WALLET_CLOUD_CAPABILITY, version.accountOwnerId);
-  // `upsert: true` is safe only because the remote key is deterministic per
-  // immutable version and the bytes were just re-verified against the version's
-  // SHA-256: a retry can only ever rewrite the object with identical content.
-  const upload = await supabase.storage
-    .from(ROAD_WALLET_REMOTE_BUCKET)
-    .upload(path, bytes, { contentType: version.mimeType, upsert: true });
-  if (upload.error) throw upload.error;
+  await satisfyImmutableRoadWalletObject(path, bytes, version);
 
   // 4. Insert the immutable row. Effect boundary re-checked immediately before.
   assertRemoteEffectAuthorized(ROAD_WALLET_CLOUD_CAPABILITY, version.accountOwnerId);

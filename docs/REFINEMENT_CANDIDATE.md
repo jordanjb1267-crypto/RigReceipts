@@ -934,12 +934,33 @@ remain OFF. This is the final owner-side pre-review implementation checkpoint.
 - READY idempotency includes `readyAt`.
 - Timestamp serialization uses `!== null`.
 
+## IR-R1 — Independent review remediation
+
+Owner-authorized bounded remediation of frozen Pass 0–3.3
+(`ee429758830dad6fe1f3763f0b228bfa266b4f98`, PR #8). **Not Pass 4.**
+Production flags remain OFF. Frozen branch / PR #8 are not advanced.
+
+- Additive `20260902000020_independent_review_remediation.sql` only.
+- IR-01: remove direct item→`auth.users` cascade FK.
+- IR-02 / IR-02A / IR-02B / IR-02C: atomic packet recovery; READY exact;
+  DRAFT membership coupled to merge; conservative status disagreement.
+- IR-03 / IR-03A / IR-03B / IR-03C: local-only READY→DRAFT proof; remote
+  READY first becomes the proven base DRAFT; stale peer DRAFT cannot
+  downgrade READY.
+- IR-04 / IR-04A / IR-04B: road-wallet objects insert-once; `upsert: false`;
+  verify-existing on retry.
+- IR-05: strict profile/template remote mapping.
+- **IR-06 = DEFERRED_DEFENSE_IN_DEPTH** — no DocumentVersion service-role trigger.
+- **IR-07 = DEPLOYMENT_PREFLIGHT** — do not modify 00013/00014.
+
 ## Evidence gaps (open)
 
-- Clean Supabase bootstrap of all migrations (00011–00019) and two-user RLS
+- Clean Supabase bootstrap of all migrations (00011–00020) and two-user RLS
   verification cannot run on the implementation VM (no Docker / psql /
   Supabase runtime). Migrations are statically parsed only. The candidate is
   not eligible for owner acceptance/merge until these are validated
-  independently.
+  independently. IR-07 dirty-data determination is part of that preflight.
+- Live account-deletion cascade ordering and documents-bucket path policies
+  are declared, not executed here.
 - REAL_DEVICE_FILE / SHARE / RECOVERY / QUICK_PRESENT / CARRIER_PACKET remain
   evidence gaps.

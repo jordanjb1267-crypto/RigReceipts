@@ -789,6 +789,171 @@ export function carrierPacketItemsExactlyMatch(
   return a.map(key).sort().join('|') === b.map(key).sort().join('|');
 }
 
+export type CarrierPacketPersistedEvidence = ReturnType<typeof carrierPacketPersistedEvidence>;
+export type CarrierPacketItemPersistedEvidence = ReturnType<typeof carrierPacketItemPersistedEvidence>;
+
+/**
+ * Local-only proof that the user explicitly returned this packet from a
+ * specific READY snapshot (IR-03). Never sent to Supabase. Never auto-claimed.
+ */
+export interface CarrierReadyReturnProof {
+  packetId: string;
+  accountOwnerId: string;
+  readyPacketEvidence: CarrierPacketPersistedEvidence;
+  readyItemsEvidence: CarrierPacketItemPersistedEvidence[];
+  createdAt: number;
+}
+
+export function draftProjectionFromReadyEvidence(
+  ready: CarrierPacketPersistedEvidence,
+): CarrierPacketPersistedEvidence {
+  return {
+    ...ready,
+    status: 'DRAFT',
+    readyAt: null,
+    sharedAt: null,
+    shareMethod: null,
+  };
+}
+
+export function carrierPacketMatchesPersistedEvidence(
+  packet: CarrierPacket,
+  evidence: CarrierPacketPersistedEvidence,
+): boolean {
+  return JSON.stringify(carrierPacketPersistedEvidence(packet)) === JSON.stringify(evidence);
+}
+
+export function carrierPacketItemsMatchPersistedEvidence(
+  items: readonly CarrierPacketItem[],
+  evidence: readonly CarrierPacketItemPersistedEvidence[],
+): boolean {
+  const key = (row: CarrierPacketItemPersistedEvidence) => JSON.stringify(row);
+  return (
+    items.map((item) => key(carrierPacketItemPersistedEvidence(item))).sort().join('|') ===
+    [...evidence].map(key).sort().join('|')
+  );
+}
+
+export function createCarrierReadyReturnProof(input: {
+  packet: CarrierPacket;
+  items: readonly CarrierPacketItem[];
+  now: number;
+}): CarrierReadyReturnProof {
+  if (input.packet.status !== 'READY') {
+    throw new Error('return-to-draft proof requires a READY packet');
+  }
+  if (!input.packet.accountOwnerId) {
+    throw new Error('return-to-draft proof requires an account-scoped packet');
+  }
+  return {
+    packetId: input.packet.id,
+    accountOwnerId: input.packet.accountOwnerId,
+    readyPacketEvidence: carrierPacketPersistedEvidence(input.packet),
+    readyItemsEvidence: input.items.map(carrierPacketItemPersistedEvidence),
+    createdAt: input.now,
+  };
+}
+
+const isPersistedPacketEvidence = (v: unknown): v is CarrierPacketPersistedEvidence => {
+  if (!isRec(v)) return false;
+  if (typeof v.id !== 'string' || !isOpaqueId(v.id)) return false;
+  if (typeof v.accountOwnerId !== 'string' || !v.accountOwnerId) return false;
+  if (!isEnum(CARRIER_PACKET_STATUSES, v.status)) return false;
+  if (typeof v.name !== 'string') return false;
+  if (!isEnum(CARRIER_TEMPLATE_SOURCE_KINDS, v.templateSourceKind)) return false;
+  if (v.templateSourceId !== null && typeof v.templateSourceId !== 'string') return false;
+  if (v.templateCode !== null && typeof v.templateCode !== 'string') return false;
+  if (!isRec(v.templateSnapshot) || Array.isArray(v.templateSnapshot)) return false;
+  if (v.carrierProfileId !== null && typeof v.carrierProfileId !== 'string') return false;
+  if (v.profileSnapshot !== null && (!isRec(v.profileSnapshot) || Array.isArray(v.profileSnapshot))) {
+    return false;
+  }
+  if (v.recipientLabel !== null && typeof v.recipientLabel !== 'string') return false;
+  if (v.shareMethod !== null && !isEnum(CARRIER_SHARE_METHODS, v.shareMethod)) return false;
+  if (v.readyAt !== null && (typeof v.readyAt !== 'number' || !Number.isFinite(v.readyAt))) return false;
+  if (v.sharedAt !== null && (typeof v.sharedAt !== 'number' || !Number.isFinite(v.sharedAt))) return false;
+  if (v.supersedesPacketId !== null && typeof v.supersedesPacketId !== 'string') return false;
+  if (typeof v.createdAt !== 'number' || !Number.isFinite(v.createdAt)) return false;
+  return true;
+};
+
+const isPersistedItemEvidence = (v: unknown): v is CarrierPacketItemPersistedEvidence => {
+  if (!isRec(v)) return false;
+  if (typeof v.id !== 'string' || !isOpaqueId(v.id)) return false;
+  if (typeof v.accountOwnerId !== 'string' || !v.accountOwnerId) return false;
+  if (typeof v.carrierPacketId !== 'string' || !isOpaqueId(v.carrierPacketId)) return false;
+  if (typeof v.requirementKey !== 'string') return false;
+  if (typeof v.requirementLabel !== 'string') return false;
+  if (typeof v.required !== 'boolean') return false;
+  if (typeof v.position !== 'number' || !Number.isSafeInteger(v.position)) return false;
+  if (typeof v.operationalDocumentId !== 'string' || !isOpaqueId(v.operationalDocumentId)) return false;
+  if (typeof v.documentVersionId !== 'string' || !isOpaqueId(v.documentVersionId)) return false;
+  if (!isEnum(DOCUMENT_KINDS, v.documentKindSnapshot)) return false;
+  if (!isEnum(SENSITIVITIES, v.sensitivitySnapshot)) return false;
+  if (v.expiresAtSnapshot !== null && typeof v.expiresAtSnapshot !== 'string') return false;
+  if (v.titleSnapshot !== null && typeof v.titleSnapshot !== 'string') return false;
+  if (typeof v.createdAt !== 'number' || !Number.isFinite(v.createdAt)) return false;
+  return true;
+};
+
+/** Hydration: discard invalid / incomplete proofs. Never mint a proof id. */
+export function sanitizeReadyReturnProof(raw: unknown): CarrierReadyReturnProof | null {
+  if (!isRec(raw)) return null;
+  if (typeof raw.packetId !== 'string' || !isOpaqueId(raw.packetId)) return null;
+  if (typeof raw.accountOwnerId !== 'string' || !raw.accountOwnerId) return null;
+  if (!isPersistedPacketEvidence(raw.readyPacketEvidence)) return null;
+  if (raw.readyPacketEvidence.id !== raw.packetId) return null;
+  if (raw.readyPacketEvidence.accountOwnerId !== raw.accountOwnerId) return null;
+  if (raw.readyPacketEvidence.status !== 'READY') return null;
+  if (!Array.isArray(raw.readyItemsEvidence)) return null;
+  const items: CarrierPacketItemPersistedEvidence[] = [];
+  for (const row of raw.readyItemsEvidence) {
+    if (!isPersistedItemEvidence(row)) return null;
+    if (row.carrierPacketId !== raw.packetId) return null;
+    if (row.accountOwnerId !== raw.accountOwnerId) return null;
+    items.push(row);
+  }
+  if (typeof raw.createdAt !== 'number' || !Number.isFinite(raw.createdAt)) return null;
+  return {
+    packetId: raw.packetId,
+    accountOwnerId: raw.accountOwnerId,
+    readyPacketEvidence: raw.readyPacketEvidence,
+    readyItemsEvidence: items,
+    createdAt: raw.createdAt,
+  };
+}
+
+export function readyReturnProofMatchesRemoteReady(
+  proof: CarrierReadyReturnProof,
+  remoteReady: CarrierPacket,
+  remoteItems: readonly CarrierPacketItem[],
+): boolean {
+  return (
+    proof.packetId === remoteReady.id &&
+    proof.accountOwnerId === remoteReady.accountOwnerId &&
+    remoteReady.status === 'READY' &&
+    carrierPacketMatchesPersistedEvidence(remoteReady, proof.readyPacketEvidence) &&
+    carrierPacketItemsMatchPersistedEvidence(remoteItems, proof.readyItemsEvidence)
+  );
+}
+
+export function remoteDraftIsProvenReadyProjection(
+  proof: CarrierReadyReturnProof,
+  remoteDraft: CarrierPacket,
+  remoteItems: readonly CarrierPacketItem[],
+): boolean {
+  return (
+    proof.packetId === remoteDraft.id &&
+    proof.accountOwnerId === remoteDraft.accountOwnerId &&
+    remoteDraft.status === 'DRAFT' &&
+    carrierPacketMatchesPersistedEvidence(
+      remoteDraft,
+      draftProjectionFromReadyEvidence(proof.readyPacketEvidence),
+    ) &&
+    carrierPacketItemsMatchPersistedEvidence(remoteItems, proof.readyItemsEvidence)
+  );
+}
+
 export function freezePacketItem(input: {
   id: string;
   packet: CarrierPacket;
@@ -1142,6 +1307,19 @@ export function toRemoteCarrierProfileRow(
   };
 }
 
+/** Optional profile scalar: string or null only. Number/object/boolean reject the row. */
+const optProfileScalar = (v: unknown): string | null | undefined => {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'string') return v;
+  return undefined;
+};
+
+const reqEquipmentTypes = (v: unknown): string[] | null => {
+  if (!Array.isArray(v)) return null;
+  if (!v.every((x): x is string => typeof x === 'string')) return null;
+  return v;
+};
+
 export function fromRemoteCarrierProfileRow(
   row: unknown,
   sessionUserId: string,
@@ -1150,27 +1328,54 @@ export function fromRemoteCarrierProfileRow(
   if (row.owner_id !== sessionUserId) return null;
   if (typeof row.id !== 'string' || !isOpaqueId(row.id)) return null;
   if (typeof row.legal_name !== 'string') return null;
-  const createdAt = Date.parse(String(row.created_at));
-  const updatedAt = Date.parse(String(row.updated_at));
-  if (!Number.isFinite(createdAt) || !Number.isFinite(updatedAt)) return null;
+  if (row.identity_source !== 'USER_ENTERED') return null;
+  const createdAt = reqIsoMs(row.created_at);
+  const updatedAt = reqIsoMs(row.updated_at);
+  if (createdAt === null || updatedAt === null) return null;
+  const dbaName = optProfileScalar(row.dba_name);
+  const usdotNumber = optProfileScalar(row.usdot_number);
+  const mcNumber = optProfileScalar(row.mc_number);
+  const addressLine1 = optProfileScalar(row.address_line1);
+  const addressLine2 = optProfileScalar(row.address_line2);
+  const city = optProfileScalar(row.city);
+  const stateProvince = optProfileScalar(row.state_province);
+  const postalCode = optProfileScalar(row.postal_code);
+  const contactName = optProfileScalar(row.contact_name);
+  const contactEmail = optProfileScalar(row.contact_email);
+  const contactPhone = optProfileScalar(row.contact_phone);
+  if (
+    dbaName === undefined ||
+    usdotNumber === undefined ||
+    mcNumber === undefined ||
+    addressLine1 === undefined ||
+    addressLine2 === undefined ||
+    city === undefined ||
+    stateProvince === undefined ||
+    postalCode === undefined ||
+    contactName === undefined ||
+    contactEmail === undefined ||
+    contactPhone === undefined
+  ) {
+    return null;
+  }
+  const equipmentTypes = reqEquipmentTypes(row.equipment_types);
+  if (equipmentTypes === null) return null;
   const profile: CarrierProfile = {
     id: row.id,
     accountOwnerId: sessionUserId,
     legalName: row.legal_name,
-    dbaName: typeof row.dba_name === 'string' ? row.dba_name : null,
-    usdotNumber: typeof row.usdot_number === 'string' ? row.usdot_number : null,
-    mcNumber: typeof row.mc_number === 'string' ? row.mc_number : null,
-    addressLine1: typeof row.address_line1 === 'string' ? row.address_line1 : null,
-    addressLine2: typeof row.address_line2 === 'string' ? row.address_line2 : null,
-    city: typeof row.city === 'string' ? row.city : null,
-    stateProvince: typeof row.state_province === 'string' ? row.state_province : null,
-    postalCode: typeof row.postal_code === 'string' ? row.postal_code : null,
-    contactName: typeof row.contact_name === 'string' ? row.contact_name : null,
-    contactEmail: typeof row.contact_email === 'string' ? row.contact_email : null,
-    contactPhone: typeof row.contact_phone === 'string' ? row.contact_phone : null,
-    equipmentTypes: Array.isArray(row.equipment_types)
-      ? row.equipment_types.filter((x): x is string => typeof x === 'string')
-      : [],
+    dbaName,
+    usdotNumber,
+    mcNumber,
+    addressLine1,
+    addressLine2,
+    city,
+    stateProvince,
+    postalCode,
+    contactName,
+    contactEmail,
+    contactPhone,
+    equipmentTypes,
     identitySource: 'USER_ENTERED',
     cloudStatus: 'synced',
     createdAt,
@@ -1205,16 +1410,23 @@ export function fromRemoteCarrierTemplateRow(
   if (typeof row.id !== 'string' || !isOpaqueId(row.id)) return null;
   if (typeof row.name !== 'string') return null;
   if (!isEnum(CARRIER_TEMPLATE_LIFECYCLES, row.lifecycle)) return null;
-  if (!isRec(row.definition)) return null;
-  const createdAt = Date.parse(String(row.created_at));
-  const updatedAt = Date.parse(String(row.updated_at));
-  if (!Number.isFinite(createdAt) || !Number.isFinite(updatedAt)) return null;
+  if (!isRec(row.definition) || Array.isArray(row.definition)) return null;
+  const createdAt = reqIsoMs(row.created_at);
+  const updatedAt = reqIsoMs(row.updated_at);
+  if (createdAt === null || updatedAt === null) return null;
+  let definition: CarrierPacketTemplateDefinition;
+  try {
+    definition = row.definition as unknown as CarrierPacketTemplateDefinition;
+    validateTemplateDefinition(definition);
+  } catch {
+    return null;
+  }
   const template: CarrierPacketTemplate = {
     id: row.id,
     accountOwnerId: sessionUserId,
     name: row.name,
     lifecycle: row.lifecycle,
-    definition: row.definition as unknown as CarrierPacketTemplateDefinition,
+    definition,
     cloudStatus: 'synced',
     createdAt,
     updatedAt,

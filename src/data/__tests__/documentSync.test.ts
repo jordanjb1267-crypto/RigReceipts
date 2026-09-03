@@ -37,12 +37,14 @@ interface RemoteState {
     contentType?: string;
     upsert?: boolean;
   }[];
+  objects: Map<string, Uint8Array>;
   upserts: { table: string; row: Record<string, unknown>; onConflict?: string }[];
   inserts: { table: string; row: Record<string, unknown> }[];
   tables: Record<string, Map<string, Record<string, unknown>>>;
   failUploadOnce: boolean;
   failInsertOnce: boolean;
   failUpsertOnce: boolean;
+  failDownloadOnce: boolean;
   onUpload: null | (() => void);
   reset(): void;
 }
@@ -51,22 +53,26 @@ jest.mock('@/lib/supabase', () => {
   const state: RemoteState = {
     configured: true,
     uploads: [],
+    objects: new Map(),
     upserts: [],
     inserts: [],
     tables: { operational_documents: new Map(), document_versions: new Map() },
     failUploadOnce: false,
     failInsertOnce: false,
     failUpsertOnce: false,
+    failDownloadOnce: false,
     onUpload: null,
     reset() {
       this.configured = true;
       this.uploads = [];
+      this.objects = new Map();
       this.upserts = [];
       this.inserts = [];
       this.tables = { operational_documents: new Map(), document_versions: new Map() };
       this.failUploadOnce = false;
       this.failInsertOnce = false;
       this.failUpsertOnce = false;
+      this.failDownloadOnce = false;
       this.onUpload = null;
     },
   };
@@ -89,13 +95,22 @@ jest.mock('@/lib/supabase', () => {
               state.failUploadOnce = false;
               return { error: new Error('upload failed') };
             }
+            const key = `${bucket}:${path}`;
+            if (state.objects.has(key) && opts?.upsert !== true) {
+              return { error: { message: 'The resource already exists', statusCode: '409' } };
+            }
+            state.objects.set(key, bytes);
             state.uploads.push({ bucket, path, bytes, ...opts });
             return { error: null };
           },
           download: async (path: string) => {
-            const hit = state.uploads.find((u) => u.bucket === bucket && u.path === path);
-            if (!hit) return { data: null, error: new Error('not found') };
-            const bytes = hit.bytes;
+            if (state.failDownloadOnce) {
+              state.failDownloadOnce = false;
+              return { data: null, error: new Error('not found') };
+            }
+            const key = `${bucket}:${path}`;
+            const bytes = state.objects.get(key);
+            if (!bytes) return { data: null, error: new Error('not found') };
             return {
               data: {
                 arrayBuffer: async () =>
@@ -259,7 +274,7 @@ describe('eligibility', () => {
     expect(up.path).toBe(`user-a/road-wallet/${document.id}/${version.id}.jpg`);
     expect(up.path.startsWith('user-a/')).toBe(true);
     expect(up.contentType).toBe('image/jpeg');
-    expect(up.upsert).toBe(true);
+    expect(up.upsert).toBe(false);
     expect(sha256Hex(up.bytes)).toBe(version.sha256);
 
     expect(remote.inserts.map((i) => i.table)).toEqual(['document_versions']);
@@ -457,13 +472,51 @@ describe('partial failure and idempotency', () => {
     expect(ver(version.id).cloudStatus).toBe('pending_sync');
     expect(ver(version.id).remoteStoragePath).toBeNull();
 
-    // Retry: same deterministic path, same verified bytes (upsert), row inserted.
+    // Retry: existing exact object is downloaded and verified; not overwritten.
     await sync();
-    expect(remote.uploads).toHaveLength(2);
-    expect(remote.uploads[1].path).toBe(remote.uploads[0].path);
-    expect(sha256Hex(remote.uploads[1].bytes)).toBe(version.sha256);
+    expect(remote.uploads).toHaveLength(1);
     expect(remote.tables.document_versions.size).toBe(1);
     expect(ver(version.id).cloudStatus).toBe('synced');
+  });
+
+  it('existing exact object is idempotent via download+hash/size/kind verify', async () => {
+    signIn('user-a');
+    setTier('driver_pro');
+    const { document, version } = await create();
+    const path = `user-a/road-wallet/${document.id}/${version.id}.jpg`;
+    remote.objects.set(`documents:${path}`, new Uint8Array(JPEG));
+    await sync();
+    expect(remote.uploads).toHaveLength(0);
+    expect(ver(version.id).cloudStatus).toBe('synced');
+    expect(remote.tables.document_versions.size).toBe(1);
+  });
+
+  it('existing mismatched object is VersionIntegrityError and is not overwritten', async () => {
+    signIn('user-a');
+    setTier('driver_pro');
+    const { document, version } = await create();
+    const path = `user-a/road-wallet/${document.id}/${version.id}.jpg`;
+    const other = new Uint8Array(JPEG);
+    other[other.length - 1] = 0x99;
+    remote.objects.set(`documents:${path}`, other);
+    const out = await sync();
+    expect(out.integrityFailures).toBeGreaterThan(0);
+    expect(ver(version.id).cloudStatus).toBe('pending_sync');
+    expect(remote.tables.document_versions.size).toBe(0);
+    expect(sha256Hex(remote.objects.get(`documents:${path}`)!)).not.toBe(version.sha256);
+  });
+
+  it('existing object that cannot be read stays pending with no false synced', async () => {
+    signIn('user-a');
+    setTier('driver_pro');
+    const { document, version } = await create();
+    const path = `user-a/road-wallet/${document.id}/${version.id}.jpg`;
+    remote.objects.set(`documents:${path}`, new Uint8Array(JPEG));
+    remote.failDownloadOnce = true;
+    await sync();
+    expect(ver(version.id).cloudStatus).toBe('pending_sync');
+    expect(remote.tables.document_versions.size).toBe(0);
+    expect(ver(version.id).remoteStoragePath).toBeNull();
   });
 
   it('upload failure leaves the version pending with no row and no status change', async () => {

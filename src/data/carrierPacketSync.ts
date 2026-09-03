@@ -3,8 +3,11 @@ import {
   authorizeCarrierProfileCloudWrite,
   authorizeCarrierTemplateCloudWrite,
   CarrierPacket,
+  CarrierPacketItem,
+  CarrierReadyReturnProof,
   CarrierRecoveryResult,
   carrierPacketItemsExactlyMatch,
+  carrierPacketItemsMatchPersistedEvidence,
   carrierPacketPersistedEvidenceExactlyMatches,
   draftCloudProjection,
   emptyCarrierRecoveryResult,
@@ -15,7 +18,9 @@ import {
   itemsForPacket,
   mergeRecoveredCarrierRecord,
   readyCloudProjection,
+  readyReturnProofMatchesRemoteReady,
   readySnapshotMatchesSharedTransition,
+  remoteDraftIsProvenReadyProjection,
   sharedCloudProjection,
   sharedSnapshotMatchesSupersededTransition,
   supersededCloudProjection,
@@ -37,6 +42,8 @@ import {
 } from './cloudSyncAuth';
 
 export const CARRIER_CLOUD_CAPABILITY = 'cloudDocumentBackup' as const;
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
 
 export interface CarrierRemote {
   fetchProfiles(userId: string): Promise<unknown[]>;
@@ -105,6 +112,47 @@ export const defaultCarrierSyncDeps = (): CarrierSyncDeps => ({
   ctx: currentCloudSyncContext,
 });
 
+/**
+ * IR-R1 multi-writer recovery / sync rules (explicit):
+ *
+ * READY local + READY remote, same id:
+ *   exact persisted packet evidence AND exact item membership → keep local
+ *   content / reconcile sync state only. Any mismatch is an integrity conflict.
+ *   Remote READY never replaces local READY membership. updatedAt is ignored.
+ *
+ * Remote READY with no local packet:
+ *   import only after the entire packet + item set validates.
+ *
+ * DRAFT local pending_sync / local_only:
+ *   preserve local packet metadata AND local membership. Remote items never
+ *   overwrite. Exception: local pending DRAFT + remote READY is an integrity
+ *   conflict unless a valid local return-to-draft proof matches that READY.
+ *
+ * DRAFT local synced + DRAFT remote:
+ *   if the safe mutable merge keeps local metadata, keep local membership.
+ *   if remote metadata is adopted, replace membership atomically with the
+ *   fully-valid remote set. Never keep local metadata + unrelated remote items.
+ *
+ * DRAFT local synced + newer remote READY:
+ *   adopt the remote READY only when the complete remote packet+items validate
+ *   and no local changes are pending.
+ *
+ * READY local + remote DRAFT:
+ *   conflict unless the remote DRAFT is the proven READY→DRAFT projection
+ *   (local return proof). Timestamp-only heuristics are forbidden.
+ *
+ * LOCAL DRAFT + remote SHARED / SUPERSEDED: integrity conflict.
+ * REMOTE READY is never downgraded by a local DRAFT without valid proof.
+ */
+
+export type RecoveredPacketCandidate = {
+  remotePacket: CarrierPacket;
+  localPacket: CarrierPacket | undefined;
+  rawItemCount: number;
+  mappedItems: CarrierPacketItem[];
+  itemMappingValid: boolean;
+};
+
 const versionExistsForOwner = (
   documentId: string,
   versionId: string,
@@ -121,6 +169,41 @@ const versionExistsForOwner = (
     version.operationalDocumentId === documentId
   );
 };
+
+const mapRemoteItemSet = (
+  rawRows: unknown[],
+  parent: CarrierPacket,
+  userId: string,
+): { mappedItems: CarrierPacketItem[]; itemMappingValid: boolean } => {
+  const mappedItems: CarrierPacketItem[] = [];
+  for (const row of rawRows) {
+    if (!isRecord(row)) return { mappedItems, itemMappingValid: false };
+    const item = fromRemoteCarrierPacketItemRow(row, userId, parent);
+    if (!item) return { mappedItems, itemMappingValid: false };
+    if (!versionExistsForOwner(item.operationalDocumentId, item.documentVersionId, userId)) {
+      return { mappedItems, itemMappingValid: false };
+    }
+    const wallet = useRoadWalletStore.getState();
+    const document = wallet.documents.find((d) => d.id === item.operationalDocumentId);
+    const version = wallet.versions.find((v) => v.id === item.documentVersionId);
+    if (
+      validatePacketItemAgainstTemplate(parent, item, {
+        document,
+        version,
+      })
+    ) {
+      return { mappedItems, itemMappingValid: false };
+    }
+    mappedItems.push(item);
+  }
+  return { mappedItems, itemMappingValid: true };
+};
+
+const localItemsOf = (packetId: string): CarrierPacketItem[] =>
+  itemsForPacket(useCarrierPacketsStore.getState().items, packetId);
+
+const proofFor = (packetId: string, ownerId: string): CarrierReadyReturnProof | null =>
+  useCarrierPacketsStore.getState().readyReturnProofFor(packetId, ownerId);
 
 export async function recoverCarrierPacketsFromCloud(
   deps: CarrierSyncDeps = defaultCarrierSyncDeps(),
@@ -194,105 +277,140 @@ export async function recoverCarrierPacketsFromCloud(
     }
   }
 
-  const recoveredPackets: CarrierPacket[] = [];
   for (const row of packetRows) {
     if (!stillActive()) return { ...result, outcome: 'cancelled' };
-    const remote = fromRemoteCarrierPacketRow(row, userId);
-    if (!remote) {
+    const remotePacket = fromRemoteCarrierPacketRow(row, userId);
+    if (!remotePacket) {
       result.integrityConflicts++;
       continue;
     }
-    const local = useCarrierPacketsStore.getState().packets.find((p) => p.id === remote.id);
-    const immutable = remote.status === 'SHARED' || remote.status === 'SUPERSEDED';
-    const merged = mergeRecoveredCarrierRecord(
-      local,
-      remote,
-      immutable,
-      carrierPacketPersistedEvidenceExactlyMatches,
+    const rawRows = itemRows.filter(
+      (itemRow) => isRecord(itemRow) && itemRow.carrier_packet_id === remotePacket.id,
     );
-    if (merged.action === 'conflict') {
+    const { mappedItems, itemMappingValid } = mapRemoteItemSet(rawRows, remotePacket, userId);
+    const candidate: RecoveredPacketCandidate = {
+      remotePacket,
+      localPacket: useCarrierPacketsStore.getState().packets.find((p) => p.id === remotePacket.id),
+      rawItemCount: rawRows.length,
+      mappedItems,
+      itemMappingValid,
+    };
+    if (!candidate.itemMappingValid) {
       result.integrityConflicts++;
       continue;
     }
-    if (merged.action === 'import') {
-      recoveredPackets.push(merged.record);
-      result.packetsRecovered++;
-    } else if (merged.action === 'replace_metadata') {
-      try {
-        useCarrierPacketsStore.getState().replaceSyncedPacketMetadata(merged.record);
-        recoveredPackets.push(merged.record);
-        result.packetsRecovered++;
-      } catch {
-        result.integrityConflicts++;
-      }
-    } else if (merged.action === 'keep_local') {
-      result.skippedLocalChanges++;
-    } else {
-      recoveredPackets.push(merged.record);
-    }
-  }
 
-  for (const parent of recoveredPackets) {
-    const mapped = [];
-    for (const row of itemRows) {
-      if (!isRecord(row) || row.carrier_packet_id !== parent.id) continue;
-      const item = fromRemoteCarrierPacketItemRow(row, userId, parent);
-      if (!item) {
-        result.integrityConflicts++;
-        continue;
-      }
-      if (!versionExistsForOwner(item.operationalDocumentId, item.documentVersionId, userId)) {
-        result.integrityConflicts++;
-        continue;
-      }
-      const wallet = useRoadWalletStore.getState();
-      const document = wallet.documents.find((d) => d.id === item.operationalDocumentId);
-      const version = wallet.versions.find((v) => v.id === item.documentVersionId);
-      if (
-        validatePacketItemAgainstTemplate(parent, item, {
-          document,
-          version,
-        })
-      ) {
-        result.integrityConflicts++;
-        continue;
-      }
-      mapped.push(item);
-    }
-    const local = useCarrierPacketsStore.getState().packets.find((p) => p.id === parent.id);
-    if (local && (local.cloudStatus === 'pending_sync' || local.cloudStatus === 'local_only')) {
+    const local = candidate.localPacket;
+    const remote = candidate.remotePacket;
+    const mapped = candidate.mappedItems;
+    const localItems = local ? localItemsOf(local.id) : [];
+    const pendingLocal =
+      !!local && (local.cloudStatus === 'pending_sync' || local.cloudStatus === 'local_only');
+    const proof = local ? proofFor(local.id, userId) : null;
+
+    if (!local) {
+      useCarrierPacketsStore.getState().importRecoveredPacket(
+        { ...remote, cloudStatus: 'synced' },
+        mapped,
+      );
+      result.packetsRecovered++;
+      result.itemsRecovered += mapped.length;
       continue;
     }
-    if (parent.status === 'SHARED' || parent.status === 'SUPERSEDED') {
-      const existingItems = itemsForPacket(useCarrierPacketsStore.getState().items, parent.id);
-      const localHistorical = useCarrierPacketsStore.getState().packets.find((p) => p.id === parent.id);
-      if (localHistorical) {
-        if (!carrierPacketItemsExactlyMatch(existingItems, mapped)) {
+
+    if (local.status === 'READY' && remote.status === 'READY') {
+      if (
+        carrierPacketPersistedEvidenceExactlyMatches(local, remote) &&
+        carrierPacketItemsExactlyMatch(localItems, mapped)
+      ) {
+        useCarrierPacketsStore.getState().setPacketCloudStatus(local.id, 'synced');
+        continue;
+      }
+      result.integrityConflicts++;
+      continue;
+    }
+
+    if (local.status === 'READY' && remote.status === 'DRAFT') {
+      if (proof && remoteDraftIsProvenReadyProjection(proof, remote, mapped)) {
+        continue;
+      }
+      result.integrityConflicts++;
+      continue;
+    }
+
+    if (local.status === 'DRAFT' && remote.status === 'READY') {
+      if (proof && readyReturnProofMatchesRemoteReady(proof, remote, mapped)) {
+        continue;
+      }
+      result.integrityConflicts++;
+      continue;
+    }
+
+    if (
+      local.status === 'DRAFT' &&
+      (remote.status === 'SHARED' || remote.status === 'SUPERSEDED')
+    ) {
+      result.integrityConflicts++;
+      continue;
+    }
+
+    if (
+      (local.status === 'READY' && (remote.status === 'SHARED' || remote.status === 'SUPERSEDED')) ||
+      ((local.status === 'SHARED' || local.status === 'SUPERSEDED') &&
+        remote.status !== local.status)
+    ) {
+      result.integrityConflicts++;
+      continue;
+    }
+
+    if (local.status === 'SHARED' || local.status === 'SUPERSEDED') {
+      if (
+        carrierPacketPersistedEvidenceExactlyMatches(local, remote) &&
+        carrierPacketItemsExactlyMatch(localItems, mapped)
+      ) {
+        continue;
+      }
+      result.integrityConflicts++;
+      continue;
+    }
+
+    if (local.status === 'DRAFT' && remote.status === 'DRAFT') {
+      if (pendingLocal) {
+        result.skippedLocalChanges++;
+        continue;
+      }
+      const merged = mergeRecoveredCarrierRecord(
+        local,
+        remote,
+        false,
+        carrierPacketPersistedEvidenceExactlyMatches,
+      );
+      if (merged.action === 'keep_synced_local' || merged.action === 'keep_local') {
+        continue;
+      }
+      if (merged.action === 'replace_metadata') {
+        try {
+          useCarrierPacketsStore.getState().applySyncedPacketAndItems(
+            { ...merged.record, cloudStatus: 'synced' },
+            mapped,
+          );
+          result.packetsRecovered++;
+          result.itemsRecovered += mapped.length;
+        } catch {
           result.integrityConflicts++;
         }
         continue;
       }
-      useCarrierPacketsStore.getState().importRecoveredPacket(parent, mapped);
-      result.itemsRecovered += mapped.length;
+      result.integrityConflicts++;
       continue;
     }
-    if (!useCarrierPacketsStore.getState().packets.some((p) => p.id === parent.id)) {
-      useCarrierPacketsStore.getState().importRecoveredPacket(parent, mapped);
-      result.itemsRecovered += mapped.length;
-    } else {
-      try {
-        useCarrierPacketsStore.getState().replaceSyncedPacketItems(parent.id, mapped);
-        result.itemsRecovered += mapped.length;
-      } catch {
-        result.integrityConflicts++;
-      }
-    }
+
+    result.integrityConflicts++;
   }
 
   return result;
 }
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
 
 export interface CarrierSyncResult {
   profilesSynced: number;
@@ -443,11 +561,58 @@ export async function syncPendingCarrierPackets(
         carrierPacketItemsExactlyMatch(existingItems, membership);
 
       if (packet.status === 'DRAFT') {
-        if (!existing || existing.status === 'DRAFT' || existing.status === 'READY') {
-          if (existing?.status === 'SHARED' || existing?.status === 'SUPERSEDED') {
+        if (existing?.status === 'SHARED' || existing?.status === 'SUPERSEDED') {
+          result.integrityConflicts++;
+          continue;
+        }
+        const proof = packet.accountOwnerId
+          ? useCarrierPacketsStore.getState().readyReturnProofFor(packet.id, packet.accountOwnerId)
+          : null;
+
+        if (existing?.status === 'READY') {
+          if (!proof || !readyReturnProofMatchesRemoteReady(proof, existing, existingItems)) {
             result.integrityConflicts++;
             continue;
           }
+          await upsertPacketNow(draftCloudProjection(existing), deps);
+          await upsertPacketNow(draftCloudProjection(packet), deps);
+          await reconcileDraftMembership(packet, membership, remoteItemRows, result, deps);
+          useCarrierPacketsStore.getState().clearReadyReturnProof(packet.id);
+          useCarrierPacketsStore.getState().setPacketCloudStatus(packet.id, 'synced');
+          result.packetsSynced++;
+          continue;
+        }
+
+        if (existing?.status === 'DRAFT' && proof) {
+          const remoteIsBase = remoteDraftIsProvenReadyProjection(proof, existing, existingItems);
+          const remoteIsLocalMeta = carrierPacketPersistedEvidenceExactlyMatches(existing, packet);
+          const remoteItemsAreLocal = carrierPacketItemsExactlyMatch(existingItems, membership);
+          const itemsMatchProof = carrierPacketItemsMatchPersistedEvidence(
+            existingItems,
+            proof.readyItemsEvidence,
+          );
+          if (remoteIsBase) {
+            await upsertPacketNow(draftCloudProjection(packet), deps);
+            await reconcileDraftMembership(packet, membership, remoteItemRows, result, deps);
+            useCarrierPacketsStore.getState().clearReadyReturnProof(packet.id);
+            useCarrierPacketsStore.getState().setPacketCloudStatus(packet.id, 'synced');
+            result.packetsSynced++;
+            continue;
+          }
+          if (remoteIsLocalMeta && (itemsMatchProof || remoteItemsAreLocal)) {
+            if (!remoteItemsAreLocal) {
+              await reconcileDraftMembership(packet, membership, remoteItemRows, result, deps);
+            }
+            useCarrierPacketsStore.getState().clearReadyReturnProof(packet.id);
+            useCarrierPacketsStore.getState().setPacketCloudStatus(packet.id, 'synced');
+            result.packetsSynced++;
+            continue;
+          }
+          result.integrityConflicts++;
+          continue;
+        }
+
+        if (!existing || existing.status === 'DRAFT') {
           await upsertPacketNow(draftCloudProjection(packet), deps);
           await reconcileDraftMembership(packet, membership, remoteItemRows, result, deps);
           useCarrierPacketsStore.getState().setPacketCloudStatus(packet.id, 'synced');

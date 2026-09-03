@@ -29,9 +29,17 @@ import {
   readyCloudProjection,
   sharedCloudProjection,
   toRemoteCarrierPacketRow,
+  toRemoteCarrierProfileRow,
+  toRemoteCarrierTemplateRow,
+  fromRemoteCarrierProfileRow,
+  fromRemoteCarrierTemplateRow,
   carrierPacketPersistedEvidenceExactlyMatches,
   carrierPacketItemsExactlyMatch,
   sharedSnapshotMatchesSupersededTransition,
+  createCarrierReadyReturnProof,
+  sanitizeReadyReturnProof,
+  draftProjectionFromReadyEvidence,
+  readyReturnProofMatchesRemoteReady,
 } from '../carrierPackets';
 import { DocumentVersion, OperationalDocument } from '../operationalDocuments';
 
@@ -638,5 +646,91 @@ describe('Pass 3.3 — persisted evidence comparators', () => {
     expect(sharedRow.ready_at).toBe(new Date(0).toISOString());
     expect(sharedRow.shared_at).toBe(new Date(0).toISOString());
     expect(fromRemoteCarrierPacketRow(sharedRow, 'user-a')?.sharedAt).toBe(0);
+  });
+});
+
+describe('IR-05 — strict remote profile / template mapping', () => {
+  const profileRow = () => toRemoteCarrierProfileRow(profile, 'user-a');
+
+  it('accepts valid null/string profile scalars and rejects coerced or malformed values', () => {
+    expect(fromRemoteCarrierProfileRow(profileRow(), 'user-a')?.legalName).toBe(profile.legalName);
+    expect(
+      fromRemoteCarrierProfileRow({ ...profileRow(), dba_name: null, usdot_number: '1' }, 'user-a')
+        ?.dbaName,
+    ).toBeNull();
+    expect(fromRemoteCarrierProfileRow({ ...profileRow(), dba_name: 123 }, 'user-a')).toBeNull();
+    expect(fromRemoteCarrierProfileRow({ ...profileRow(), usdot_number: {} }, 'user-a')).toBeNull();
+    expect(fromRemoteCarrierProfileRow({ ...profileRow(), contact_email: false }, 'user-a')).toBeNull();
+    expect(
+      fromRemoteCarrierProfileRow({ ...profileRow(), equipment_types: ['dry-van', 1] }, 'user-a'),
+    ).toBeNull();
+    expect(
+      fromRemoteCarrierProfileRow({ ...profileRow(), identity_source: 'FMCSA' }, 'user-a'),
+    ).toBeNull();
+    expect(fromRemoteCarrierProfileRow({ ...profileRow(), created_at: 1 }, 'user-a')).toBeNull();
+    expect(fromRemoteCarrierProfileRow({ ...profileRow(), updated_at: 2 }, 'user-a')).toBeNull();
+    expect(
+      fromRemoteCarrierProfileRow({ ...profileRow(), created_at: 'not-a-date' }, 'user-a'),
+    ).toBeNull();
+    expect(fromRemoteCarrierProfileRow({ ...profileRow(), owner_id: 'user-b' }, 'user-a')).toBeNull();
+  });
+
+  it('rejects malformed template timestamps and non-object definitions', () => {
+    const template = {
+      id: id(70),
+      accountOwnerId: 'user-a' as string | null,
+      name: 'Custom',
+      lifecycle: 'ACTIVE' as const,
+      definition: STANDARD_BROKER_PACKET,
+      cloudStatus: 'synced' as const,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const row = toRemoteCarrierTemplateRow(template, 'user-a');
+    expect(fromRemoteCarrierTemplateRow(row, 'user-a')?.name).toBe('Custom');
+    expect(fromRemoteCarrierTemplateRow({ ...row, created_at: 1 }, 'user-a')).toBeNull();
+    expect(fromRemoteCarrierTemplateRow({ ...row, updated_at: 'nope' }, 'user-a')).toBeNull();
+    expect(fromRemoteCarrierTemplateRow({ ...row, definition: [] }, 'user-a')).toBeNull();
+    expect(
+      fromRemoteCarrierTemplateRow({ ...row, definition: { ...STANDARD_BROKER_PACKET, schemaVersion: 2 } }, 'user-a'),
+    ).toBeNull();
+  });
+});
+
+describe('IR-03 — return-to-draft proof', () => {
+  it('captures READY evidence and rejects malformed / wrong-owner proofs', () => {
+    const ready = {
+      id: id(2),
+      accountOwnerId: 'user-a' as string | null,
+      status: 'READY' as const,
+      name: 'Pack',
+      templateSourceKind: 'BUILTIN' as const,
+      templateSourceId: null,
+      templateCode: 'STANDARD_BROKER_PACKET' as const,
+      templateSnapshot: STANDARD_BROKER_PACKET,
+      carrierProfileId: profile.id,
+      profileSnapshot: snapshotCarrierProfile(profile, 1),
+      recipientLabel: null,
+      shareMethod: null,
+      readyAt: 5,
+      sharedAt: null,
+      supersedesPacketId: null,
+      cloudStatus: 'local_only' as const,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const proof = createCarrierReadyReturnProof({ packet: ready, items: [], now: 9 });
+    expect(proof.packetId).toBe(ready.id);
+    expect(proof.readyPacketEvidence.status).toBe('READY');
+    expect(proof.readyPacketEvidence.readyAt).toBe(5);
+    expect(readyReturnProofMatchesRemoteReady(proof, ready, [])).toBe(true);
+    expect(draftProjectionFromReadyEvidence(proof.readyPacketEvidence).status).toBe('DRAFT');
+    expect(draftProjectionFromReadyEvidence(proof.readyPacketEvidence).readyAt).toBeNull();
+    expect(sanitizeReadyReturnProof(proof)?.packetId).toBe(ready.id);
+    expect(sanitizeReadyReturnProof({ ...proof, packetId: 'minted' })).toBeNull();
+    expect(sanitizeReadyReturnProof({ ...proof, accountOwnerId: 'user-b' })).toBeNull();
+    expect(sanitizeReadyReturnProof({ ...proof, readyPacketEvidence: { id: ready.id } })).toBeNull();
+    expect(sanitizeReadyReturnProof({ ...proof, readyItemsEvidence: [{ id: 'x' }] })).toBeNull();
+    expect(sanitizeReadyReturnProof({ ...proof, createdAt: 'now' })).toBeNull();
   });
 });

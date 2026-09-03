@@ -1,4 +1,6 @@
 import {
+  createCarrierReadyReturnProof,
+  draftCloudProjection,
   newOpaqueId,
   STANDARD_BROKER_PACKET,
   toRemoteCarrierPacketItemRow,
@@ -775,5 +777,391 @@ describe('Pass 3.3 — exact historical evidence', () => {
     expect(items.integrityConflicts).toBeGreaterThan(0);
     expect(useCarrierPacketsStore.getState().items[0]?.sensitivitySnapshot).toBe('FINANCIAL_SENSITIVE');
     expect(useCarrierPacketsStore.getState().items[0]?.titleSnapshot).toBe('W-9');
+  });
+});
+
+describe('IR-R1 — atomic recovery and return-to-draft proof', () => {
+  const readyPacket = (packetId: string, over: Record<string, unknown> = {}) => ({
+    id: packetId,
+    accountOwnerId: 'user-a' as const,
+    status: 'READY' as const,
+    name: 'Pack',
+    templateSourceKind: 'BUILTIN' as const,
+    templateSourceId: null,
+    templateCode: 'STANDARD_BROKER_PACKET' as const,
+    templateSnapshot: STANDARD_BROKER_PACKET,
+    carrierProfileId: null,
+    profileSnapshot: null,
+    recipientLabel: null,
+    shareMethod: null,
+    readyAt: 1,
+    sharedAt: null,
+    supersedesPacketId: null,
+    cloudStatus: 'synced' as const,
+    createdAt: 1,
+    updatedAt: 2,
+    ...over,
+  });
+
+  const w9Item = (packetId: string, itemId: string, docId: string, verId: string) => ({
+    id: itemId,
+    accountOwnerId: 'user-a' as const,
+    carrierPacketId: packetId,
+    requirementKey: 'w9',
+    requirementLabel: 'W-9',
+    required: true,
+    position: 0,
+    operationalDocumentId: docId,
+    documentVersionId: verId,
+    documentKindSnapshot: 'W9' as const,
+    sensitivitySnapshot: 'FINANCIAL_SENSITIVE' as const,
+    expiresAtSnapshot: '2027-01-01' as string | null,
+    titleSnapshot: 'W-9' as string | null,
+    createdAt: 1,
+  });
+
+  const seedWallet = (docId: string, verId: string) => {
+    useRoadWalletStore.getState().addDocument({
+      id: docId,
+      accountOwnerId: 'user-a',
+      documentKind: 'W9',
+      subjectKind: 'CARRIER',
+      sensitivity: 'FINANCIAL_SENSITIVE',
+      title: 'W-9',
+      issuer: null,
+      jurisdiction: null,
+      maskedReference: null,
+      issuedAt: null,
+      effectiveAt: null,
+      expiresAt: null,
+      truckId: null,
+      trailerNumber: null,
+      offlinePinned: false,
+      lifecycle: 'ACTIVE',
+      cloudStatus: 'synced',
+      createdAt: 1,
+      updatedAt: 1,
+    } as never);
+    useRoadWalletStore.getState().addVersion({
+      id: verId,
+      operationalDocumentId: docId,
+      accountOwnerId: 'user-a',
+      versionNumber: 1,
+      supersedesVersionId: null,
+      fileKind: 'IMAGE',
+      mimeType: 'image/jpeg',
+      ext: 'jpg',
+      relativePath: 'road-wallet/x/y.jpg',
+      sha256: 'a'.repeat(64),
+      byteSize: 12,
+      fileCache: {
+        state: 'READY',
+        relativePath: 'road-wallet/x/y.jpg',
+        sha256: 'a'.repeat(64),
+        error: null,
+        checkedAt: 1,
+      },
+      cloudStatus: 'synced',
+      remoteStorageBucket: null,
+      remoteStoragePath: null,
+      createdAt: 1,
+    } as never);
+  };
+
+  it('READY local exact READY remote + exact items does not mutate membership', async () => {
+    const packetId = id(40);
+    const itemId = id(41);
+    const docId = id(42);
+    const verId = id(43);
+    seedWallet(docId, verId);
+    const local = readyPacket(packetId);
+    const item = w9Item(packetId, itemId, docId, verId);
+    useCarrierPacketsStore.getState().addPacket(local, [item]);
+    remote.packets.push(toRemoteCarrierPacketRow(local, 'user-a') as unknown as Record<string, unknown>);
+    remote.items.push(toRemoteCarrierPacketItemRow(item, 'user-a') as unknown as Record<string, unknown>);
+    const out = await recoverCarrierPacketsFromCloud(deps());
+    expect(out.integrityConflicts).toBe(0);
+    expect(useCarrierPacketsStore.getState().items[0]?.id).toBe(itemId);
+    expect(useCarrierPacketsStore.getState().packets[0]?.name).toBe('Pack');
+  });
+
+  it('READY remote item mismatches and malformed rows conflict without changing local membership', async () => {
+    const packetId = id(44);
+    const itemId = id(45);
+    const docId = id(46);
+    const verId = id(47);
+    seedWallet(docId, verId);
+    const local = readyPacket(packetId);
+    const item = w9Item(packetId, itemId, docId, verId);
+    const extra = w9Item(packetId, id(48), docId, verId);
+    const cases: Record<string, unknown>[] = [
+      toRemoteCarrierPacketItemRow({ ...item, sensitivitySnapshot: 'STANDARD' }, 'user-a') as unknown as Record<
+        string,
+        unknown
+      >,
+      toRemoteCarrierPacketItemRow({ ...item, titleSnapshot: 'Other' }, 'user-a') as unknown as Record<
+        string,
+        unknown
+      >,
+      toRemoteCarrierPacketItemRow({ ...item, expiresAtSnapshot: '2028-01-01' }, 'user-a') as unknown as Record<
+        string,
+        unknown
+      >,
+      toRemoteCarrierPacketItemRow({ ...item, sensitivitySnapshot: 'STANDARD' }, 'user-a') as unknown as Record<
+        string,
+        unknown
+      >,
+    ];
+    for (const remoteItem of cases) {
+      useCarrierPacketsStore.getState().clear();
+      useCarrierPacketsStore.getState().addPacket(local, [item]);
+      remote.packets = [toRemoteCarrierPacketRow(local, 'user-a') as unknown as Record<string, unknown>];
+      remote.items = [remoteItem];
+      const out = await recoverCarrierPacketsFromCloud(deps());
+      expect(out.integrityConflicts).toBeGreaterThan(0);
+      expect(useCarrierPacketsStore.getState().items[0]?.id).toBe(itemId);
+      expect(useCarrierPacketsStore.getState().items[0]?.titleSnapshot).toBe('W-9');
+      expect(useCarrierPacketsStore.getState().items[0]?.sensitivitySnapshot).toBe('FINANCIAL_SENSITIVE');
+    }
+
+    useCarrierPacketsStore.getState().clear();
+    useCarrierPacketsStore.getState().addPacket(local, [item]);
+    remote.packets = [toRemoteCarrierPacketRow(local, 'user-a') as unknown as Record<string, unknown>];
+    remote.items = [];
+    const missing = await recoverCarrierPacketsFromCloud(deps());
+    expect(missing.integrityConflicts).toBeGreaterThan(0);
+    expect(useCarrierPacketsStore.getState().items).toHaveLength(1);
+
+    useCarrierPacketsStore.getState().clear();
+    useCarrierPacketsStore.getState().addPacket(local, [item]);
+    remote.items = [
+      toRemoteCarrierPacketItemRow(item, 'user-a') as unknown as Record<string, unknown>,
+      toRemoteCarrierPacketItemRow(extra, 'user-a') as unknown as Record<string, unknown>,
+    ];
+    const extraRow = await recoverCarrierPacketsFromCloud(deps());
+    expect(extraRow.integrityConflicts).toBeGreaterThan(0);
+    expect(useCarrierPacketsStore.getState().items).toHaveLength(1);
+
+    useCarrierPacketsStore.getState().clear();
+    useCarrierPacketsStore.getState().addPacket(local, [item]);
+    remote.items = [
+      {
+        ...(toRemoteCarrierPacketItemRow(item, 'user-a') as unknown as Record<string, unknown>),
+        sensitivity_snapshot: 12,
+      },
+    ];
+    const malformed = await recoverCarrierPacketsFromCloud(deps());
+    expect(malformed.integrityConflicts).toBeGreaterThan(0);
+    expect(useCarrierPacketsStore.getState().items[0]?.sensitivitySnapshot).toBe('FINANCIAL_SENSITIVE');
+  });
+
+  it('malformed one-of-N remote items blocks the whole packet import', async () => {
+    const packetId = id(49);
+    const docId = id(50);
+    const verId = id(51);
+    seedWallet(docId, verId);
+    const remoteReady = readyPacket(packetId);
+    const good = w9Item(packetId, id(52), docId, verId);
+    remote.packets = [toRemoteCarrierPacketRow(remoteReady, 'user-a') as unknown as Record<string, unknown>];
+    remote.items = [
+      toRemoteCarrierPacketItemRow(good, 'user-a') as unknown as Record<string, unknown>,
+      {
+        id: id(53),
+        owner_id: 'user-a',
+        carrier_packet_id: packetId,
+        requirement_key: 'coi',
+        requirement_label: 1,
+      },
+    ];
+    const out = await recoverCarrierPacketsFromCloud(deps());
+    expect(out.integrityConflicts).toBeGreaterThan(0);
+    expect(useCarrierPacketsStore.getState().packets).toHaveLength(0);
+    expect(useCarrierPacketsStore.getState().items).toHaveLength(0);
+  });
+
+  it('pending local DRAFT keeps local metadata and membership when remote items differ', async () => {
+    const packetId = id(54);
+    const itemId = id(55);
+    const docId = id(56);
+    const verId = id(57);
+    seedWallet(docId, verId);
+    const local = readyPacket(packetId, { status: 'DRAFT', readyAt: null, cloudStatus: 'pending_sync' });
+    const item = w9Item(packetId, itemId, docId, verId);
+    useCarrierPacketsStore.getState().addPacket(local, [item]);
+    remote.packets = [
+      toRemoteCarrierPacketRow(
+        readyPacket(packetId, { status: 'DRAFT', readyAt: null, name: 'Remote', updatedAt: 99 }),
+        'user-a',
+      ) as unknown as Record<string, unknown>,
+    ];
+    remote.items = [
+      toRemoteCarrierPacketItemRow({ ...item, titleSnapshot: 'Remote title' }, 'user-a') as unknown as Record<
+        string,
+        unknown
+      >,
+    ];
+    const out = await recoverCarrierPacketsFromCloud(deps());
+    expect(out.skippedLocalChanges).toBeGreaterThan(0);
+    expect(useCarrierPacketsStore.getState().packets[0]?.name).toBe('Pack');
+    expect(useCarrierPacketsStore.getState().items[0]?.titleSnapshot).toBe('W-9');
+  });
+
+  it('synced DRAFT keeps membership when local metadata is kept and replaces both atomically', async () => {
+    const packetId = id(58);
+    const itemId = id(59);
+    const docId = id(60);
+    const verId = id(61);
+    seedWallet(docId, verId);
+    const local = readyPacket(packetId, {
+      status: 'DRAFT',
+      readyAt: null,
+      name: 'Local',
+      updatedAt: 50,
+      cloudStatus: 'synced',
+    });
+    const item = w9Item(packetId, itemId, docId, verId);
+    useCarrierPacketsStore.getState().addPacket(local, [item]);
+    remote.packets = [
+      toRemoteCarrierPacketRow(
+        readyPacket(packetId, { status: 'DRAFT', readyAt: null, name: 'Older', updatedAt: 10 }),
+        'user-a',
+      ) as unknown as Record<string, unknown>,
+    ];
+    remote.items = [
+      toRemoteCarrierPacketItemRow({ ...item, titleSnapshot: 'Should not apply' }, 'user-a') as unknown as Record<
+        string,
+        unknown
+      >,
+    ];
+    const kept = await recoverCarrierPacketsFromCloud(deps());
+    expect(kept.integrityConflicts).toBe(0);
+    expect(useCarrierPacketsStore.getState().packets[0]?.name).toBe('Local');
+    expect(useCarrierPacketsStore.getState().items[0]?.titleSnapshot).toBe('W-9');
+
+    remote.packets = [
+      toRemoteCarrierPacketRow(
+        readyPacket(packetId, { status: 'DRAFT', readyAt: null, name: 'Newer remote', updatedAt: 80 }),
+        'user-a',
+      ) as unknown as Record<string, unknown>,
+    ];
+    const replaced = await recoverCarrierPacketsFromCloud(deps());
+    expect(replaced.integrityConflicts).toBe(0);
+    expect(useCarrierPacketsStore.getState().packets[0]?.name).toBe('Newer remote');
+    expect(useCarrierPacketsStore.getState().items[0]?.titleSnapshot).toBe('Should not apply');
+  });
+
+  it('Device B stale DRAFT cannot downgrade remote READY without proof', async () => {
+    const packetId = id(62);
+    const local = readyPacket(packetId, {
+      status: 'DRAFT',
+      readyAt: null,
+      name: 'Stale',
+      cloudStatus: 'pending_sync',
+    });
+    useCarrierPacketsStore.getState().addPacket(local, []);
+    remote.packets = [
+      toRemoteCarrierPacketRow(readyPacket(packetId), 'user-a') as unknown as Record<string, unknown>,
+    ];
+    const recovered = await recoverCarrierPacketsFromCloud(deps());
+    expect(recovered.integrityConflicts).toBeGreaterThan(0);
+    const synced = await syncPendingCarrierPackets(deps());
+    expect(synced.integrityConflicts).toBeGreaterThan(0);
+    expect(remote.packets[0]?.status).toBe('READY');
+    expect(useCarrierPacketsStore.getState().packets[0]?.status).toBe('DRAFT');
+  });
+
+  it('valid proof stages remote READY to base DRAFT then local DRAFT membership', async () => {
+    const packetId = id(63);
+    const itemId = id(64);
+    const docId = id(65);
+    const verId = id(66);
+    seedWallet(docId, verId);
+    const ready = readyPacket(packetId, { cloudStatus: 'pending_sync' });
+    const item = w9Item(packetId, itemId, docId, verId);
+    const edited = w9Item(packetId, itemId, docId, verId);
+    useCarrierPacketsStore.getState().addPacket({ ...ready, status: 'READY' }, [item]);
+    const proof = createCarrierReadyReturnProof({
+      packet: { ...ready, status: 'READY' },
+      items: [item],
+      now: 9,
+    });
+    useCarrierPacketsStore.getState().upsertReadyReturnProof(proof);
+    useCarrierPacketsStore.getState().transitionPacket(packetId, 'DRAFT', {
+      readyAt: null,
+      updatedAt: 20,
+      cloudStatus: 'pending_sync',
+    });
+    useCarrierPacketsStore.getState().updateDraftPacket(packetId, { name: 'Edited', updatedAt: 21 }, [
+      { ...edited, titleSnapshot: 'Edited W-9' },
+    ]);
+    remote.packets = [toRemoteCarrierPacketRow(ready, 'user-a') as unknown as Record<string, unknown>];
+    remote.items = [toRemoteCarrierPacketItemRow(item, 'user-a') as unknown as Record<string, unknown>];
+    const out = await syncPendingCarrierPackets(deps());
+    expect(out.integrityConflicts).toBe(0);
+    expect(out.packetsSynced).toBe(1);
+    const statuses = remote.upserts.filter((u) => u.table === 'carrier_packets').map((u) => u.row);
+    expect(statuses[0]?.status).toBe('DRAFT');
+    expect(statuses[0]?.name).toBe('Pack');
+    expect(statuses[0]?.ready_at).toBeNull();
+    expect(statuses[1]?.name).toBe('Edited');
+    expect(remote.packets[0]?.name).toBe('Edited');
+    expect(remote.items[0]?.title_snapshot).toBe('Edited W-9');
+    expect(useCarrierPacketsStore.getState().readyReturnProofFor(packetId, 'user-a')).toBeNull();
+  });
+
+  it('proof mismatch against remote READY is a conflict; crash after base DRAFT retries safely', async () => {
+    const packetId = id(67);
+    const ready = readyPacket(packetId, { cloudStatus: 'pending_sync' });
+    useCarrierPacketsStore.getState().addPacket(ready, []);
+    const proof = createCarrierReadyReturnProof({ packet: ready, items: [], now: 9 });
+    useCarrierPacketsStore.getState().upsertReadyReturnProof(proof);
+    useCarrierPacketsStore.getState().transitionPacket(packetId, 'DRAFT', {
+      readyAt: null,
+      updatedAt: 20,
+      cloudStatus: 'pending_sync',
+    });
+    remote.packets = [
+      toRemoteCarrierPacketRow({ ...ready, name: 'Other READY' }, 'user-a') as unknown as Record<
+        string,
+        unknown
+      >,
+    ];
+    const mismatch = await syncPendingCarrierPackets(deps());
+    expect(mismatch.integrityConflicts).toBeGreaterThan(0);
+    expect(remote.packets[0]?.status).toBe('READY');
+    expect(useCarrierPacketsStore.getState().readyReturnProofFor(packetId, 'user-a')?.packetId).toBe(
+      packetId,
+    );
+
+    remote.packets = [
+      toRemoteCarrierPacketRow(draftCloudProjection(ready), 'user-a') as unknown as Record<string, unknown>,
+    ];
+    remote.failPacketUpsertWhen = (row) => row.name === 'Pack' && row.status === 'DRAFT' && false;
+    const continued = await syncPendingCarrierPackets(deps());
+    expect(continued.integrityConflicts).toBe(0);
+    expect(continued.packetsSynced).toBe(1);
+    expect(useCarrierPacketsStore.getState().readyReturnProofFor(packetId, 'user-a')).toBeNull();
+  });
+
+  it('local DRAFT + remote SHARED/SUPERSEDED is a conflict', async () => {
+    const packetId = id(68);
+    useCarrierPacketsStore.getState().addPacket(
+      readyPacket(packetId, { status: 'DRAFT', readyAt: null, cloudStatus: 'pending_sync' }),
+      [],
+    );
+    remote.packets = [
+      toRemoteCarrierPacketRow(
+        readyPacket(packetId, {
+          status: 'SHARED',
+          sharedAt: 3,
+          shareMethod: 'OTHER',
+          recipientLabel: 'Broker',
+        }),
+        'user-a',
+      ) as unknown as Record<string, unknown>,
+    ];
+    const out = await syncPendingCarrierPackets(deps());
+    expect(out.integrityConflicts).toBeGreaterThan(0);
+    expect(remote.packets[0]?.status).toBe('SHARED');
   });
 });
