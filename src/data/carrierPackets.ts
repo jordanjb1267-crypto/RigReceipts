@@ -1,10 +1,8 @@
 import {
   assertPacketDraft,
-  assertPacketMutable,
   canMutateCarrierPackets,
   canMutateCarrierTemplates,
   canTransitionPacket,
-  canUseFeature,
   CarrierPacket,
   CarrierPacketItem,
   CarrierPacketReview,

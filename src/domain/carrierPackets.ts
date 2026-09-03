@@ -841,7 +841,7 @@ export function fromRemoteCarrierTemplateRow(
     accountOwnerId: sessionUserId,
     name: row.name,
     lifecycle: row.lifecycle,
-    definition: row.definition as CarrierPacketTemplateDefinition,
+    definition: row.definition as unknown as CarrierPacketTemplateDefinition,
     cloudStatus: 'synced',
     createdAt,
     updatedAt,

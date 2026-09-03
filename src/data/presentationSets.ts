@@ -72,8 +72,10 @@ export interface PresentationSetDeps {
   appActivity?: () => 'active' | 'inactive' | 'background' | 'unknown';
 }
 
-const liveAppActivity = (): 'active' | 'inactive' | 'background' | 'unknown' =>
-  AppState.currentState;
+const liveAppActivity = (): 'active' | 'inactive' | 'background' | 'unknown' => {
+  const state = AppState.currentState;
+  return state === 'active' || state === 'inactive' || state === 'background' ? state : 'unknown';
+};
 
 export const defaultPresentationSetDeps = (): PresentationSetDeps => ({
   fileStore: roadWalletFileStore(),

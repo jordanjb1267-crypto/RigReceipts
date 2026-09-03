@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { Button, Card, Pill, Screen } from '@/components';
@@ -52,7 +52,7 @@ function CarrierPacketDetailScreen() {
   const [notice, setNotice] = useState<string | null>(null);
   const [recipient, setRecipient] = useState(packet?.recipientLabel ?? '');
   const [confirmShared, setConfirmShared] = useState(false);
-  const review = useMemo(() => (id ? liveReviewCarrierPacket(id) : null), [id, packet, documents]);
+  const review = id ? liveReviewCarrierPacket(id) : null;
   const items = id ? packetItems(id) : [];
 
   if (!packet || packet.accountOwnerId !== userId) {

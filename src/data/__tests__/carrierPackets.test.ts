@@ -28,7 +28,6 @@ import {
   replaceOperationalDocumentFile,
 } from '../roadWallet';
 
-const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46, 1, 2, 3, 4]);
 const PDF = new TextEncoder().encode('%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF\n');
 
 let fileStore: MemoryDocumentFileStore;

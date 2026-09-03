@@ -467,7 +467,13 @@ describe('Pass 2.1 H4/H5/H6/H9 — preflight and live session races', () => {
   it('Pass 3-H0: production deps expose live AppState; test deps stay injectable', () => {
     const production = defaultPresentationSetDeps();
     expect(production.appActivity).toEqual(expect.any(Function));
-    expect(production.appActivity?.()).toBe(AppState.currentState);
+    const live = production.appActivity?.();
+    const raw = AppState.currentState;
+    if (raw === 'active' || raw === 'inactive' || raw === 'background') {
+      expect(live).toBe(raw);
+    } else {
+      expect(live).toBe('unknown');
+    }
     let activity: 'active' | 'background' = 'background';
     const injected = { ...deps(), appActivity: () => activity };
     expect(injected.appActivity()).toBe('background');

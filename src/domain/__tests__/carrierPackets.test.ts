@@ -1,11 +1,11 @@
 import { newOpaqueId } from '../documentFiles';
+import { canUseFeature } from '../entitlements';
 import {
   assertPacketMutable,
   canMutateCarrierPackets,
   canMutateCarrierProfile,
   canMutateCarrierTemplates,
   canTransitionPacket,
-  canUseFeature,
   canViewCarrierHistory,
   CARRIER_PACKET_FORBIDDEN_COPY,
   CARRIER_PACKET_REQUIREMENTS_VARY_COPY,
