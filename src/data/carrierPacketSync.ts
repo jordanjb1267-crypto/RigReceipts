@@ -5,20 +5,19 @@ import {
   CarrierPacket,
   CarrierRecoveryResult,
   carrierPacketItemsExactlyMatch,
+  carrierPacketPersistedEvidenceExactlyMatches,
   draftCloudProjection,
   emptyCarrierRecoveryResult,
   fromRemoteCarrierPacketItemRow,
   fromRemoteCarrierPacketRow,
   fromRemoteCarrierProfileRow,
   fromRemoteCarrierTemplateRow,
-  historicalEvidenceMatchesIgnoringStatus,
-  historicalItemsMatch,
-  historicalPacketSnapshotsMatch,
   itemsForPacket,
   mergeRecoveredCarrierRecord,
   readyCloudProjection,
   readySnapshotMatchesSharedTransition,
   sharedCloudProjection,
+  sharedSnapshotMatchesSupersededTransition,
   supersededCloudProjection,
   toRemoteCarrierPacketItemRow,
   toRemoteCarrierPacketRow,
@@ -205,7 +204,12 @@ export async function recoverCarrierPacketsFromCloud(
     }
     const local = useCarrierPacketsStore.getState().packets.find((p) => p.id === remote.id);
     const immutable = remote.status === 'SHARED' || remote.status === 'SUPERSEDED';
-    const merged = mergeRecoveredCarrierRecord(local, remote, immutable, historicalPacketSnapshotsMatch);
+    const merged = mergeRecoveredCarrierRecord(
+      local,
+      remote,
+      immutable,
+      carrierPacketPersistedEvidenceExactlyMatches,
+    );
     if (merged.action === 'conflict') {
       result.integrityConflicts++;
       continue;
@@ -261,14 +265,15 @@ export async function recoverCarrierPacketsFromCloud(
     }
     if (parent.status === 'SHARED' || parent.status === 'SUPERSEDED') {
       const existingItems = itemsForPacket(useCarrierPacketsStore.getState().items, parent.id);
-      if (existingItems.length > 0 && !historicalItemsMatch(existingItems, mapped)) {
-        result.integrityConflicts++;
+      const localHistorical = useCarrierPacketsStore.getState().packets.find((p) => p.id === parent.id);
+      if (localHistorical) {
+        if (!carrierPacketItemsExactlyMatch(existingItems, mapped)) {
+          result.integrityConflicts++;
+        }
         continue;
       }
-      if (!useCarrierPacketsStore.getState().packets.some((p) => p.id === parent.id)) {
-        useCarrierPacketsStore.getState().importRecoveredPacket(parent, mapped);
-        result.itemsRecovered += mapped.length;
-      }
+      useCarrierPacketsStore.getState().importRecoveredPacket(parent, mapped);
+      result.itemsRecovered += mapped.length;
       continue;
     }
     if (!useCarrierPacketsStore.getState().packets.some((p) => p.id === parent.id)) {
@@ -432,10 +437,10 @@ export async function syncPendingCarrierPackets(
         .find((p) => p?.id === packet.id);
       const existingItems = existing ? remoteItemsFor(remoteItemRows, existing, userId) : [];
 
-      const exactHistorical =
+      const exactPersisted =
         !!existing &&
-        historicalPacketSnapshotsMatch(existing, packet) &&
-        historicalItemsMatch(existingItems, membership);
+        carrierPacketPersistedEvidenceExactlyMatches(existing, packet) &&
+        carrierPacketItemsExactlyMatch(existingItems, membership);
 
       if (packet.status === 'DRAFT') {
         if (!existing || existing.status === 'DRAFT' || existing.status === 'READY') {
@@ -454,7 +459,7 @@ export async function syncPendingCarrierPackets(
       }
 
       if (packet.status === 'READY') {
-        if (existing?.status === 'READY' && exactHistorical) {
+        if (existing?.status === 'READY' && exactPersisted) {
           useCarrierPacketsStore.getState().setPacketCloudStatus(packet.id, 'synced');
           result.packetsSynced++;
           continue;
@@ -463,7 +468,7 @@ export async function syncPendingCarrierPackets(
           result.integrityConflicts++;
           continue;
         }
-        if (existing?.status === 'READY' && !exactHistorical) {
+        if (existing?.status === 'READY' && !exactPersisted) {
           result.integrityConflicts++;
           continue;
         }
@@ -476,12 +481,12 @@ export async function syncPendingCarrierPackets(
       }
 
       if (packet.status === 'SHARED') {
-        if (existing?.status === 'SHARED' && exactHistorical) {
+        if (existing?.status === 'SHARED' && exactPersisted) {
           useCarrierPacketsStore.getState().setPacketCloudStatus(packet.id, 'synced');
           result.packetsSynced++;
           continue;
         }
-        if (existing?.status === 'SHARED' && !exactHistorical) {
+        if (existing?.status === 'SHARED' && !exactPersisted) {
           result.integrityConflicts++;
           continue;
         }
@@ -512,19 +517,19 @@ export async function syncPendingCarrierPackets(
       }
 
       if (packet.status === 'SUPERSEDED') {
-        if (existing?.status === 'SUPERSEDED' && exactHistorical) {
+        if (existing?.status === 'SUPERSEDED' && exactPersisted) {
           useCarrierPacketsStore.getState().setPacketCloudStatus(packet.id, 'synced');
           result.packetsSynced++;
           continue;
         }
-        if (existing?.status === 'SUPERSEDED' && !exactHistorical) {
+        if (existing?.status === 'SUPERSEDED' && !exactPersisted) {
           result.integrityConflicts++;
           continue;
         }
         if (
           existing?.status === 'SHARED' &&
-          historicalEvidenceMatchesIgnoringStatus(existing, packet) &&
-          historicalItemsMatch(existingItems, membership)
+          sharedSnapshotMatchesSupersededTransition(existing, packet) &&
+          carrierPacketItemsExactlyMatch(existingItems, membership)
         ) {
           await upsertPacketNow(supersededCloudProjection(packet), deps);
           useCarrierPacketsStore.getState().setPacketCloudStatus(packet.id, 'synced');

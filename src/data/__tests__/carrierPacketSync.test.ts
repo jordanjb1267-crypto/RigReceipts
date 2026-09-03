@@ -1,12 +1,14 @@
 import {
   newOpaqueId,
   STANDARD_BROKER_PACKET,
+  toRemoteCarrierPacketItemRow,
   toRemoteCarrierPacketRow,
   toRemoteCarrierProfileRow,
 } from '@/domain';
 import { useAuthStore } from '@/store/auth';
 import { useCarrierPacketsStore } from '@/store/carrierPackets';
 import { useCarrierProfileStore } from '@/store/carrierProfile';
+import { useRoadWalletStore } from '@/store/roadWallet';
 import { useSubscriptionStore } from '@/store/subscription';
 
 import { CarrierRemote, recoverCarrierPacketsFromCloud, syncPendingCarrierPackets } from '../carrierPacketSync';
@@ -79,6 +81,7 @@ const deps = () => ({
 beforeEach(() => {
   useCarrierPacketsStore.getState().clear();
   useCarrierProfileStore.getState().clear();
+  useRoadWalletStore.getState().clear();
   remote = new FakeCarrierRemote();
   useAuthStore.setState({ userId: 'user-a', status: 'signed_in', session: null });
   useSubscriptionStore.getState().setTier('owner_operator');
@@ -551,5 +554,226 @@ describe('carrier packet cloud writes', () => {
       expect(conflicted.integrityConflicts).toBeGreaterThan(0);
       expect(remote.packets[0]?.status).toBe('READY');
     }
+  });
+});
+
+describe('Pass 3.3 — exact historical evidence', () => {
+  const sharedPacket = (packetId: string, over: Record<string, unknown> = {}) => ({
+    id: packetId,
+    accountOwnerId: 'user-a' as const,
+    status: 'SHARED' as const,
+    name: 'Pack',
+    templateSourceKind: 'BUILTIN' as const,
+    templateSourceId: null,
+    templateCode: 'STANDARD_BROKER_PACKET' as const,
+    templateSnapshot: STANDARD_BROKER_PACKET,
+    carrierProfileId: null,
+    profileSnapshot: null,
+    recipientLabel: 'Broker',
+    shareMethod: 'OTHER' as const,
+    readyAt: 1,
+    sharedAt: 2,
+    supersedesPacketId: null,
+    cloudStatus: 'pending_sync' as const,
+    createdAt: 1,
+    updatedAt: 2,
+    ...over,
+  });
+
+  const w9Item = (packetId: string, itemId: string, docId: string, verId: string) => ({
+    id: itemId,
+    accountOwnerId: 'user-a' as const,
+    carrierPacketId: packetId,
+    requirementKey: 'w9',
+    requirementLabel: 'W-9',
+    required: true,
+    position: 0,
+    operationalDocumentId: docId,
+    documentVersionId: verId,
+    documentKindSnapshot: 'W9' as const,
+    sensitivitySnapshot: 'FINANCIAL_SENSITIVE' as const,
+    expiresAtSnapshot: '2027-01-01' as string | null,
+    titleSnapshot: 'W-9' as string | null,
+    createdAt: 1,
+  });
+
+  const seedWallet = (docId: string, verId: string) => {
+    useRoadWalletStore.getState().addDocument({
+      id: docId,
+      accountOwnerId: 'user-a',
+      documentKind: 'W9',
+      subjectKind: 'CARRIER',
+      sensitivity: 'FINANCIAL_SENSITIVE',
+      title: 'W-9',
+      issuer: null,
+      jurisdiction: null,
+      maskedReference: null,
+      issuedAt: null,
+      effectiveAt: null,
+      expiresAt: null,
+      truckId: null,
+      trailerNumber: null,
+      offlinePinned: false,
+      lifecycle: 'ACTIVE',
+      cloudStatus: 'synced',
+      createdAt: 1,
+      updatedAt: 1,
+    } as never);
+    useRoadWalletStore.getState().addVersion({
+      id: verId,
+      operationalDocumentId: docId,
+      accountOwnerId: 'user-a',
+      versionNumber: 1,
+      supersedesVersionId: null,
+      fileKind: 'IMAGE',
+      mimeType: 'image/jpeg',
+      ext: 'jpg',
+      relativePath: 'road-wallet/x/y.jpg',
+      sha256: 'a'.repeat(64),
+      byteSize: 12,
+      fileCache: {
+        state: 'READY',
+        relativePath: 'road-wallet/x/y.jpg',
+        sha256: 'a'.repeat(64),
+        error: null,
+        checkedAt: 1,
+      },
+      cloudStatus: 'synced',
+      remoteStorageBucket: null,
+      remoteStoragePath: null,
+      createdAt: 1,
+    } as never);
+  };
+
+  it('remote SHARED exact evidence is idempotent; readyAt or item snapshot mismatch conflicts', async () => {
+    const packetId = id(30);
+    const itemId = id(31);
+    const docId = id(32);
+    const verId = id(33);
+    const local = sharedPacket(packetId);
+    const item = w9Item(packetId, itemId, docId, verId);
+    useCarrierPacketsStore.getState().addPacket(local, [item]);
+    remote.packets.push(toRemoteCarrierPacketRow(local, 'user-a') as unknown as Record<string, unknown>);
+    remote.items.push(toRemoteCarrierPacketItemRow(item, 'user-a') as unknown as Record<string, unknown>);
+    const exact = await syncPendingCarrierPackets(deps());
+    expect(exact.integrityConflicts).toBe(0);
+    expect(exact.packetsSynced).toBe(1);
+    expect(remote.upserts.filter((u) => u.table === 'carrier_packets')).toHaveLength(0);
+
+    useCarrierPacketsStore.getState().setPacketCloudStatus(packetId, 'pending_sync');
+    remote.packets = [
+      toRemoteCarrierPacketRow({ ...local, readyAt: 99 }, 'user-a') as unknown as Record<string, unknown>,
+    ];
+    const readyAtConflict = await syncPendingCarrierPackets(deps());
+    expect(readyAtConflict.integrityConflicts).toBeGreaterThan(0);
+    expect(useCarrierPacketsStore.getState().packets[0]?.readyAt).toBe(1);
+
+    useCarrierPacketsStore.getState().setPacketCloudStatus(packetId, 'pending_sync');
+    remote.packets = [toRemoteCarrierPacketRow(local, 'user-a') as unknown as Record<string, unknown>];
+    remote.items = [
+      toRemoteCarrierPacketItemRow(
+        { ...item, sensitivitySnapshot: 'STANDARD' },
+        'user-a',
+      ) as unknown as Record<string, unknown>,
+    ];
+    const sensitivityConflict = await syncPendingCarrierPackets(deps());
+    expect(sensitivityConflict.integrityConflicts).toBeGreaterThan(0);
+
+    remote.items = [
+      toRemoteCarrierPacketItemRow(
+        { ...item, expiresAtSnapshot: '2028-01-01', titleSnapshot: 'Other' },
+        'user-a',
+      ) as unknown as Record<string, unknown>,
+    ];
+    useCarrierPacketsStore.getState().setPacketCloudStatus(packetId, 'pending_sync');
+    const snapshotConflict = await syncPendingCarrierPackets(deps());
+    expect(snapshotConflict.integrityConflicts).toBeGreaterThan(0);
+  });
+
+  it('remote SUPERSEDED exact succeeds; evidence mismatch conflicts; SHARED→SUPERSEDED is status-only', async () => {
+    const packetId = id(34);
+    const superseded = sharedPacket(packetId, { status: 'SUPERSEDED' });
+    useCarrierPacketsStore.getState().addPacket(superseded, []);
+    remote.packets.push(
+      toRemoteCarrierPacketRow(superseded, 'user-a') as unknown as Record<string, unknown>,
+    );
+    const exact = await syncPendingCarrierPackets(deps());
+    expect(exact.integrityConflicts).toBe(0);
+    expect(exact.packetsSynced).toBe(1);
+
+    useCarrierPacketsStore.getState().setPacketCloudStatus(packetId, 'pending_sync');
+    remote.packets = [
+      toRemoteCarrierPacketRow({ ...superseded, readyAt: 50 }, 'user-a') as unknown as Record<
+        string,
+        unknown
+      >,
+    ];
+    const mismatch = await syncPendingCarrierPackets(deps());
+    expect(mismatch.integrityConflicts).toBeGreaterThan(0);
+    expect(remote.packets[0]?.status).toBe('SUPERSEDED');
+
+    useCarrierPacketsStore.getState().clear();
+    const localSuperseded = sharedPacket(packetId, { status: 'SUPERSEDED', updatedAt: 8 });
+    const remoteShared = sharedPacket(packetId, { status: 'SHARED', cloudStatus: 'synced' });
+    useCarrierPacketsStore.getState().addPacket(localSuperseded, []);
+    remote.packets = [
+      toRemoteCarrierPacketRow(remoteShared, 'user-a') as unknown as Record<string, unknown>,
+    ];
+    remote.upserts = [];
+    const promoted = await syncPendingCarrierPackets(deps());
+    expect(promoted.integrityConflicts).toBe(0);
+    expect(promoted.packetsSynced).toBe(1);
+    expect(remote.packets[0]?.status).toBe('SUPERSEDED');
+    expect(remote.packets[0]?.ready_at).toBe(toRemoteCarrierPacketRow(remoteShared, 'user-a').ready_at);
+  });
+
+  it('READY local/remote different readyAt is an integrity conflict', async () => {
+    const packetId = id(35);
+    const ready = {
+      ...sharedPacket(packetId, {
+        status: 'READY',
+        sharedAt: null,
+        shareMethod: null,
+        recipientLabel: null,
+      }),
+    };
+    useCarrierPacketsStore.getState().addPacket(ready, []);
+    remote.packets.push(
+      toRemoteCarrierPacketRow({ ...ready, readyAt: 77 }, 'user-a') as unknown as Record<string, unknown>,
+    );
+    const out = await syncPendingCarrierPackets(deps());
+    expect(out.integrityConflicts).toBeGreaterThan(0);
+    expect(useCarrierPacketsStore.getState().packets[0]?.readyAt).toBe(1);
+    expect(remote.packets[0]?.status).toBe('READY');
+  });
+
+  it('recovery never silently accepts changed historical packet or item evidence', async () => {
+    const packetId = id(36);
+    const itemId = id(37);
+    const docId = id(38);
+    const verId = id(39);
+    seedWallet(docId, verId);
+    const local = { ...sharedPacket(packetId), cloudStatus: 'synced' as const };
+    const item = w9Item(packetId, itemId, docId, verId);
+    useCarrierPacketsStore.getState().addPacket(local, [item]);
+    remote.packets.push(
+      toRemoteCarrierPacketRow({ ...local, readyAt: 44 }, 'user-a') as unknown as Record<string, unknown>,
+    );
+    remote.items.push(toRemoteCarrierPacketItemRow(item, 'user-a') as unknown as Record<string, unknown>);
+    const readyAt = await recoverCarrierPacketsFromCloud(deps());
+    expect(readyAt.integrityConflicts).toBeGreaterThan(0);
+    expect(useCarrierPacketsStore.getState().packets[0]?.readyAt).toBe(1);
+
+    remote.packets = [toRemoteCarrierPacketRow(local, 'user-a') as unknown as Record<string, unknown>];
+    remote.items = [
+      toRemoteCarrierPacketItemRow(
+        { ...item, sensitivitySnapshot: 'STANDARD', titleSnapshot: 'Changed' },
+        'user-a',
+      ) as unknown as Record<string, unknown>,
+    ];
+    const items = await recoverCarrierPacketsFromCloud(deps());
+    expect(items.integrityConflicts).toBeGreaterThan(0);
+    expect(useCarrierPacketsStore.getState().items[0]?.sensitivitySnapshot).toBe('FINANCIAL_SENSITIVE');
+    expect(useCarrierPacketsStore.getState().items[0]?.titleSnapshot).toBe('W-9');
   });
 });

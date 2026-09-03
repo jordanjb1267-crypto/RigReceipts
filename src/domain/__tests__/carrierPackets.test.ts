@@ -29,6 +29,9 @@ import {
   readyCloudProjection,
   sharedCloudProjection,
   toRemoteCarrierPacketRow,
+  carrierPacketPersistedEvidenceExactlyMatches,
+  carrierPacketItemsExactlyMatch,
+  sharedSnapshotMatchesSupersededTransition,
 } from '../carrierPackets';
 import { DocumentVersion, OperationalDocument } from '../operationalDocuments';
 
@@ -500,5 +503,140 @@ describe('Pass 3.2 — snapshot integrity', () => {
     expect(sharedProj.status).toBe('SHARED');
     expect(sharedProj.sharedAt).toBe(9);
     expect(sharedProj.shareMethod).toBe('OS_SHARE_SHEET');
+  });
+});
+
+describe('Pass 3.3 — persisted evidence comparators', () => {
+  const packet = {
+    id: id(2),
+    accountOwnerId: 'user-a' as string | null,
+    status: 'SHARED' as const,
+    name: 'Pack',
+    templateSourceKind: 'BUILTIN' as const,
+    templateSourceId: null,
+    templateCode: 'STANDARD_BROKER_PACKET' as const,
+    templateSnapshot: STANDARD_BROKER_PACKET,
+    carrierProfileId: profile.id,
+    profileSnapshot: snapshotCarrierProfile(profile, 1),
+    recipientLabel: 'Broker',
+    shareMethod: 'OTHER' as const,
+    readyAt: 5,
+    sharedAt: 9,
+    supersedesPacketId: null,
+    cloudStatus: 'synced' as const,
+    createdAt: 1,
+    updatedAt: 9,
+  };
+
+  it('exact packet evidence ignores only cloudStatus and updatedAt', () => {
+    expect(
+      carrierPacketPersistedEvidenceExactlyMatches(packet, {
+        ...packet,
+        cloudStatus: 'pending_sync',
+        updatedAt: 99,
+      }),
+    ).toBe(true);
+    expect(carrierPacketPersistedEvidenceExactlyMatches(packet, { ...packet, readyAt: 6 })).toBe(
+      false,
+    );
+    expect(carrierPacketPersistedEvidenceExactlyMatches(packet, { ...packet, createdAt: 2 })).toBe(
+      false,
+    );
+    expect(
+      carrierPacketPersistedEvidenceExactlyMatches(packet, {
+        ...packet,
+        templateSnapshot: { ...STANDARD_BROKER_PACKET, name: 'Other' },
+      }),
+    ).toBe(false);
+    expect(
+      carrierPacketPersistedEvidenceExactlyMatches(packet, {
+        ...packet,
+        profileSnapshot: snapshotCarrierProfile({ ...profile, legalName: 'Other' }, 1),
+      }),
+    ).toBe(false);
+    expect(
+      carrierPacketPersistedEvidenceExactlyMatches(packet, { ...packet, recipientLabel: 'Other' }),
+    ).toBe(false);
+    expect(
+      carrierPacketPersistedEvidenceExactlyMatches(packet, {
+        ...packet,
+        shareMethod: 'OS_SHARE_SHEET',
+      }),
+    ).toBe(false);
+    expect(carrierPacketPersistedEvidenceExactlyMatches(packet, { ...packet, sharedAt: 10 })).toBe(
+      false,
+    );
+    expect(
+      carrierPacketPersistedEvidenceExactlyMatches(packet, {
+        ...packet,
+        supersedesPacketId: id(99),
+      }),
+    ).toBe(false);
+  });
+
+  it('SHARED→SUPERSEDED comparator ignores only status and keeps readyAt/createdAt', () => {
+    const superseded = { ...packet, status: 'SUPERSEDED' as const, updatedAt: 12 };
+    expect(sharedSnapshotMatchesSupersededTransition(packet, superseded)).toBe(true);
+    expect(sharedSnapshotMatchesSupersededTransition({ ...packet, readyAt: 6 }, superseded)).toBe(
+      false,
+    );
+    expect(sharedSnapshotMatchesSupersededTransition({ ...packet, createdAt: 2 }, superseded)).toBe(
+      false,
+    );
+  });
+
+  it('exact item evidence compares every persisted field regardless of order', () => {
+    const item = {
+      id: id(40),
+      accountOwnerId: 'user-a' as string | null,
+      carrierPacketId: packet.id,
+      requirementKey: 'w9',
+      requirementLabel: 'W-9',
+      required: true,
+      position: 0,
+      operationalDocumentId: id(41),
+      documentVersionId: id(42),
+      documentKindSnapshot: 'W9' as const,
+      sensitivitySnapshot: 'FINANCIAL_SENSITIVE' as const,
+      expiresAtSnapshot: '2027-01-01',
+      titleSnapshot: 'W-9',
+      createdAt: 1,
+    };
+    const other = { ...item, id: id(43), requirementKey: 'coi', position: 1 };
+    expect(carrierPacketItemsExactlyMatch([item, other], [other, item])).toBe(true);
+    expect(
+      carrierPacketItemsExactlyMatch([item], [{ ...item, requirementLabel: 'Wrong' }]),
+    ).toBe(false);
+    expect(carrierPacketItemsExactlyMatch([item], [{ ...item, required: false }])).toBe(false);
+    expect(carrierPacketItemsExactlyMatch([item], [{ ...item, position: 3 }])).toBe(false);
+    expect(
+      carrierPacketItemsExactlyMatch(
+        [item],
+        [{ ...item, documentKindSnapshot: 'CERTIFICATE_OF_INSURANCE' }],
+      ),
+    ).toBe(false);
+    expect(
+      carrierPacketItemsExactlyMatch([item], [{ ...item, sensitivitySnapshot: 'STANDARD' }]),
+    ).toBe(false);
+    expect(
+      carrierPacketItemsExactlyMatch([item], [{ ...item, expiresAtSnapshot: '2028-01-01' }]),
+    ).toBe(false);
+    expect(carrierPacketItemsExactlyMatch([item], [{ ...item, titleSnapshot: 'Other' }])).toBe(
+      false,
+    );
+    expect(carrierPacketItemsExactlyMatch([item], [{ ...item, createdAt: 2 }])).toBe(false);
+  });
+
+  it('serializes finite timestamp 0 instead of coercing it to null', () => {
+    const ready = { ...packet, status: 'READY' as const, readyAt: 0, sharedAt: null, shareMethod: null };
+    const row = toRemoteCarrierPacketRow(ready, 'user-a');
+    expect(row.ready_at).toBe(new Date(0).toISOString());
+    expect(row.shared_at).toBeNull();
+    expect(fromRemoteCarrierPacketRow(row, 'user-a')?.readyAt).toBe(0);
+    const shared = { ...packet, readyAt: 0, sharedAt: 0 };
+    const sharedRow = toRemoteCarrierPacketRow(shared, 'user-a');
+    expect(sharedRow.ready_at).toBe(new Date(0).toISOString());
+    expect(sharedRow.shared_at).toBe(new Date(0).toISOString());
+    expect(fromRemoteCarrierPacketRow(sharedRow, 'user-a')?.sharedAt).toBe(0);
   });
 });

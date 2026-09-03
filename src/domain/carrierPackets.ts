@@ -716,25 +716,76 @@ export function readySnapshotMatchesSharedTransition(
   );
 }
 
+export function carrierPacketPersistedEvidence(packet: CarrierPacket) {
+  return {
+    id: packet.id,
+    accountOwnerId: packet.accountOwnerId,
+    status: packet.status,
+    name: packet.name,
+    templateSourceKind: packet.templateSourceKind,
+    templateSourceId: packet.templateSourceId,
+    templateCode: packet.templateCode,
+    templateSnapshot: packet.templateSnapshot,
+    carrierProfileId: packet.carrierProfileId,
+    profileSnapshot: packet.profileSnapshot,
+    recipientLabel: packet.recipientLabel,
+    shareMethod: packet.shareMethod,
+    readyAt: packet.readyAt,
+    sharedAt: packet.sharedAt,
+    supersedesPacketId: packet.supersedesPacketId,
+    createdAt: packet.createdAt,
+  };
+}
+
+export function carrierPacketPersistedEvidenceExactlyMatches(
+  a: CarrierPacket,
+  b: CarrierPacket,
+): boolean {
+  return (
+    JSON.stringify(carrierPacketPersistedEvidence(a)) ===
+    JSON.stringify(carrierPacketPersistedEvidence(b))
+  );
+}
+
+/**
+ * SHARED → SUPERSEDED may change only status (plus local updatedAt/cloudStatus).
+ * readyAt and createdAt are part of the historical evidence and must match.
+ */
+export function sharedSnapshotMatchesSupersededTransition(
+  remoteShared: CarrierPacket,
+  localSuperseded: CarrierPacket,
+): boolean {
+  if (remoteShared.status !== 'SHARED') return false;
+  if (localSuperseded.status !== 'SUPERSEDED') return false;
+  const { status: _rs, ...remoteEvidence } = carrierPacketPersistedEvidence(remoteShared);
+  const { status: _ls, ...localEvidence } = carrierPacketPersistedEvidence(localSuperseded);
+  return JSON.stringify(remoteEvidence) === JSON.stringify(localEvidence);
+}
+
+export function carrierPacketItemPersistedEvidence(item: CarrierPacketItem) {
+  return {
+    id: item.id,
+    accountOwnerId: item.accountOwnerId,
+    carrierPacketId: item.carrierPacketId,
+    requirementKey: item.requirementKey,
+    requirementLabel: item.requirementLabel,
+    required: item.required,
+    position: item.position,
+    operationalDocumentId: item.operationalDocumentId,
+    documentVersionId: item.documentVersionId,
+    documentKindSnapshot: item.documentKindSnapshot,
+    sensitivitySnapshot: item.sensitivitySnapshot,
+    expiresAtSnapshot: item.expiresAtSnapshot,
+    titleSnapshot: item.titleSnapshot,
+    createdAt: item.createdAt,
+  };
+}
+
 export function carrierPacketItemsExactlyMatch(
   a: readonly CarrierPacketItem[],
   b: readonly CarrierPacketItem[],
 ): boolean {
-  const key = (item: CarrierPacketItem) =>
-    JSON.stringify({
-      id: item.id,
-      requirementKey: item.requirementKey,
-      requirementLabel: item.requirementLabel,
-      required: item.required,
-      position: item.position,
-      operationalDocumentId: item.operationalDocumentId,
-      documentVersionId: item.documentVersionId,
-      documentKindSnapshot: item.documentKindSnapshot,
-      sensitivitySnapshot: item.sensitivitySnapshot,
-      expiresAtSnapshot: item.expiresAtSnapshot,
-      titleSnapshot: item.titleSnapshot,
-      createdAt: item.createdAt,
-    });
+  const key = (item: CarrierPacketItem) => JSON.stringify(carrierPacketItemPersistedEvidence(item));
   return a.map(key).sort().join('|') === b.map(key).sort().join('|');
 }
 
@@ -1190,8 +1241,8 @@ export function toRemoteCarrierPacketRow(packet: CarrierPacket, ownerId: string)
     profile_snapshot: packet.profileSnapshot,
     recipient_label: packet.recipientLabel,
     share_method: packet.shareMethod,
-    ready_at: packet.readyAt ? new Date(packet.readyAt).toISOString() : null,
-    shared_at: packet.sharedAt ? new Date(packet.sharedAt).toISOString() : null,
+    ready_at: packet.readyAt !== null ? new Date(packet.readyAt).toISOString() : null,
+    shared_at: packet.sharedAt !== null ? new Date(packet.sharedAt).toISOString() : null,
     supersedes_packet_id: packet.supersedesPacketId,
     created_at: new Date(packet.createdAt).toISOString(),
     updated_at: new Date(packet.updatedAt).toISOString(),
@@ -1349,39 +1400,9 @@ export function fromRemoteCarrierPacketItemRow(
   return item;
 }
 
-const historicalEvidence = (p: CarrierPacket) => ({
-  id: p.id,
-  name: p.name,
-  templateSourceKind: p.templateSourceKind,
-  templateSourceId: p.templateSourceId,
-  templateCode: p.templateCode,
-  templateSnapshot: p.templateSnapshot,
-  carrierProfileId: p.carrierProfileId,
-  profileSnapshot: p.profileSnapshot,
-  recipientLabel: p.recipientLabel,
-  shareMethod: p.shareMethod,
-  sharedAt: p.sharedAt,
-  supersedesPacketId: p.supersedesPacketId,
-});
-
-/** Exact historical SHARED/SUPERSEDED snapshot, including status. */
+/** @deprecated Use carrierPacketPersistedEvidenceExactlyMatches — this is the same exact comparator. */
 export function historicalPacketSnapshotsMatch(a: CarrierPacket, b: CarrierPacket): boolean {
-  return JSON.stringify({ ...historicalEvidence(a), status: a.status }) ===
-    JSON.stringify({ ...historicalEvidence(b), status: b.status });
-}
-
-/** Snapshot equality used for the narrow SHARED → SUPERSEDED cloud transition. */
-export function historicalEvidenceMatchesIgnoringStatus(a: CarrierPacket, b: CarrierPacket): boolean {
-  return JSON.stringify(historicalEvidence(a)) === JSON.stringify(historicalEvidence(b));
-}
-
-export function historicalItemsMatch(
-  a: CarrierPacketItem[],
-  b: CarrierPacketItem[],
-): boolean {
-  const key = (i: CarrierPacketItem) =>
-    `${i.id}:${i.requirementKey}:${i.operationalDocumentId}:${i.documentVersionId}`;
-  return a.map(key).sort().join('|') === b.map(key).sort().join('|');
+  return carrierPacketPersistedEvidenceExactlyMatches(a, b);
 }
 
 export type CarrierMergeAction = 'import' | 'replace_metadata' | 'keep_local' | 'keep_synced_local' | 'conflict';

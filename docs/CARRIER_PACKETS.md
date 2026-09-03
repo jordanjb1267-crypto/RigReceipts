@@ -242,7 +242,25 @@ titles. No Carrier Packet analytics in Pass 3.
 
 `CLEAN_BOOTSTRAP` and `TWO_USER_RLS` remain evidence gaps.
 
-## Not in Pass 3 / 3.1 / 3.2
+## Pass 3.3 — final evidence closure
+
+- Additive migration `20260902000019_carrier_packet_final_evidence_hardening.sql`
+  only. 00016–00018 are not rewritten.
+- Direct INSERT must be DRAFT with DRAFT status-shape. READY / SHARED /
+  SUPERSEDED cannot be inserted; they are reached only through the accepted
+  transition matrix.
+- Canonical persisted packet evidence (`carrierPacketPersistedEvidence`)
+  excludes only `cloudStatus` and `updatedAt`. SHARED / SUPERSEDED recovery
+  and idempotency use that exact comparator plus exact item evidence.
+- `carrierPacketItemsExactlyMatch` compares every persisted item field.
+- SHARED → SUPERSEDED compares historical evidence including `readyAt` and
+  `createdAt`, ignoring only status / `updatedAt` / `cloudStatus`.
+- READY idempotency includes `readyAt`.
+- Timestamp serialization uses `!== null` so finite `0` is preserved.
+
+`CLEAN_BOOTSTRAP` and `TWO_USER_RLS` remain evidence gaps.
+
+## Not in Pass 3 / 3.1 / 3.2 / 3.3
 
 FMCSA / DAT / EIA / Parse / ImportYeti / TruckDown / TruckQuote / NWS.
 Email, portal submit, signatures, contract acceptance, freight booking.

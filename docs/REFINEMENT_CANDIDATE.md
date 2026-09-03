@@ -921,9 +921,22 @@ remain OFF.
 - Template-requirement ↔ packet-item integrity, including live document kind.
 - Defensive remote packet/item scalar and timestamp mapping.
 
+## Pass 3.3 — Final Carrier Packet evidence closure
+
+Authorized pre-Pass-4 hardening only. Migrations `20260902000016`–
+`20260902000018` are unchanged; additive `20260902000019`. Production flags
+remain OFF. This is the final owner-side pre-review implementation checkpoint.
+
+- INSERT is DRAFT-only.
+- Canonical persisted packet + item evidence comparators.
+- SHARED / SUPERSEDED recovery and idempotency are exact.
+- SHARED → SUPERSEDED keeps `readyAt` / `createdAt`.
+- READY idempotency includes `readyAt`.
+- Timestamp serialization uses `!== null`.
+
 ## Evidence gaps (open)
 
-- Clean Supabase bootstrap of all migrations (00011–00018) and two-user RLS
+- Clean Supabase bootstrap of all migrations (00011–00019) and two-user RLS
   verification cannot run on the implementation VM (no Docker / psql /
   Supabase runtime). Migrations are statically parsed only. The candidate is
   not eligible for owner acceptance/merge until these are validated

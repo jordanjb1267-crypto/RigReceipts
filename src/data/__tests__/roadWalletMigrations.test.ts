@@ -19,6 +19,7 @@ const sets = normalize(read('20260902000015_quick_present_sets.sql'));
 const carrier = normalize(read('20260902000016_carrier_packets.sql'));
 const carrierHarden = normalize(read('20260902000017_carrier_packet_integrity_hardening.sql'));
 const carrierSnapshot = normalize(read('20260902000018_carrier_packet_snapshot_integrity.sql'));
+const carrierEvidence = normalize(read('20260902000019_carrier_packet_final_evidence_hardening.sql'));
 const deletion = normalize(read('20260719000008_account_deletion.sql'));
 
 /** Policies declared for a table across the given SQL: [name, command]. */
@@ -287,6 +288,34 @@ describe('Pass 3.2 — carrier packet snapshot integrity (00018)', () => {
       /status in \('shared', 'superseded'\) and ready_at is not null and shared_at is not null and share_method is not null/,
     );
     expect(carrierSnapshot).toMatch(/before insert or update on carrier_packets/);
+  });
+});
+
+describe('Pass 3.3 — carrier packet final evidence hardening (00019)', () => {
+  it('does not rewrite 00016–00018 and rejects non-DRAFT INSERT', () => {
+    expect(carrier).not.toMatch(/packet insert must be draft/);
+    expect(carrierHarden).not.toMatch(/packet insert must be draft/);
+    expect(carrierSnapshot).not.toMatch(/packet insert must be draft/);
+    expect(carrierSnapshot).toMatch(/elsif new.status = 'ready'/);
+    expect(carrierEvidence).toMatch(/packet insert must be draft/);
+    expect(carrierEvidence).toMatch(/if new.status <> 'draft' then/);
+    expect(carrierEvidence).toMatch(/draft status-shape violation/);
+    expect(read('20260902000016_carrier_packets.sql')).not.toMatch(/packet insert must be draft/);
+    expect(read('20260902000017_carrier_packet_integrity_hardening.sql')).not.toMatch(
+      /packet insert must be draft/,
+    );
+    expect(read('20260902000018_carrier_packet_snapshot_integrity.sql')).not.toMatch(
+      /packet insert must be draft/,
+    );
+    expect(carrierEvidence).not.toMatch(/security definer/);
+  });
+
+  it('keeps the accepted transition matrix', () => {
+    expect(carrierEvidence).toMatch(/ready to shared may change only share metadata/);
+    expect(carrierEvidence).toMatch(/shared to superseded may change only status and updated_at/);
+    expect(carrierEvidence).toMatch(/if new.status <> 'draft' and new.status <> 'ready'/);
+    expect(carrierEvidence).toMatch(/shared packet may only transition to superseded/);
+    expect(carrierEvidence).toMatch(/invalid packet transition/);
   });
 });
 
