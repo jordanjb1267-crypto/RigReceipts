@@ -372,6 +372,8 @@ describe('Pass 3 — Carrier Packet surface', () => {
     }
     expect(detail).toMatch(/Share \/ Export/);
     expect(detail).toMatch(/Mark packet shared/);
+    expect(detail).toMatch(/Remove optional document/);
+    expect(detail).toMatch(/!req\.required/);
     expect(detail).toMatch(/MARK_SHARED_ATTESTATION_COPY/);
     expect(wallet).toMatch(/Carrier Profile/);
     expect(wallet).toMatch(/Carrier Packets/);

@@ -396,6 +396,9 @@ export function validateCarrierPacket(packet: CarrierPacket): void {
   if (packet.supersedesPacketId !== null && !isOpaqueId(packet.supersedesPacketId)) {
     throw new Error('supersedesPacketId is not an opaque id');
   }
+  if (packet.supersedesPacketId === packet.id) {
+    throw new Error('packet cannot supersede itself');
+  }
 }
 
 export function validateCarrierPacketItem(item: CarrierPacketItem): void {

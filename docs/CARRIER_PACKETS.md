@@ -200,7 +200,26 @@ Do not log legal name, DBA, USDOT, MC, address, contact, recipient label,
 packet membership, W-9/factoring/banking selection, version ids, or document
 titles. No Carrier Packet analytics in Pass 3.
 
-## Not in Pass 3
+## Pass 3.1 — integrity closure
+
+- DRAFT requirement membership keeps a **stable item id** when the selected
+  document or current version changes.
+- Optional DRAFT items may be removed (`removeOptionalCarrierPacketItem`).
+  Required / READY / SHARED / SUPERSEDED removals are denied.
+- Additive migration `20260902000017_carrier_packet_integrity_hardening.sql`:
+  DRAFT-only authenticated DELETE of `carrier_packet_items`; old+new parent
+  item guard; DB lifecycle matrix; immutable `id` / `owner_id` / `created_at`;
+  no self-supersession. Account-deletion cascade is preserved via a
+  transaction-local GUC set on `carrier_packets` BEFORE DELETE.
+- Remote writes stage through DRAFT membership, then READY / SHARED /
+  SUPERSEDED. Historical rows never receive item mutations.
+- Every remote mutation re-authorizes after awaits.
+- Packet-context Share/Export requires **zero live blockers** and re-proves
+  that immediately before `DocumentFileStore.share()`.
+
+`CLEAN_BOOTSTRAP` and `TWO_USER_RLS` remain evidence gaps.
+
+## Not in Pass 3 / 3.1
 
 FMCSA / DAT / EIA / Parse / ImportYeti / TruckDown / TruckQuote / NWS.
 Email, portal submit, signatures, contract acceptance, freight booking.

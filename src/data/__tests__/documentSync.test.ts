@@ -966,7 +966,7 @@ describe('Pass 2.1 H2/H3 — setWriteSafe + signed-out reconcile', () => {
       }),
       syncPendingCarrierPackets: async () => {
         carrier++;
-        return { profilesSynced: 0, templatesSynced: 0, packetsSynced: 0, itemsSynced: 0, integrityConflicts: 0 };
+        return { profilesSynced: 0, templatesSynced: 0, packetsSynced: 0, itemsSynced: 0, itemsDeleted: 0, integrityConflicts: 0 };
       },
     });
     expect(result.writeSafe).toBe(true);
@@ -1005,7 +1005,7 @@ describe('Pass 2.1 H2/H3 — setWriteSafe + signed-out reconcile', () => {
       }),
       syncPendingCarrierPackets: async () => {
         carrier++;
-        return { profilesSynced: 0, templatesSynced: 0, packetsSynced: 0, itemsSynced: 0, integrityConflicts: 0 };
+        return { profilesSynced: 0, templatesSynced: 0, packetsSynced: 0, itemsSynced: 0, itemsDeleted: 0, integrityConflicts: 0 };
       },
     });
     expect(result.writeSafe).toBe(true);

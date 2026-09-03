@@ -17,6 +17,7 @@ const core = normalize(read('20260902000013_road_wallet_core.sql'));
 const hardening = normalize(read('20260902000014_road_wallet_integrity_hardening.sql'));
 const sets = normalize(read('20260902000015_quick_present_sets.sql'));
 const carrier = normalize(read('20260902000016_carrier_packets.sql'));
+const carrierHarden = normalize(read('20260902000017_carrier_packet_integrity_hardening.sql'));
 const deletion = normalize(read('20260719000008_account_deletion.sql'));
 
 /** Policies declared for a table across the given SQL: [name, command]. */
@@ -208,6 +209,38 @@ describe('Pass 3 — carrier packets (00016)', () => {
     expect(carrier).toMatch(/cannot mutate items of a historical packet/);
     expect(carrier).toMatch(/on delete cascade/);
     expect(carrier).toMatch(/identity_source text not null check \(identity_source = 'user_entered'\)/);
+  });
+});
+
+describe('Pass 3.1 — carrier packet integrity hardening (00017)', () => {
+  it('adds DRAFT-only item DELETE and does not rewrite 00016', () => {
+    expect(carrierHarden).toMatch(/create policy "delete own draft carrier packet items" on carrier_packet_items for delete to authenticated/);
+    expect(carrierHarden).toMatch(/p.status = 'draft'/);
+    expect(carrierHarden).not.toMatch(/on carrier_packets for delete/);
+    expect(carrierHarden).not.toMatch(/security definer/);
+    expect(carrier).not.toMatch(/delete own draft carrier packet items/);
+  });
+
+  it('hardens old\+new parent item guard and cascade-safe DELETE', () => {
+    expect(carrierHarden).toMatch(/old_parent_status/);
+    expect(carrierHarden).toMatch(/new_parent_status/);
+    expect(carrierHarden).toMatch(/cannot insert items unless parent is draft/);
+    expect(carrierHarden).toMatch(/cannot update items unless old and new parents are draft/);
+    expect(carrierHarden).toMatch(/cannot delete items unless parent is draft/);
+    expect(carrierHarden).toMatch(/before insert or update or delete on carrier_packet_items/);
+    expect(carrierHarden).toMatch(/rigreceipts.deleting_carrier_packet/);
+    expect(carrierHarden).toMatch(/create trigger carrier_packets_mark_cascade_delete/);
+  });
+
+  it('declares the canonical packet transition matrix and identity immutability', () => {
+    expect(carrierHarden).toMatch(/packet identity is immutable/);
+    expect(carrierHarden).toMatch(/new.created_at is distinct from old.created_at/);
+    expect(carrierHarden).toMatch(/superseded packet is terminal/);
+    expect(carrierHarden).toMatch(/invalid packet transition/);
+    expect(carrierHarden).toMatch(/shared to superseded may change only status and updated_at/);
+    expect(carrierHarden).toMatch(/carrier_packets_no_self_supersede/);
+    expect(carrierHarden).toMatch(/supersedes_packet_id is null or supersedes_packet_id <> id/);
+    expect(carrierHarden).toMatch(/ready packet snapshot is immutable/);
   });
 });
 

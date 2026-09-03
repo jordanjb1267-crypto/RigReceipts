@@ -358,8 +358,14 @@ export interface ShareDocumentVersionInput {
 }
 
 export interface ShareDeps extends Pick<RoadWalletDeps, 'fileStore' | 'ctx' | 'now'> {
-  /** Called immediately before the share effect; lets tests observe the late re-check. */
+  /** Called after verification awaits and immediately before the late live re-check. */
   beforeShare?: () => void;
+  /**
+   * Called immediately before DocumentFileStore.share(), after the Road Wallet
+   * late owner/entitlement/sensitivity re-check. Carrier Packet uses this to
+   * re-prove packet-context readiness without a second share implementation.
+   */
+  beforeShareEffect?: () => void;
 }
 
 const assertShareAuthorized = (ctx: CloudSyncContext, doc: OperationalDocument): void => {
@@ -435,6 +441,7 @@ export async function shareOperationalDocumentVersion(
   if (liveVersion.fileCache.state !== 'READY') {
     throw new ShareDeniedError('FILE_UNAVAILABLE', liveVersion.fileCache.error);
   }
+  deps.beforeShareEffect?.();
 
   await deps.fileStore.share(liveVersion.relativePath, {
     mimeType: liveVersion.mimeType,

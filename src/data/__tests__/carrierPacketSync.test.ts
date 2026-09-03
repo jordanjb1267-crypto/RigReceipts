@@ -16,7 +16,9 @@ class FakeCarrierRemote implements CarrierRemote {
   packets: Record<string, unknown>[] = [];
   items: Record<string, unknown>[] = [];
   upserts: { table: string; row: Record<string, unknown> }[] = [];
+  deletes: string[] = [];
   failItemOnce = false;
+  onFetchPackets: (() => void) | null = null;
 
   async fetchProfiles() {
     return this.profiles;
@@ -25,10 +27,15 @@ class FakeCarrierRemote implements CarrierRemote {
     return [];
   }
   async fetchPackets() {
+    this.onFetchPackets?.();
     return this.packets;
   }
   async fetchItems() {
     return this.items;
+  }
+  async deleteItem(itemId: string) {
+    this.deletes.push(itemId);
+    this.items = this.items.filter((row) => row.id !== itemId);
   }
   async upsertProfile(row: Record<string, unknown>) {
     this.upserts.push({ table: 'carrier_profiles', row });
@@ -126,6 +133,13 @@ describe('carrier packet cloud writes', () => {
     const retried = await syncPendingCarrierPackets(deps());
     expect(retried.packetsSynced).toBe(1);
     expect(remote.packets[0]?.status).toBe('SHARED');
+    const statuses = remote.upserts
+      .filter((u) => u.table === 'carrier_packets')
+      .map((u) => u.row.status);
+    expect(statuses).toContain('DRAFT');
+    expect(statuses).toContain('READY');
+    expect(statuses[statuses.length - 1]).toBe('SHARED');
+    expect(statuses.indexOf('DRAFT')).toBeLessThan(statuses.indexOf('READY'));
     expect(useCarrierPacketsStore.getState().packets[0]?.cloudStatus).toBe('synced');
 
     useCarrierPacketsStore.getState().setPacketCloudStatus(packetId, 'pending_sync');
@@ -278,5 +292,115 @@ describe('carrier packet cloud writes', () => {
     expect(remote.packets[0]?.status).toBe('SUPERSEDED');
     expect(remote.packets[0]?.recipient_label).toBe('Broker');
     expect(useCarrierPacketsStore.getState().packets[0]?.status).toBe('SUPERSEDED');
+  });
+
+  it('DRAFT membership diff deletes stale remote rows and converges after partial delete', async () => {
+    const packetId = id(12);
+    const keep = id(13);
+    const stale = id(14);
+    const docId = id(15);
+    const verId = id(16);
+    useCarrierPacketsStore.getState().addPacket(
+      {
+        id: packetId,
+        accountOwnerId: 'user-a',
+        status: 'DRAFT',
+        name: 'Pack',
+        templateSourceKind: 'BUILTIN',
+        templateSourceId: null,
+        templateCode: 'STANDARD_BROKER_PACKET',
+        templateSnapshot: STANDARD_BROKER_PACKET,
+        carrierProfileId: null,
+        profileSnapshot: null,
+        recipientLabel: null,
+        shareMethod: null,
+        readyAt: null,
+        sharedAt: null,
+        supersedesPacketId: null,
+        cloudStatus: 'pending_sync',
+        createdAt: 1,
+        updatedAt: 2,
+      },
+      [
+        {
+          id: keep,
+          accountOwnerId: 'user-a',
+          carrierPacketId: packetId,
+          requirementKey: 'w9',
+          requirementLabel: 'W-9',
+          required: true,
+          position: 0,
+          operationalDocumentId: docId,
+          documentVersionId: verId,
+          documentKindSnapshot: 'W9',
+          sensitivitySnapshot: 'FINANCIAL_SENSITIVE',
+          expiresAtSnapshot: null,
+          titleSnapshot: 'W-9',
+          createdAt: 1,
+        },
+      ],
+    );
+    remote.items.push({
+      id: stale,
+      owner_id: 'user-a',
+      carrier_packet_id: packetId,
+      requirement_key: 'factoring',
+    });
+    const out = await syncPendingCarrierPackets(deps());
+    expect(out.itemsDeleted).toBe(1);
+    expect(remote.deletes).toContain(stale);
+    expect(remote.items.some((row) => row.id === stale)).toBe(false);
+    expect(remote.items.some((row) => row.id === keep)).toBe(true);
+    expect(remote.packets[0]?.status).toBe('DRAFT');
+  });
+
+  it('READY first sync stages DRAFT then items then READY; account switch after fetch writes nothing', async () => {
+    const packetId = id(17);
+    useCarrierPacketsStore.getState().addPacket(
+      {
+        id: packetId,
+        accountOwnerId: 'user-a',
+        status: 'READY',
+        name: 'Pack',
+        templateSourceKind: 'BUILTIN',
+        templateSourceId: null,
+        templateCode: 'STANDARD_BROKER_PACKET',
+        templateSnapshot: STANDARD_BROKER_PACKET,
+        carrierProfileId: null,
+        profileSnapshot: null,
+        recipientLabel: null,
+        shareMethod: null,
+        readyAt: 1,
+        sharedAt: null,
+        supersedesPacketId: null,
+        cloudStatus: 'pending_sync',
+        createdAt: 1,
+        updatedAt: 2,
+      },
+      [],
+    );
+    const ready = await syncPendingCarrierPackets(deps());
+    expect(ready.packetsSynced).toBe(1);
+    expect(remote.packets[0]?.status).toBe('READY');
+    const staged = remote.upserts.filter((u) => u.table === 'carrier_packets').map((u) => u.row.status);
+    expect(staged[0]).toBe('DRAFT');
+    expect(staged[staged.length - 1]).toBe('READY');
+
+    useCarrierPacketsStore.getState().setPacketCloudStatus(packetId, 'pending_sync');
+    remote.upserts = [];
+    remote.onFetchPackets = () => {
+      useAuthStore.setState({ userId: 'user-b', status: 'signed_in', session: null });
+    };
+    const switched = await syncPendingCarrierPackets(deps());
+    expect(switched.packetsSynced).toBe(0);
+    expect(remote.upserts).toHaveLength(0);
+
+    useAuthStore.setState({ userId: 'user-a', status: 'signed_in', session: null });
+    remote.onFetchPackets = () => {
+      useSubscriptionStore.getState().setTier('driver_pro');
+    };
+    useCarrierPacketsStore.getState().setPacketCloudStatus(packetId, 'pending_sync');
+    const lost = await syncPendingCarrierPackets(deps());
+    expect(lost.packetsSynced).toBe(0);
   });
 });

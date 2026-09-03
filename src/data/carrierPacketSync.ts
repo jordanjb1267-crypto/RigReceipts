@@ -41,6 +41,7 @@ export interface CarrierRemote {
   upsertTemplate(row: Record<string, unknown>): Promise<void>;
   upsertPacket(row: Record<string, unknown>): Promise<void>;
   upsertItem(row: Record<string, unknown>): Promise<void>;
+  deleteItem(itemId: string): Promise<void>;
 }
 
 const table = (name: string) => getSupabaseClient().from(name);
@@ -80,6 +81,10 @@ export const supabaseCarrierRemote: CarrierRemote = {
   },
   async upsertItem(row) {
     const { error } = await table('carrier_packet_items').upsert(row, { onConflict: 'id' });
+    if (error) throw error;
+  },
+  async deleteItem(itemId) {
+    const { error } = await table('carrier_packet_items').delete().eq('id', itemId);
     if (error) throw error;
   },
 };
@@ -270,8 +275,72 @@ export interface CarrierSyncResult {
   templatesSynced: number;
   packetsSynced: number;
   itemsSynced: number;
+  itemsDeleted: number;
   integrityConflicts: number;
 }
+
+const liveWriteUserId = (
+  authorize:
+    | typeof authorizeCarrierPacketCloudWrite
+    | typeof authorizeCarrierProfileCloudWrite
+    | typeof authorizeCarrierTemplateCloudWrite,
+  contentOwnerId: string | null | undefined,
+  deps: CarrierSyncDeps,
+): string => {
+  const ctx = deps.ctx();
+  const decision = authorize(ctx, contentOwnerId);
+  if (!decision.allowed) {
+    throw new CloudSyncDeniedError(CARRIER_CLOUD_CAPABILITY, decision.reason);
+  }
+  return assertRemoteEffectAuthorized(CARRIER_CLOUD_CAPABILITY, contentOwnerId, ctx);
+};
+
+const upsertPacketNow = async (
+  packet: CarrierPacket,
+  status: CarrierPacket['status'],
+  deps: CarrierSyncDeps,
+): Promise<void> => {
+  const userId = liveWriteUserId(authorizeCarrierPacketCloudWrite, packet.accountOwnerId, deps);
+  await deps.remote.upsertPacket(
+    toRemoteCarrierPacketRow({ ...packet, status }, userId) as unknown as Record<string, unknown>,
+  );
+};
+
+const reconcileDraftMembership = async (
+  packet: CarrierPacket,
+  membership: ReturnType<typeof itemsForPacket>,
+  remoteItemRows: unknown[],
+  result: CarrierSyncResult,
+  deps: CarrierSyncDeps,
+): Promise<void> => {
+  const userId = liveWriteUserId(authorizeCarrierPacketCloudWrite, packet.accountOwnerId, deps);
+  const remoteForPacket = remoteItemRows.filter(
+    (row) => isRecord(row) && row.carrier_packet_id === packet.id && row.owner_id === userId,
+  );
+  const localIds = new Set(membership.map((item) => item.id));
+  for (const row of remoteForPacket) {
+    if (!isRecord(row) || typeof row.id !== 'string' || localIds.has(row.id)) continue;
+    liveWriteUserId(authorizeCarrierPacketCloudWrite, packet.accountOwnerId, deps);
+    await deps.remote.deleteItem(row.id);
+    result.itemsDeleted++;
+  }
+  for (const item of membership) {
+    const itemUser = liveWriteUserId(authorizeCarrierPacketCloudWrite, item.accountOwnerId, deps);
+    await deps.remote.upsertItem(
+      toRemoteCarrierPacketItemRow(item, itemUser) as unknown as Record<string, unknown>,
+    );
+    result.itemsSynced++;
+  }
+};
+
+const remoteItemsFor = (
+  rows: unknown[],
+  parent: CarrierPacket,
+  userId: string,
+) =>
+  rows
+    .map((row) => fromRemoteCarrierPacketItemRow(row, userId, parent))
+    .filter((i): i is NonNullable<typeof i> => !!i && i.carrierPacketId === parent.id);
 
 export async function syncPendingCarrierPackets(
   deps: CarrierSyncDeps = defaultCarrierSyncDeps(),
@@ -281,6 +350,7 @@ export async function syncPendingCarrierPackets(
     templatesSynced: 0,
     packetsSynced: 0,
     itemsSynced: 0,
+    itemsDeleted: 0,
     integrityConflicts: 0,
   };
   const ctx = deps.ctx();
@@ -289,12 +359,14 @@ export async function syncPendingCarrierPackets(
 
   for (const profile of useCarrierProfileStore.getState().profiles) {
     if (profile.cloudStatus !== 'pending_sync') continue;
-    const decision = authorizeCarrierProfileCloudWrite(deps.ctx(), profile.accountOwnerId);
-    if (!decision.allowed) continue;
     try {
-      assertRemoteEffectAuthorized(CARRIER_CLOUD_CAPABILITY, profile.accountOwnerId, deps.ctx());
+      const userId = liveWriteUserId(
+        authorizeCarrierProfileCloudWrite,
+        profile.accountOwnerId,
+        deps,
+      );
       await deps.remote.upsertProfile(
-        toRemoteCarrierProfileRow(profile, decision.userId) as unknown as Record<string, unknown>,
+        toRemoteCarrierProfileRow(profile, userId) as unknown as Record<string, unknown>,
       );
       useCarrierProfileStore.getState().setCloudStatus(profile.id, 'synced');
       result.profilesSynced++;
@@ -307,12 +379,14 @@ export async function syncPendingCarrierPackets(
 
   for (const template of useCarrierPacketsStore.getState().templates) {
     if (template.cloudStatus !== 'pending_sync') continue;
-    const decision = authorizeCarrierTemplateCloudWrite(deps.ctx(), template.accountOwnerId);
-    if (!decision.allowed) continue;
     try {
-      assertRemoteEffectAuthorized(CARRIER_CLOUD_CAPABILITY, template.accountOwnerId, deps.ctx());
+      const userId = liveWriteUserId(
+        authorizeCarrierTemplateCloudWrite,
+        template.accountOwnerId,
+        deps,
+      );
       await deps.remote.upsertTemplate(
-        toRemoteCarrierTemplateRow(template, decision.userId) as unknown as Record<string, unknown>,
+        toRemoteCarrierTemplateRow(template, userId) as unknown as Record<string, unknown>,
       );
       useCarrierPacketsStore.getState().setTemplateCloudStatus(template.id, 'synced');
       result.templatesSynced++;
@@ -325,90 +399,134 @@ export async function syncPendingCarrierPackets(
 
   for (const packet of useCarrierPacketsStore.getState().packets) {
     if (packet.cloudStatus !== 'pending_sync') continue;
-    const decision = authorizeCarrierPacketCloudWrite(deps.ctx(), packet.accountOwnerId);
-    if (!decision.allowed) continue;
     const membership = itemsForPacket(useCarrierPacketsStore.getState().items, packet.id);
     try {
-      assertRemoteEffectAuthorized(CARRIER_CLOUD_CAPABILITY, packet.accountOwnerId, deps.ctx());
-      if (packet.status === 'SHARED' || packet.status === 'SUPERSEDED') {
-        const remotePackets = await deps.remote.fetchPackets(decision.userId);
-        const remoteItems = await deps.remote.fetchItems(decision.userId);
-        const existing = remotePackets
-          .map((row) => fromRemoteCarrierPacketRow(row, decision.userId))
-          .find((p) => p?.id === packet.id);
-        if (existing && (existing.status === 'SHARED' || existing.status === 'SUPERSEDED')) {
-          const existingItems = remoteItems
-            .map((row) => fromRemoteCarrierPacketItemRow(row, decision.userId, existing))
-            .filter((i): i is NonNullable<typeof i> => !!i && i.carrierPacketId === packet.id);
-          if (
-            packet.status === 'SUPERSEDED' &&
-            existing.status === 'SHARED' &&
-            historicalEvidenceMatchesIgnoringStatus(existing, packet) &&
-            historicalItemsMatch(existingItems, membership)
-          ) {
-            await deps.remote.upsertPacket(
-              toRemoteCarrierPacketRow(packet, decision.userId) as unknown as Record<
-                string,
-                unknown
-              >,
-            );
-            useCarrierPacketsStore.getState().setPacketCloudStatus(packet.id, 'synced');
-            result.packetsSynced++;
+      liveWriteUserId(authorizeCarrierPacketCloudWrite, packet.accountOwnerId, deps);
+      const remotePacketRows = await deps.remote.fetchPackets(packet.accountOwnerId ?? '');
+      const remoteItemRows = await deps.remote.fetchItems(packet.accountOwnerId ?? '');
+      const userId = liveWriteUserId(
+        authorizeCarrierPacketCloudWrite,
+        packet.accountOwnerId,
+        deps,
+      );
+      const existing = remotePacketRows
+        .map((row) => fromRemoteCarrierPacketRow(row, userId))
+        .find((p) => p?.id === packet.id);
+      const existingItems = existing ? remoteItemsFor(remoteItemRows, existing, userId) : [];
+
+      const exactHistorical =
+        !!existing &&
+        historicalPacketSnapshotsMatch(existing, packet) &&
+        historicalItemsMatch(existingItems, membership);
+
+      if (packet.status === 'DRAFT') {
+        if (!existing || existing.status === 'DRAFT' || existing.status === 'READY') {
+          if (existing?.status === 'SHARED' || existing?.status === 'SUPERSEDED') {
+            result.integrityConflicts++;
             continue;
           }
-          if (
-            historicalPacketSnapshotsMatch(existing, packet) &&
-            historicalItemsMatch(existingItems, membership)
-          ) {
-            useCarrierPacketsStore.getState().setPacketCloudStatus(packet.id, 'synced');
-            result.packetsSynced++;
-            continue;
-          }
+          await upsertPacketNow(packet, 'DRAFT', deps);
+          await reconcileDraftMembership(packet, membership, remoteItemRows, result, deps);
+          useCarrierPacketsStore.getState().setPacketCloudStatus(packet.id, 'synced');
+          result.packetsSynced++;
+          continue;
+        }
+        result.integrityConflicts++;
+        continue;
+      }
+
+      if (packet.status === 'READY') {
+        if (existing?.status === 'READY' && exactHistorical) {
+          useCarrierPacketsStore.getState().setPacketCloudStatus(packet.id, 'synced');
+          result.packetsSynced++;
+          continue;
+        }
+        if (existing && existing.status !== 'DRAFT' && existing.status !== 'READY') {
           result.integrityConflicts++;
           continue;
         }
-        const readyProjection = { ...packet, status: 'READY' as const };
-        await deps.remote.upsertPacket(
-          toRemoteCarrierPacketRow(readyProjection, decision.userId) as unknown as Record<
-            string,
-            unknown
-          >,
-        );
-        for (const item of membership) {
-          assertRemoteEffectAuthorized(CARRIER_CLOUD_CAPABILITY, item.accountOwnerId, deps.ctx());
-          await deps.remote.upsertItem(
-            toRemoteCarrierPacketItemRow(item, decision.userId) as unknown as Record<string, unknown>,
-          );
-          result.itemsSynced++;
+        if (existing?.status === 'READY' && !exactHistorical) {
+          result.integrityConflicts++;
+          continue;
         }
-        if (packet.status === 'SUPERSEDED') {
-          await deps.remote.upsertPacket(
-            toRemoteCarrierPacketRow(
-              { ...packet, status: 'SHARED' },
-              decision.userId,
-            ) as unknown as Record<string, unknown>,
-          );
-        }
-        await deps.remote.upsertPacket(
-          toRemoteCarrierPacketRow(packet, decision.userId) as unknown as Record<string, unknown>,
-        );
+        await upsertPacketNow(packet, 'DRAFT', deps);
+        await reconcileDraftMembership(packet, membership, remoteItemRows, result, deps);
+        await upsertPacketNow(packet, 'READY', deps);
         useCarrierPacketsStore.getState().setPacketCloudStatus(packet.id, 'synced');
         result.packetsSynced++;
         continue;
       }
 
-      await deps.remote.upsertPacket(
-        toRemoteCarrierPacketRow(packet, decision.userId) as unknown as Record<string, unknown>,
-      );
-      for (const item of membership) {
-        assertRemoteEffectAuthorized(CARRIER_CLOUD_CAPABILITY, item.accountOwnerId, deps.ctx());
-        await deps.remote.upsertItem(
-          toRemoteCarrierPacketItemRow(item, decision.userId) as unknown as Record<string, unknown>,
-        );
-        result.itemsSynced++;
+      if (packet.status === 'SHARED') {
+        if (existing?.status === 'SHARED' && exactHistorical) {
+          useCarrierPacketsStore.getState().setPacketCloudStatus(packet.id, 'synced');
+          result.packetsSynced++;
+          continue;
+        }
+        if (existing?.status === 'SHARED' && !exactHistorical) {
+          result.integrityConflicts++;
+          continue;
+        }
+        if (existing?.status === 'SUPERSEDED') {
+          result.integrityConflicts++;
+          continue;
+        }
+        if (existing?.status === 'READY') {
+          if (!historicalItemsMatch(existingItems, membership)) {
+            result.integrityConflicts++;
+            continue;
+          }
+          await upsertPacketNow(packet, 'SHARED', deps);
+          useCarrierPacketsStore.getState().setPacketCloudStatus(packet.id, 'synced');
+          result.packetsSynced++;
+          continue;
+        }
+        await upsertPacketNow(packet, 'DRAFT', deps);
+        await reconcileDraftMembership(packet, membership, remoteItemRows, result, deps);
+        await upsertPacketNow(packet, 'READY', deps);
+        await upsertPacketNow(packet, 'SHARED', deps);
+        useCarrierPacketsStore.getState().setPacketCloudStatus(packet.id, 'synced');
+        result.packetsSynced++;
+        continue;
       }
-      useCarrierPacketsStore.getState().setPacketCloudStatus(packet.id, 'synced');
-      result.packetsSynced++;
+
+      if (packet.status === 'SUPERSEDED') {
+        if (existing?.status === 'SUPERSEDED' && exactHistorical) {
+          useCarrierPacketsStore.getState().setPacketCloudStatus(packet.id, 'synced');
+          result.packetsSynced++;
+          continue;
+        }
+        if (existing?.status === 'SUPERSEDED' && !exactHistorical) {
+          result.integrityConflicts++;
+          continue;
+        }
+        if (
+          existing?.status === 'SHARED' &&
+          historicalEvidenceMatchesIgnoringStatus(existing, packet) &&
+          historicalItemsMatch(existingItems, membership)
+        ) {
+          await upsertPacketNow(packet, 'SUPERSEDED', deps);
+          useCarrierPacketsStore.getState().setPacketCloudStatus(packet.id, 'synced');
+          result.packetsSynced++;
+          continue;
+        }
+        if (existing?.status === 'SHARED') {
+          result.integrityConflicts++;
+          continue;
+        }
+        if (existing && existing.status !== 'DRAFT' && existing.status !== 'READY') {
+          result.integrityConflicts++;
+          continue;
+        }
+        await upsertPacketNow(packet, 'DRAFT', deps);
+        await reconcileDraftMembership(packet, membership, remoteItemRows, result, deps);
+        await upsertPacketNow(packet, 'READY', deps);
+        await upsertPacketNow(packet, 'SHARED', deps);
+        await upsertPacketNow(packet, 'SUPERSEDED', deps);
+        useCarrierPacketsStore.getState().setPacketCloudStatus(packet.id, 'synced');
+        result.packetsSynced++;
+        continue;
+      }
     } catch (err) {
       if (err instanceof CloudSyncDeniedError) {
         useCarrierPacketsStore.getState().reconcileCloudStatuses(deps.ctx());

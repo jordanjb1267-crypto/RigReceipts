@@ -894,6 +894,19 @@ broker portal, signatures, combined PDF/ZIP, or production flag enablement.
 
 See `docs/CARRIER_PACKETS.md`.
 
+## Pass 3.1 — Carrier Packet integrity closure
+
+Authorized pre-Pass-4 hardening only. Migration `20260902000016` is unchanged;
+additive `20260902000017`. Production flags remain OFF.
+
+- Stable DRAFT item ids on document/version replacement.
+- Optional DRAFT item removal + DRAFT-only remote DELETE.
+- Item guard is INSERT/UPDATE/DELETE and old+new-parent aware.
+- DB transition matrix + immutable identity/`created_at`.
+- Remote staging uses DRAFT membership then lifecycle promotion.
+- Per-effect live authorization after every await.
+- Packet-context share requires zero live blockers and a late pre-share re-proof.
+
 ## Evidence gaps (open)
 
 - Clean Supabase bootstrap of all migrations (00011–00016) and two-user RLS

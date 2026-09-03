@@ -16,7 +16,9 @@ import {
   itemsForPacket,
   matchingDocumentsForKind,
   profileSnapshotEqualsCurrent,
+  requiredShareConfirmation,
   reviewCarrierPacket,
+  shareConfirmationSatisfies,
   snapshotCarrierProfile,
   STANDARD_BROKER_PACKET,
   STANDARD_BROKER_PACKET_CODE,
@@ -30,7 +32,11 @@ import { useRoadWalletStore } from '@/store/roadWallet';
 import { currentCarrierProfile } from './carrierProfile';
 import { currentCloudSyncContext } from './cloudSyncAuth';
 import { newSecureOpaqueId } from './documentFiles';
-import { ShareDeniedError, shareOperationalDocumentVersion } from './roadWallet';
+import {
+  defaultRoadWalletDeps,
+  ShareDeniedError,
+  shareOperationalDocumentVersion,
+} from './roadWallet';
 import { restoreDocumentVersionToDevice } from './roadWalletRecovery';
 
 export class CarrierPacketDeniedError extends Error {
@@ -39,6 +45,7 @@ export class CarrierPacketDeniedError extends Error {
     | 'NOT_FOUND'
     | 'NOT_VISIBLE'
     | 'NOT_DRAFT'
+    | 'REQUIRED'
     | 'NOT_READY'
     | 'IMMUTABLE'
     | 'BLOCKED'
@@ -260,13 +267,16 @@ export function setCarrierPacketItemDocument(
   if (doc.documentKind !== req.documentKind) throw new CarrierPacketDeniedError('NOT_FOUND', 'kind');
   const version = currentVersion(wallet.versions, doc.id);
   if (!version) throw new CarrierPacketDeniedError('NOT_FOUND', 'version');
+  const existing = itemsForPacket(useCarrierPacketsStore.getState().items, packet.id).find(
+    (i) => i.requirementKey === requirementKey,
+  );
   const nextItem = freezePacketItem({
-    id: deps.newId(),
+    id: existing?.id ?? deps.newId(),
     packet,
     requirement: req,
     document: doc,
     version,
-    now: deps.now(),
+    now: existing?.createdAt ?? deps.now(),
   });
   const items = itemsForPacket(useCarrierPacketsStore.getState().items, packet.id).filter(
     (i) => i.requirementKey !== requirementKey,
@@ -278,6 +288,28 @@ export function setCarrierPacketItemDocument(
     items.sort((a, b) => a.position - b.position),
   );
   return nextItem;
+}
+
+export function removeOptionalCarrierPacketItem(
+  packetId: string,
+  requirementKey: string,
+  deps: CarrierPacketDeps = defaultCarrierPacketDeps(),
+): void {
+  const ctx = deps.ctx();
+  assertBuilder(ctx);
+  const packet = ownedPacket(packetId, ctx);
+  assertPacketDraft(packet);
+  const req = packet.templateSnapshot.documentRequirements.find((r) => r.key === requirementKey);
+  if (!req) throw new CarrierPacketDeniedError('NOT_FOUND', 'requirement');
+  if (req.required) throw new CarrierPacketDeniedError('REQUIRED');
+  const items = itemsForPacket(useCarrierPacketsStore.getState().items, packet.id).filter(
+    (i) => i.requirementKey !== requirementKey,
+  );
+  useCarrierPacketsStore.getState().updateDraftPacket(
+    packet.id,
+    { updatedAt: deps.now(), cloudStatus: cloudAfter(ctx, true) },
+    items,
+  );
 }
 
 export function refreshCarrierPacketItem(
@@ -399,14 +431,14 @@ export function returnCarrierPacketToDraft(
   return useCarrierPacketsStore.getState().packets.find((p) => p.id === packet.id)!;
 }
 
-export async function shareCarrierPacketItem(
+const assertPacketContextShare = (
   input: {
     packetId: string;
     itemId: string;
     sensitiveConfirmation: 'NONE' | 'PERSONAL_ACKNOWLEDGED' | 'FINANCIAL_ACKNOWLEDGED';
   },
-  deps: CarrierPacketDeps = defaultCarrierPacketDeps(),
-): Promise<{ versionId: string; mimeType: string }> {
+  deps: CarrierPacketDeps,
+): { documentId: string; versionId: string } => {
   const ctx = deps.ctx();
   assertBuilder(ctx);
   const packet = ownedPacket(input.packetId, ctx);
@@ -416,20 +448,49 @@ export async function shareCarrierPacketItem(
   );
   if (!item) throw new CarrierPacketDeniedError('NOT_FOUND');
   const review = liveReviewCarrierPacket(packet.id, deps);
-  const stale = review.blockers.find(
-    (f) => f.requirementKey === item.requirementKey && f.code === 'STALE_VERSION',
-  );
-  if (stale) throw new CarrierPacketDeniedError('STALE_VERSION');
-  if (
-    review.blockers.some((f) => !f.requirementKey || f.requirementKey === item.requirementKey)
-  ) {
+  if (review.blockers.length > 0) {
+    if (review.blockers.some((f) => f.code === 'STALE_VERSION')) {
+      throw new CarrierPacketDeniedError('STALE_VERSION');
+    }
     throw new CarrierPacketDeniedError('BLOCKED');
   }
-  return shareOperationalDocumentVersion({
-    documentId: item.operationalDocumentId,
-    versionId: item.documentVersionId,
-    sensitiveConfirmation: input.sensitiveConfirmation,
-  });
+  const wallet = useRoadWalletStore.getState();
+  const doc = wallet.documents.find((d) => d.id === item.operationalDocumentId);
+  const version = wallet.versions.find((v) => v.id === item.documentVersionId);
+  if (!doc || !version || version.operationalDocumentId !== doc.id) {
+    throw new CarrierPacketDeniedError('BLOCKED');
+  }
+  if (!shareConfirmationSatisfies(input.sensitiveConfirmation, requiredShareConfirmation(doc.sensitivity))) {
+    throw new CarrierPacketDeniedError('CONFIRMATION_REQUIRED');
+  }
+  return { documentId: item.operationalDocumentId, versionId: item.documentVersionId };
+};
+
+export async function shareCarrierPacketItem(
+  input: {
+    packetId: string;
+    itemId: string;
+    sensitiveConfirmation: 'NONE' | 'PERSONAL_ACKNOWLEDGED' | 'FINANCIAL_ACKNOWLEDGED';
+  },
+  deps: CarrierPacketDeps = defaultCarrierPacketDeps(),
+): Promise<{ versionId: string; mimeType: string }> {
+  const proved = assertPacketContextShare(input, deps);
+  const rw = defaultRoadWalletDeps();
+  return shareOperationalDocumentVersion(
+    {
+      documentId: proved.documentId,
+      versionId: proved.versionId,
+      sensitiveConfirmation: input.sensitiveConfirmation,
+    },
+    {
+      fileStore: rw.fileStore,
+      ctx: deps.ctx,
+      now: deps.now,
+      beforeShareEffect: () => {
+        assertPacketContextShare(input, deps);
+      },
+    },
+  );
 }
 
 export async function restoreCarrierPacketItem(

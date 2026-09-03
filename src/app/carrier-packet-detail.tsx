@@ -13,6 +13,7 @@ import {
   markCarrierPacketShared,
   packetItems,
   refreshCarrierPacketItem,
+  removeOptionalCarrierPacketItem,
   restoreCarrierPacketItem,
   returnCarrierPacketToDraft,
   setCarrierPacketItemDocument,
@@ -123,6 +124,13 @@ function CarrierPacketDetailScreen() {
                 label="Refresh to current version"
                 variant="secondary"
                 onPress={() => run(() => refreshCarrierPacketItem(packet.id, req.key))}
+              />
+            )}
+            {packet.status === 'DRAFT' && item && !req.required && (
+              <Button
+                label="Remove optional document"
+                variant="secondary"
+                onPress={() => run(() => removeOptionalCarrierPacketItem(packet.id, req.key))}
               />
             )}
             {packet.status === 'READY' && item && (

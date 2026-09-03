@@ -16,6 +16,7 @@ import {
   markCarrierPacketShared,
   packetItems,
   refreshCarrierPacketItem,
+  removeOptionalCarrierPacketItem,
   returnCarrierPacketToDraft,
   setCarrierPacketItemDocument,
   shareCarrierPacketItem,
@@ -65,6 +66,8 @@ beforeEach(() => {
   fileStore.addSource('file:///tmp/picker/coi.pdf', PDF, 'application/pdf');
   fileStore.addSource('file:///tmp/picker/auth.pdf', PDF, 'application/pdf');
   fileStore.addSource('file:///tmp/picker/w9b.pdf', PDF, 'application/pdf');
+  fileStore.addSource('file:///tmp/picker/w9c.pdf', PDF, 'application/pdf');
+  fileStore.addSource('file:///tmp/picker/noa.pdf', PDF, 'application/pdf');
   configureRoadWalletFileStore(fileStore);
   signIn('user-a');
   setTier('owner_operator');
@@ -131,9 +134,28 @@ describe('profile + packet assembly', () => {
     const review = liveReviewCarrierPacket(packet.id, packetDeps());
     expect(review.blockers.some((f) => f.code === 'STALE_VERSION')).toBe(true);
     refreshCarrierPacketItem(packet.id, still.requirementKey, packetDeps());
-    expect(
-      packetItems(packet.id).find((i) => i.requirementKey === still.requirementKey)?.documentVersionId,
-    ).toBe(v2.id);
+    const refreshed = packetItems(packet.id).find((i) => i.requirementKey === still.requirementKey)!;
+    expect(refreshed.id).toBe(still.id);
+    expect(refreshed.documentVersionId).toBe(v2.id);
+  });
+
+  it('replacing the selected document preserves the requirement item id', async () => {
+    saveCarrierProfile({ legalName: 'Acme', equipmentTypes: [] }, packetDeps());
+    const w9a = await addKind('W9', 'file:///tmp/picker/w9.pdf');
+    const w9b = await createOperationalDocumentFromFile(
+      { uri: 'file:///tmp/picker/w9c.pdf', mimeType: 'application/pdf', name: 'z.pdf' },
+      { documentKind: 'W9', title: 'W9-B' },
+      deps(),
+    );
+    await addKind('CERTIFICATE_OF_INSURANCE', 'file:///tmp/picker/coi.pdf');
+    await addKind('OPERATING_AUTHORITY', 'file:///tmp/picker/auth.pdf');
+    const packet = createCarrierPacketDraft({ source: { kind: 'BUILTIN' } }, packetDeps());
+    const first = setCarrierPacketItemDocument(packet.id, 'w9', w9a.document.id, packetDeps());
+    const second = setCarrierPacketItemDocument(packet.id, 'w9', w9b.document.id, packetDeps());
+    expect(second.id).toBe(first.id);
+    expect(second.operationalDocumentId).toBe(w9b.document.id);
+    expect(second.documentVersionId).toBe(w9b.version.id);
+    expect(second.documentVersionId).not.toBe(first.documentVersionId);
   });
 });
 
@@ -390,5 +412,102 @@ describe('account scope + templates + entitlements', () => {
         packetDeps(),
       ),
     ).toThrow(/NOT_ENTITLED/);
+  });
+});
+
+describe('Pass 3.1 — draft membership + packet-context share', () => {
+  it('optional removal is DRAFT-only; required/READY/SHARED are denied', async () => {
+    saveCarrierProfile({ legalName: 'Acme', usdotNumber: '1', mcNumber: '2', equipmentTypes: [] }, packetDeps());
+    await addKind('W9', 'file:///tmp/picker/w9.pdf');
+    await addKind('CERTIFICATE_OF_INSURANCE', 'file:///tmp/picker/coi.pdf');
+    await addKind('OPERATING_AUTHORITY', 'file:///tmp/picker/auth.pdf');
+    const noa = await createOperationalDocumentFromFile(
+      { uri: 'file:///tmp/picker/noa.pdf', mimeType: 'application/pdf', name: 'n.pdf' },
+      { documentKind: 'FACTORING_NOA', title: 'NOA' },
+      deps(),
+    );
+    const packet = createCarrierPacketDraft({ source: { kind: 'BUILTIN' } }, packetDeps());
+    setCarrierPacketItemDocument(packet.id, 'factoring', noa.document.id, packetDeps());
+    expect(packetItems(packet.id).some((i) => i.requirementKey === 'factoring')).toBe(true);
+    expect(() => removeOptionalCarrierPacketItem(packet.id, 'w9', packetDeps())).toThrow(/REQUIRED/);
+    removeOptionalCarrierPacketItem(packet.id, 'factoring', packetDeps());
+    expect(packetItems(packet.id).some((i) => i.requirementKey === 'factoring')).toBe(false);
+    markCarrierPacketReady(packet.id, packetDeps());
+    expect(() => removeOptionalCarrierPacketItem(packet.id, 'factoring', packetDeps())).toThrow(/DRAFT/);
+    markCarrierPacketShared({ packetId: packet.id, confirmed: true }, packetDeps());
+    expect(() => removeOptionalCarrierPacketItem(packet.id, 'factoring', packetDeps())).toThrow(/DRAFT/);
+  });
+
+  it('any live packet blocker prevents packet-context share, including another required item', async () => {
+    saveCarrierProfile({ legalName: 'Acme', usdotNumber: '1', mcNumber: '2', equipmentTypes: [] }, packetDeps());
+    const w9 = await addKind('W9', 'file:///tmp/picker/w9.pdf');
+    await addKind('CERTIFICATE_OF_INSURANCE', 'file:///tmp/picker/coi.pdf');
+    await addKind('OPERATING_AUTHORITY', 'file:///tmp/picker/auth.pdf');
+    const packet = createCarrierPacketDraft({ source: { kind: 'BUILTIN' } }, packetDeps());
+    markCarrierPacketReady(packet.id, packetDeps());
+    await replaceOperationalDocumentFile(
+      w9.document.id,
+      { uri: 'file:///tmp/picker/w9b.pdf', mimeType: 'application/pdf', name: 'y.pdf' },
+      deps(),
+    );
+    const coi = packetItems(packet.id).find((i) => i.requirementKey === 'coi')!;
+    await expect(
+      shareCarrierPacketItem(
+        { packetId: packet.id, itemId: coi.id, sensitiveConfirmation: 'NONE' },
+        packetDeps(),
+      ),
+    ).rejects.toMatchObject({ reason: 'STALE_VERSION' });
+  });
+
+  it('return-to-draft or account switch during verification prevents the share sheet', async () => {
+    saveCarrierProfile({ legalName: 'Acme', usdotNumber: '1', mcNumber: '2', equipmentTypes: [] }, packetDeps());
+    await addKind('W9', 'file:///tmp/picker/w9.pdf');
+    await addKind('CERTIFICATE_OF_INSURANCE', 'file:///tmp/picker/coi.pdf');
+    await addKind('OPERATING_AUTHORITY', 'file:///tmp/picker/auth.pdf');
+    const packet = createCarrierPacketDraft({ source: { kind: 'BUILTIN' } }, packetDeps());
+    markCarrierPacketReady(packet.id, packetDeps());
+    const item = packetItems(packet.id).find((i) => i.requirementKey === 'coi')!;
+    const orig = fileStore.verify.bind(fileStore);
+    fileStore.verify = async (path, opts) => {
+      returnCarrierPacketToDraft(packet.id, packetDeps());
+      return orig(path, opts);
+    };
+    await expect(
+      shareCarrierPacketItem(
+        { packetId: packet.id, itemId: item.id, sensitiveConfirmation: 'NONE' },
+        packetDeps(),
+      ),
+    ).rejects.toMatchObject({ reason: 'NOT_READY' });
+    fileStore.verify = orig;
+
+    markCarrierPacketReady(packet.id, packetDeps());
+    fileStore.verify = async (path, opts) => {
+      signIn('user-b');
+      return orig(path, opts);
+    };
+    await expect(
+      shareCarrierPacketItem(
+        { packetId: packet.id, itemId: item.id, sensitiveConfirmation: 'NONE' },
+        packetDeps(),
+      ),
+    ).rejects.toMatchObject({ reason: 'NOT_VISIBLE' });
+    fileStore.verify = orig;
+    signIn('user-a');
+
+    fileStore.verify = async (path, opts) => {
+      setTier('driver_pro');
+      return orig(path, opts);
+    };
+    await expect(
+      shareCarrierPacketItem(
+        { packetId: packet.id, itemId: item.id, sensitiveConfirmation: 'NONE' },
+        packetDeps(),
+      ),
+    ).rejects.toMatchObject({ reason: 'NOT_ENTITLED' });
+    fileStore.verify = orig;
+    setTier('owner_operator');
+    expect(useCarrierPacketsStore.getState().packets.find((p) => p.id === packet.id)?.status).toBe(
+      'READY',
+    );
   });
 });

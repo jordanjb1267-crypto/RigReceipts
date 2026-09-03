@@ -17,6 +17,7 @@ import {
   reviewCarrierPacket,
   snapshotCarrierProfile,
   STANDARD_BROKER_PACKET,
+  validateCarrierPacket,
   validateCarrierProfile,
   validateTemplateDefinition,
   writeSafeFromCarrierRecovery,
@@ -223,6 +224,9 @@ describe('review + transitions', () => {
     expect(canTransitionPacket('SHARED', 'SUPERSEDED')).toBe(true);
     expect(canTransitionPacket('SUPERSEDED', 'READY')).toBe(false);
     expect(() => assertPacketMutable({ ...packet, status: 'SHARED' })).toThrow(/immutable/);
+    expect(() =>
+      validateCarrierPacket({ ...packet, supersedesPacketId: packet.id }),
+    ).toThrow(/cannot supersede itself/);
   });
 
   it('attestation copy does not claim delivery and writeSafeFromCarrierRecovery is strict', () => {
