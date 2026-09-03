@@ -857,9 +857,49 @@ Migration `20260902000015_quick_present_sets.sql` is unchanged; no 00016.
 - **H10:** PresentationSession remains in-memory only; no new persistent
   session table.
 
+## Pass 3 — Carrier Profile + Carrier Packet foundation
+
+Authorized preparation + review + explicit user share only. No FMCSA, email,
+broker portal, signatures, combined PDF/ZIP, or production flag enablement.
+
+- **Pass 3-H0:** `defaultPresentationSetDeps()` injects live
+  `AppState.currentState` as `appActivity`. Test deps remain injectable.
+  Existing background-before/during/after Quick Present tests stay.
+- **Domain:** `src/domain/carrierPackets.ts`. `LoadDocument !=
+  OperationalDocument != CarrierPacket`. PresentationSetItem remains logical.
+- **CarrierProfile:** reusable USER_ENTERED identity; legalName required; one
+  per account; no EIN/bank fields; no verified boolean.
+- **STANDARD_BROKER_PACKET:** in-code product default. Required W9 / COI /
+  operating authority; optional factoring NOA / banking. Copy: requirements
+  vary. Not “universal” or “FMCSA-compliant.”
+- **Custom templates:** `carrierPacketTemplates`, archive not delete, packet
+  stores immutable `templateSnapshot`.
+- **Packets:** DRAFT / READY / SHARED / SUPERSEDED. Exact DocumentVersion
+  items. `markCarrierPacketReady` / `returnCarrierPacketToDraft` /
+  `markCarrierPacketShared` / `shareCarrierPacketItem` (wraps the accepted
+  exact-version share boundary).
+- **Stale after READY:** new wallet version or profile change blocks Share
+  and Mark Shared until return-to-draft → refresh → READY.
+- **SHARED:** user attestation only. Per-document share never auto-transitions.
+  Combined PDF/ZIP and profile cover = DEFERRED.
+- **Cloud:** recover after Road Wallet; `carrierWriteSafe` independent of
+  `setWriteSafe`. SHARED first sync stages READY → items → SHARED. SHARED
+  mismatch = integrity conflict.
+- **Migration 00016:** owner RLS, same-owner FKs, INVOKER immutability
+  triggers. 00011–00015 unchanged.
+- **UI:** stack routes only (`carrier-profile`, `carrier-packets`,
+  `carrier-packet-detail`, `carrier-packet-review`,
+  `carrier-packet-template-edit`). Road Wallet CARRIER section when flags on.
+  Five tabs unchanged. All seven refinement flags remain OFF.
+
+See `docs/CARRIER_PACKETS.md`.
+
 ## Evidence gaps (open)
 
-- Clean Supabase bootstrap of all migrations and two-user RLS verification
-  cannot run on the implementation VM (no Docker / psql / Supabase runtime).
-  Migrations are statically parsed with libpg_query only. The candidate is not
-  eligible for owner acceptance/merge until these are validated independently.
+- Clean Supabase bootstrap of all migrations (00011–00016) and two-user RLS
+  verification cannot run on the implementation VM (no Docker / psql /
+  Supabase runtime). Migrations are statically parsed only. The candidate is
+  not eligible for owner acceptance/merge until these are validated
+  independently.
+- REAL_DEVICE_FILE / SHARE / RECOVERY / QUICK_PRESENT / CARRIER_PACKET remain
+  evidence gaps.

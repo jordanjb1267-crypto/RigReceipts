@@ -13,6 +13,10 @@ export const PAYWALL_TRIGGERS = [
   'saved_presentation_sets',
   'document_share_export',
   'carrier_packet',
+  'carrier_profile',
+  'carrier_packet_builder',
+  'carrier_packet_templates',
+  'carrier_packet_history',
 ] as const;
 
 export type PaywallTrigger = (typeof PAYWALL_TRIGGERS)[number];
@@ -47,6 +51,22 @@ export const PAYWALL_TRIGGER_COPY: Record<PaywallTrigger, { headline: string; bo
   carrier_packet: {
     headline: 'Put your carrier packet together once.',
     body: 'Owner-Operator adds a Carrier Profile and the Carrier Packet Builder: assemble, review, and snapshot the exact documents you send brokers. Nothing is submitted or signed for you.',
+  },
+  carrier_profile: {
+    headline: 'Save the carrier details you entered.',
+    body: 'Owner-Operator adds a reusable Carrier Profile — legal name, USDOT, MC, and contact — entered by you. Nothing here is FMCSA-verified or broker-approved.',
+  },
+  carrier_packet_builder: {
+    headline: 'Assemble the packet you actually send.',
+    body: 'Owner-Operator lets you freeze exact Road Wallet versions, review missing or stale copies, and attest that this snapshot was shared. Nothing is emailed, submitted or signed for you.',
+  },
+  carrier_packet_templates: {
+    headline: 'Save the packet layouts you reuse.',
+    body: 'Owner-Operator lets you build custom packet templates beyond the standard broker starting point. Broker and customer requirements still vary.',
+  },
+  carrier_packet_history: {
+    headline: 'Keep the snapshots you already shared.',
+    body: 'Owner-Operator keeps historical SHARED packet snapshots on this account. A shared record is your attestation, not proof of delivery or acceptance.',
   },
 };
 

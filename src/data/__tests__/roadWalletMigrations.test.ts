@@ -16,6 +16,7 @@ const normalize = (sql: string) => stripComments(sql).replace(/\s+/g, ' ').toLow
 const core = normalize(read('20260902000013_road_wallet_core.sql'));
 const hardening = normalize(read('20260902000014_road_wallet_integrity_hardening.sql'));
 const sets = normalize(read('20260902000015_quick_present_sets.sql'));
+const carrier = normalize(read('20260902000016_carrier_packets.sql'));
 const deletion = normalize(read('20260719000008_account_deletion.sql'));
 
 /** Policies declared for a table across the given SQL: [name, command]. */
@@ -161,6 +162,52 @@ describe('Pass 2 — presentation_sets / items (00015)', () => {
     expect(sets).not.toMatch(/on presentation_sets for delete/);
     expect(sets).not.toMatch(/on presentation_set_items for delete/);
     expect(sets).not.toMatch(/service_role|security definer/);
+  });
+});
+
+describe('Pass 3 — carrier packets (00016)', () => {
+  it('creates owner-scoped tables with no public or client DELETE policies', () => {
+    for (const table of [
+      'carrier_profiles',
+      'carrier_packet_templates',
+      'carrier_packets',
+      'carrier_packet_items',
+    ]) {
+      expect(carrier).toMatch(new RegExp(`create table ${table}`));
+      expect(policiesFor(carrier, table).map(([, cmd]) => cmd).sort()).toEqual([
+        'insert',
+        'select',
+        'update',
+      ]);
+      expect(carrier).not.toMatch(new RegExp(`on ${table} for delete`));
+    }
+    expect(carrier).not.toMatch(/create policy "[^"]+" on carrier_[a-z_]+ for .* to public/);
+    expect(carrier).not.toMatch(/security definer/);
+  });
+
+  it('enforces same-owner FKs and historical immutability triggers', () => {
+    expect(carrier).toMatch(
+      /foreign key \(carrier_profile_id, owner_id\) references carrier_profiles \(id, owner_id\)/,
+    );
+    expect(carrier).toMatch(
+      /foreign key \(template_source_id, owner_id\) references carrier_packet_templates \(id, owner_id\)/,
+    );
+    expect(carrier).toMatch(
+      /foreign key \(carrier_packet_id, owner_id\) references carrier_packets \(id, owner_id\) on delete cascade/,
+    );
+    expect(carrier).toMatch(
+      /foreign key \(operational_document_id, owner_id\) references operational_documents \(id, owner_id\)/,
+    );
+    expect(carrier).toMatch(
+      /foreign key \(document_version_id, operational_document_id, owner_id\) references document_versions \(id, operational_document_id, owner_id\)/,
+    );
+    expect(carrier).toMatch(/create function carrier_packets_guard_immutable\(\)/);
+    expect(carrier).toMatch(/create function carrier_packet_items_guard_immutable\(\)/);
+    expect(carrier).toMatch(/shared packet snapshot is immutable/);
+    expect(carrier).toMatch(/superseded packet is terminal/);
+    expect(carrier).toMatch(/cannot mutate items of a historical packet/);
+    expect(carrier).toMatch(/on delete cascade/);
+    expect(carrier).toMatch(/identity_source text not null check \(identity_source = 'user_entered'\)/);
   });
 });
 

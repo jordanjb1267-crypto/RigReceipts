@@ -938,6 +938,84 @@ describe('Pass 2.1 H2/H3 — setWriteSafe + signed-out reconcile', () => {
     expect(sets).toBe(1);
   });
 
+  it('carrierWriteSafe failure blocks only Carrier writes', async () => {
+    signIn('user-a');
+    setTier('driver_pro');
+    let rw = 0;
+    let sets = 0;
+    let carrier = 0;
+    const result = await runRoadWalletCloudCycle({
+      recoverRoadWallet: recoverOk,
+      syncPendingRoadWallet: async () => {
+        rw++;
+        return { documentsSynced: 0, versionsSynced: 0, integrityFailures: 0 };
+      },
+      recoverPresentationSets: setOk,
+      syncPendingPresentationSets: async () => {
+        sets++;
+        return { setsSynced: 0, itemsSynced: 0 };
+      },
+      recoverCarrierPackets: async () => ({
+        profilesRecovered: 0,
+        templatesRecovered: 0,
+        packetsRecovered: 0,
+        itemsRecovered: 0,
+        integrityConflicts: 1,
+        skippedLocalChanges: 0,
+        outcome: 'completed',
+      }),
+      syncPendingCarrierPackets: async () => {
+        carrier++;
+        return { profilesSynced: 0, templatesSynced: 0, packetsSynced: 0, itemsSynced: 0, integrityConflicts: 0 };
+      },
+    });
+    expect(result.writeSafe).toBe(true);
+    expect(result.setWriteSafe).toBe(true);
+    expect(result.carrierWriteSafe).toBe(false);
+    expect(rw).toBe(1);
+    expect(sets).toBe(1);
+    expect(carrier).toBe(0);
+  });
+
+  it('setWriteSafe failure does not block Carrier writes when carrier recovery is clean', async () => {
+    signIn('user-a');
+    setTier('owner_operator');
+    let rw = 0;
+    let sets = 0;
+    let carrier = 0;
+    const result = await runRoadWalletCloudCycle({
+      recoverRoadWallet: recoverOk,
+      syncPendingRoadWallet: async () => {
+        rw++;
+        return { documentsSynced: 0, versionsSynced: 0, integrityFailures: 0 };
+      },
+      recoverPresentationSets: setFail,
+      syncPendingPresentationSets: async () => {
+        sets++;
+        return { setsSynced: 0, itemsSynced: 0 };
+      },
+      recoverCarrierPackets: async () => ({
+        profilesRecovered: 0,
+        templatesRecovered: 0,
+        packetsRecovered: 0,
+        itemsRecovered: 0,
+        integrityConflicts: 0,
+        skippedLocalChanges: 0,
+        outcome: 'completed',
+      }),
+      syncPendingCarrierPackets: async () => {
+        carrier++;
+        return { profilesSynced: 0, templatesSynced: 0, packetsSynced: 0, itemsSynced: 0, integrityConflicts: 0 };
+      },
+    });
+    expect(result.writeSafe).toBe(true);
+    expect(result.setWriteSafe).toBe(false);
+    expect(result.carrierWriteSafe).toBe(true);
+    expect(rw).toBe(1);
+    expect(sets).toBe(0);
+    expect(carrier).toBe(1);
+  });
+
   it('signed-out reconciles both stores locally and calls no remote recovery or write', async () => {
     signIn('user-a');
     setTier('driver_pro');
@@ -962,10 +1040,13 @@ describe('Pass 2.1 H2/H3 — setWriteSafe + signed-out reconcile', () => {
       syncPendingRoadWallet: boom,
       recoverPresentationSets: boom,
       syncPendingPresentationSets: boom,
+      recoverCarrierPackets: boom,
+      syncPendingCarrierPackets: boom,
     });
     expect(remoteCalled).toBe(false);
     expect(result.writeSafe).toBe(false);
     expect(result.setWriteSafe).toBe(false);
+    expect(result.carrierWriteSafe).toBe(false);
     expect(result.recovery.outcome).toBe('signed_out');
     expect(usePresentationSetsStore.getState().sets[0]?.cloudStatus).toBe('local_only');
   });

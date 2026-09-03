@@ -46,6 +46,16 @@ describe('buildExportBundle', () => {
     expect(ACCOUNT_EXPORT_SCOPE.includes).toMatch(/Quick Present set metadata/);
   });
 
+  it('exports Carrier Profile / packet metadata tables (Pass 3)', () => {
+    expect(EXPORT_TABLES).toContain('carrier_profiles');
+    expect(EXPORT_TABLES).toContain('carrier_packet_templates');
+    expect(EXPORT_TABLES).toContain('carrier_packets');
+    expect(EXPORT_TABLES).toContain('carrier_packet_items');
+    expect(ACCOUNT_EXPORT_SCOPE.includes).toMatch(/Carrier Profile metadata/);
+    expect(ACCOUNT_EXPORT_SCOPE.excludes).toMatch(/combined packet PDF\/ZIP/);
+    expect(ACCOUNT_EXPORT_SCOPE.excludes).toMatch(/delivery proof/);
+  });
+
   it('describes the export as metadata, explicitly excluding binary files and device-only documents', () => {
     expect(ACCOUNT_EXPORT_SCOPE.includes).toMatch(/Road Wallet document metadata/);
     expect(ACCOUNT_EXPORT_SCOPE.excludes).toMatch(/image\/PDF files/);

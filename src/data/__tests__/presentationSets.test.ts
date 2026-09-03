@@ -1,3 +1,5 @@
+import { AppState } from 'react-native';
+
 import { CloudSyncContext, newOpaqueId, OperationalDocument } from '@/domain';
 import { usePresentationSetsStore } from '@/store/presentationSets';
 import { useRoadWalletStore } from '@/store/roadWallet';
@@ -10,6 +12,7 @@ import {
   archiveCustomPresentationSet,
   buildQuickPresentSession,
   createCustomPresentationSet,
+  defaultPresentationSetDeps,
   destroyPresentationSession,
   PresentationSetDeniedError,
   runPresentationPreflight,
@@ -459,6 +462,17 @@ describe('Pass 2.1 H4/H5/H6/H9 — preflight and live session races', () => {
     expect(activePresentationSession()?.id).toBe(session.id);
     destroyPresentationSession();
     expect(activePresentationSession()).toBeNull();
+  });
+
+  it('Pass 3-H0: production deps expose live AppState; test deps stay injectable', () => {
+    const production = defaultPresentationSetDeps();
+    expect(production.appActivity).toEqual(expect.any(Function));
+    expect(production.appActivity?.()).toBe(AppState.currentState);
+    let activity: 'active' | 'background' = 'background';
+    const injected = { ...deps(), appActivity: () => activity };
+    expect(injected.appActivity()).toBe('background');
+    activity = 'active';
+    expect(injected.appActivity()).toBe('active');
   });
 });
 

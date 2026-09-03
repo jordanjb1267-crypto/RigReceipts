@@ -15,6 +15,10 @@ describe('paywall triggers (Pass 0)', () => {
       'saved_presentation_sets',
       'document_share_export',
       'carrier_packet',
+      'carrier_profile',
+      'carrier_packet_builder',
+      'carrier_packet_templates',
+      'carrier_packet_history',
     ]);
   });
 

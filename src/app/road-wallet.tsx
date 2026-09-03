@@ -112,6 +112,30 @@ function RoadWalletScreen() {
         )}
       </View>
 
+      {(isFeatureEnabled('carrier_profile_enabled') ||
+        isFeatureEnabled('carrier_packet_builder_enabled')) && (
+        <Card label="Carrier" style={styles.emptyCard}>
+          {isFeatureEnabled('carrier_profile_enabled') && (
+            <RouteBand
+              marker="ID"
+              markerTone="neutral"
+              title="Carrier Profile"
+              subtitle="Details you entered — not verified."
+              onPress={() => router.push('/carrier-profile')}
+            />
+          )}
+          {isFeatureEnabled('carrier_packet_builder_enabled') && (
+            <RouteBand
+              marker="PK"
+              markerTone="neutral"
+              title="Carrier Packets"
+              subtitle="Prepare and review an exact snapshot."
+              onPress={() => router.push('/carrier-packets')}
+            />
+          )}
+        </Card>
+      )}
+
       {active.length === 0 ? (
         <Card style={styles.emptyCard}>
           <Text style={styles.emptyTitle}>Nothing in your wallet yet.</Text>

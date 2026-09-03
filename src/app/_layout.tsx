@@ -116,6 +116,11 @@ export default function RootLayout() {
           <Stack.Screen name="document-detail" options={{ presentation: 'modal' }} />
           <Stack.Screen name="quick-present" />
           <Stack.Screen name="presentation-set-edit" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="carrier-profile" />
+          <Stack.Screen name="carrier-packets" />
+          <Stack.Screen name="carrier-packet-detail" />
+          <Stack.Screen name="carrier-packet-review" />
+          <Stack.Screen name="carrier-packet-template-edit" options={{ presentation: 'modal' }} />
         </Stack>
       </SafeAreaProvider>
     </QueryClientProvider>

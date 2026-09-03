@@ -1,3 +1,5 @@
+import { AppState } from 'react-native';
+
 import {
   applySelectionToMembership,
   canMutateCustomPresentationSets,
@@ -66,15 +68,19 @@ export interface PresentationSetDeps {
   ctx: () => CloudSyncContext;
   now: () => number;
   newId: () => string;
-  /** Pass 2.1 H6 — injectable AppState. Defaults to active in tests. */
+  /** Pass 2.1 H6 / Pass 3-H0 — injectable AppState. Production uses live RN AppState. */
   appActivity?: () => 'active' | 'inactive' | 'background' | 'unknown';
 }
+
+const liveAppActivity = (): 'active' | 'inactive' | 'background' | 'unknown' =>
+  AppState.currentState;
 
 export const defaultPresentationSetDeps = (): PresentationSetDeps => ({
   fileStore: roadWalletFileStore(),
   ctx: currentCloudSyncContext,
   now: Date.now,
   newId: newSecureOpaqueId,
+  appActivity: liveAppActivity,
 });
 
 const assertCanMutate = (ctx: CloudSyncContext): void => {

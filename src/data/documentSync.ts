@@ -10,11 +10,15 @@ import {
   sha256Hex,
   toRemoteDocumentRow,
   toRemoteVersionRow,
+  CarrierRecoveryResult,
   PresentationSetRecoveryResult,
+  writeSafeFromCarrierRecovery,
   writeSafeFromRecovery,
   writeSafeFromSetRecovery,
 } from '@/domain';
 import { getSupabaseClient } from '@/lib/supabase';
+import { useCarrierPacketsStore } from '@/store/carrierPackets';
+import { useCarrierProfileStore } from '@/store/carrierProfile';
 import { usePresentationSetsStore } from '@/store/presentationSets';
 import { ROAD_WALLET_CLOUD_CAPABILITY, useRoadWalletStore } from '@/store/roadWallet';
 
@@ -26,6 +30,11 @@ import {
   subscribeCloudSyncContext,
 } from './cloudSyncAuth';
 import { DocumentFileStore, reverifyDocumentFile } from './documentFiles';
+import {
+  CarrierSyncResult,
+  recoverCarrierPacketsFromCloud,
+  syncPendingCarrierPackets,
+} from './carrierPacketSync';
 import {
   recoverPresentationSetsFromCloud,
   PresentationSetSyncResult,
@@ -240,9 +249,12 @@ export interface RoadWalletCloudCycleResult {
   recovery: RoadWalletRecoveryResult;
   writeSafe: boolean;
   setWriteSafe: boolean;
+  carrierWriteSafe: boolean;
   writes: RoadWalletSyncResult | null;
   setRecovery: PresentationSetRecoveryResult | null;
   setWrites: PresentationSetSyncResult | null;
+  carrierRecovery: CarrierRecoveryResult | null;
+  carrierWrites: CarrierSyncResult | null;
 }
 
 export interface CloudCycleDeps {
@@ -250,6 +262,8 @@ export interface CloudCycleDeps {
   syncPendingRoadWallet?: typeof syncPendingRoadWallet;
   recoverPresentationSets?: typeof recoverPresentationSetsFromCloud;
   syncPendingPresentationSets?: typeof syncPendingPresentationSets;
+  recoverCarrierPackets?: typeof recoverCarrierPacketsFromCloud;
+  syncPendingCarrierPackets?: typeof syncPendingCarrierPackets;
 }
 
 let cycleInFlight: Promise<RoadWalletCloudCycleResult> | null = null;
@@ -259,9 +273,12 @@ const emptyCycle = (recovery: RoadWalletRecoveryResult): RoadWalletCloudCycleRes
   recovery,
   writeSafe: false,
   setWriteSafe: false,
+  carrierWriteSafe: false,
   writes: null,
   setRecovery: null,
   setWrites: null,
+  carrierRecovery: null,
+  carrierWrites: null,
 });
 
 /**
@@ -292,14 +309,17 @@ export function runRoadWalletCloudCycle(
   const syncRw = extras.syncPendingRoadWallet ?? syncPendingRoadWallet;
   const recoverSets = extras.recoverPresentationSets ?? recoverPresentationSetsFromCloud;
   const syncSets = extras.syncPendingPresentationSets ?? syncPendingPresentationSets;
+  const recoverCarrier = extras.recoverCarrierPackets ?? recoverCarrierPacketsFromCloud;
+  const syncCarrier = extras.syncPendingCarrierPackets ?? syncPendingCarrierPackets;
 
   cycleInFlight = (async () => {
     try {
       const ctx = currentCloudSyncContext();
       if (!ctx.userId || !ctx.supabaseConfigured) {
-        // H3: local-only reconcile of BOTH stores. No remote recovery or write.
         useRoadWalletStore.getState().reconcileCloudStatuses(ctx);
         usePresentationSetsStore.getState().reconcileCloudStatuses(ctx);
+        useCarrierProfileStore.getState().reconcileCloudStatuses(ctx);
+        useCarrierPacketsStore.getState().reconcileCloudStatuses(ctx);
         return emptyCycle(emptyRecoveryResult(ctx.userId ? 'not_configured' : 'signed_out'));
       }
 
@@ -325,19 +345,51 @@ export function runRoadWalletCloudCycle(
       }
       const setWriteSafe = writeSafeFromSetRecovery(setRecovery);
 
+      let carrierRecovery: CarrierRecoveryResult | null = null;
+      try {
+        carrierRecovery = await recoverCarrier();
+      } catch {
+        carrierRecovery = {
+          profilesRecovered: 0,
+          templatesRecovered: 0,
+          packetsRecovered: 0,
+          itemsRecovered: 0,
+          integrityConflicts: 0,
+          skippedLocalChanges: 0,
+          outcome: 'fetch_failed',
+        };
+      }
+      const carrierWriteSafe = writeSafeFromCarrierRecovery(carrierRecovery);
+
       useRoadWalletStore.getState().reconcileCloudStatuses(currentCloudSyncContext());
       usePresentationSetsStore.getState().reconcileCloudStatuses(currentCloudSyncContext());
+      useCarrierProfileStore.getState().reconcileCloudStatuses(currentCloudSyncContext());
+      useCarrierPacketsStore.getState().reconcileCloudStatuses(currentCloudSyncContext());
 
       let writes: RoadWalletSyncResult | null = null;
       let setWrites: PresentationSetSyncResult | null = null;
+      let carrierWrites: CarrierSyncResult | null = null;
       if (writeSafe) {
         writes = await syncRw();
       }
       if (writeSafe && setWriteSafe) {
         setWrites = await syncSets();
       }
+      if (writeSafe && carrierWriteSafe) {
+        carrierWrites = await syncCarrier();
+      }
 
-      return { recovery, writeSafe, setWriteSafe, writes, setRecovery, setWrites };
+      return {
+        recovery,
+        writeSafe,
+        setWriteSafe,
+        carrierWriteSafe,
+        writes,
+        setRecovery,
+        setWrites,
+        carrierRecovery,
+        carrierWrites,
+      };
     } finally {
       cycleInFlight = null;
       if (cycleRerunRequested) {
@@ -361,7 +413,10 @@ export function initDocumentSync(): void {
   if (started) return;
   started = true;
   const bothHydrated = () =>
-    useRoadWalletStore.persist.hasHydrated() && usePresentationSetsStore.persist.hasHydrated();
+    useRoadWalletStore.persist.hasHydrated() &&
+    usePresentationSetsStore.persist.hasHydrated() &&
+    useCarrierProfileStore.persist.hasHydrated() &&
+    useCarrierPacketsStore.persist.hasHydrated();
   const run = () => {
     void runRoadWalletCloudCycle();
   };
@@ -371,6 +426,8 @@ export function initDocumentSync(): void {
   if (bothHydrated()) run();
   useRoadWalletStore.persist.onFinishHydration(runWhenReady);
   usePresentationSetsStore.persist.onFinishHydration(runWhenReady);
+  useCarrierProfileStore.persist.onFinishHydration(runWhenReady);
+  useCarrierPacketsStore.persist.onFinishHydration(runWhenReady);
   subscribeCloudSyncContext(run);
 }
 

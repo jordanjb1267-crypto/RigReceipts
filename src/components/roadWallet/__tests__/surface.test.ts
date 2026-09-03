@@ -33,6 +33,11 @@ describe('root stack + sync bootstrap', () => {
       'document-detail',
       'quick-present',
       'presentation-set-edit',
+      'carrier-profile',
+      'carrier-packets',
+      'carrier-packet-detail',
+      'carrier-packet-review',
+      'carrier-packet-template-edit',
     ]) {
       expect(count(layout, new RegExp(`<Stack\\.Screen name="${name}"`, 'g'))).toBe(1);
     }
@@ -336,5 +341,39 @@ describe('Pass 2 — Quick Present surface', () => {
     const pager = present.slice(present.indexOf('function PresentationPager'));
     expect(pager).not.toMatch(/Share \/ Export/);
     expect(pager).not.toMatch(/shareOperationalDocumentVersion/);
+  });
+});
+
+describe('Pass 3 — Carrier Packet surface', () => {
+  const profile = read('src/app/carrier-profile.tsx');
+  const packets = read('src/app/carrier-packets.tsx');
+  const detail = read('src/app/carrier-packet-detail.tsx');
+  const gate = read('src/components/roadWallet/CarrierGates.tsx');
+  const haystack = `${profile}\n${packets}\n${detail}\n${wallet}`;
+
+  it('gates routes on flags + entitlements and does not add a sixth tab', () => {
+    expect(gate).toMatch(/carrier_profile_enabled/);
+    expect(gate).toMatch(/carrier_packet_builder_enabled/);
+    expect(gate).toMatch(/carrierProfile/);
+    expect(gate).toMatch(/carrierPacketBuilder/);
+    expect(count(tabsLayout, /<Tabs\.Screen/g)).toBe(5);
+  });
+
+  it('rejects authority-expansion copy and keeps Share / Export separate from Mark packet shared', () => {
+    for (const phrase of [
+      'FMCSA verified',
+      'Broker approved',
+      'Send to broker',
+      'Submit packet',
+      'Accept agreement',
+      'Sign packet',
+    ]) {
+      expect(haystack).not.toContain(phrase);
+    }
+    expect(detail).toMatch(/Share \/ Export/);
+    expect(detail).toMatch(/Mark packet shared/);
+    expect(detail).toMatch(/MARK_SHARED_ATTESTATION_COPY/);
+    expect(wallet).toMatch(/Carrier Profile/);
+    expect(wallet).toMatch(/Carrier Packets/);
   });
 });

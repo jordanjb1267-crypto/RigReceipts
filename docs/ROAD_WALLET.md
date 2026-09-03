@@ -357,10 +357,12 @@ paths, filenames, hashes, dates or contents.
   digest and CSPRNG, camera, document picker, cloud download and the share
   sheet have been validated against the SDK 57 type surface and by tests — not
   on hardware.
-- **Database:** clean Supabase bootstrap of migrations 00011–00015 and
+- **Database:** clean Supabase bootstrap of migrations 00011–00016 and
   two-user RLS verification are not runnable in the implementation
   environment (statically parsed only).
 - **REAL_DEVICE_QUICK_PRESENT = EVIDENCE GAP.** See §37.
+- **CARRIER_PACKET_REAL_DEVICE / CLEAN_BOOTSTRAP / TWO_USER_RLS = EVIDENCE
+  GAPS.** See `docs/CARRIER_PACKETS.md`.
 - **Release gate (privacy/legal/store):** before enabling the flag —
   - Privacy Policy must describe operational-document storage, including
     potentially personal/medical and financial-sensitive documents;
@@ -369,3 +371,27 @@ paths, filenames, hashes, dates or contents.
   - retention / delete / export behaviour (archive vs delete, metadata-only
     export, account deletion cascade) must be reviewed;
   - real-device storage and share behaviour must be tested.
+
+---
+
+## Pass 3 — Carrier Packet foundation (v0.1)
+
+See `docs/CARRIER_PACKETS.md`. Carrier Packet is **not** an OperationalDocument
+and **not** a PresentationSet.
+
+- **Pass 3-H0:** production `defaultPresentationSetDeps().appActivity` reads
+  live `AppState.currentState`. Quick Present UI AppState checks remain.
+- **CarrierProfile:** one `USER_ENTERED` identity per account. No EIN/SSN/bank
+  scalars. USDOT/MC are not verified.
+- **CarrierPacket:** exact `DocumentVersion` snapshot + template/profile
+  snapshots. Lifecycle DRAFT → READY → SHARED → SUPERSEDED. SHARED is a user
+  attestation, not delivery proof.
+- **Share/Export:** existing exact-version boundary only. Per-document share
+  never marks the packet SHARED.
+- **Cloud cycle:** after Road Wallet + presentation-set recovery, recover
+  Carrier Profile/templates/packets/items → `carrierWriteSafe`. Carrier writes
+  require `writeSafe && carrierWriteSafe`. The three write planes stay
+  independent except that carrier writes also need Road Wallet `writeSafe`.
+- **Migration `20260902000016_carrier_packets.sql`:** owner-only tables with
+  SHARED immutability triggers. Combined PDF/ZIP and profile-cover artifacts
+  are deferred. Production flags remain OFF.
