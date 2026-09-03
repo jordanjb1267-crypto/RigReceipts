@@ -79,6 +79,7 @@ const normalize = (sql: string) => stripComments(sql).replace(/\s+/g, ' ').trim(
 
 const FILE_00006 = '20260718000006_harden_rls_auto_enable.sql';
 const FILE_00021 = '20260902000021_runtime_assurance_remediation.sql';
+const FILE_00022 = '20260902000022_account_delete_dependency_ordering.sql';
 const sql00006 = read(FILE_00006);
 const sql00021 = read(FILE_00021);
 const n06 = normalize(sql00006).toLowerCase();
@@ -226,13 +227,15 @@ describe('IR-R2 RR-DB-02A — only 00006 historical migration differs from froze
       (name) =>
         !(name in FROZEN_IR_R1_PROTECTED_MIGRATION_SHA256) &&
         name !== FILE_00006 &&
-        name !== FILE_00021,
+        name !== FILE_00021 &&
+        name !== FILE_00022,
     );
     expect(extras).toEqual([]);
     expect(currentFiles).toContain(FILE_00006);
     expect(currentFiles).toContain(FILE_00021);
+    expect(currentFiles).toContain(FILE_00022);
     expect(currentFiles).toHaveLength(
-      Object.keys(FROZEN_IR_R1_PROTECTED_MIGRATION_SHA256).length + 2,
+      Object.keys(FROZEN_IR_R1_PROTECTED_MIGRATION_SHA256).length + 3,
     );
 
     for (const [name, expectedHash] of Object.entries(FROZEN_IR_R1_PROTECTED_MIGRATION_SHA256)) {
