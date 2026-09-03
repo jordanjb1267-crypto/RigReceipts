@@ -486,6 +486,8 @@ export {
   validateCarrierProfileSnapshot,
   snapshotCarrierProfile,
   profileSnapshotEqualsCurrent,
+  rematerializeTemplateDefinition,
+  rematerializeProfileSnapshot,
   validateTemplateDefinition,
   validateCarrierPacketTemplate,
   validateCarrierPacket,

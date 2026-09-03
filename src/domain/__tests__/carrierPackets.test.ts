@@ -427,6 +427,64 @@ describe('Pass 3.2 — snapshot integrity', () => {
     ).toBeNull();
   });
 
+  it('rematerializes jsonb-reordered snapshots so READY predecessor evidence still matches', () => {
+    const ready = {
+      ...packet,
+      status: 'READY' as const,
+      readyAt: 1788460124542,
+      recipientLabel: 'Broker A edit',
+    };
+    const shared = {
+      ...ready,
+      status: 'SHARED' as const,
+      sharedAt: 1788460127417,
+      shareMethod: 'OTHER' as const,
+      recipientLabel: 'Broker Share',
+    };
+    const row = toRemoteCarrierPacketRow(ready, 'user-a');
+    const jsonbReordered = {
+      ...row,
+      template_snapshot: {
+        name: STANDARD_BROKER_PACKET.name,
+        schemaVersion: 1,
+        documentRequirements: STANDARD_BROKER_PACKET.documentRequirements.map((req) => ({
+          key: req.key,
+          label: req.label,
+          position: req.position,
+          required: req.required,
+          documentKind: req.documentKind,
+        })),
+        requireCarrierProfile: true,
+      },
+      profile_snapshot: {
+        city: null,
+        dbaName: null,
+        mcNumber: profile.mcNumber,
+        legalName: profile.legalName,
+        capturedAt: 1,
+        postalCode: null,
+        contactName: null,
+        usdotNumber: profile.usdotNumber,
+        addressLine1: null,
+        addressLine2: null,
+        contactEmail: null,
+        contactPhone: null,
+        stateProvince: null,
+        equipmentTypes: [],
+        identitySource: 'USER_ENTERED',
+      },
+    };
+    expect(JSON.stringify(jsonbReordered.template_snapshot)).not.toBe(
+      JSON.stringify(ready.templateSnapshot),
+    );
+    const mapped = fromRemoteCarrierPacketRow(jsonbReordered, 'user-a');
+    expect(mapped).not.toBeNull();
+    expect(JSON.stringify(mapped!.templateSnapshot)).toBe(JSON.stringify(ready.templateSnapshot));
+    expect(JSON.stringify(mapped!.profileSnapshot)).toBe(JSON.stringify(ready.profileSnapshot));
+    expect(readySnapshotMatchesSharedTransition(mapped!, shared)).toBe(true);
+    expect(carrierPacketPersistedEvidenceExactlyMatches(mapped!, ready)).toBe(true);
+  });
+
   it('rejects malformed remote items against the parent template snapshot', () => {
     const itemId = id(40);
     const docId = id(41);

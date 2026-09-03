@@ -399,6 +399,50 @@ export function profileSnapshotEqualsCurrent(
   return JSON.stringify({ ...live, capturedAt: 0 }) === JSON.stringify({ ...snapshot, capturedAt: 0 });
 }
 
+/**
+ * Postgres jsonb does not preserve object key insertion order. Remote rows must
+ * be rematerialized into domain field order so existing JSON.stringify evidence
+ * comparators keep working. Comparators themselves are unchanged.
+ */
+export function rematerializeTemplateDefinition(
+  def: CarrierPacketTemplateDefinition,
+): CarrierPacketTemplateDefinition {
+  return {
+    schemaVersion: def.schemaVersion,
+    name: def.name,
+    requireCarrierProfile: def.requireCarrierProfile,
+    documentRequirements: def.documentRequirements.map((req) => ({
+      key: req.key,
+      documentKind: req.documentKind,
+      label: req.label,
+      required: req.required,
+      position: req.position,
+    })),
+  };
+}
+
+export function rematerializeProfileSnapshot(
+  snapshot: CarrierProfileSnapshot,
+): CarrierProfileSnapshot {
+  return {
+    legalName: snapshot.legalName,
+    dbaName: snapshot.dbaName,
+    usdotNumber: snapshot.usdotNumber,
+    mcNumber: snapshot.mcNumber,
+    addressLine1: snapshot.addressLine1,
+    addressLine2: snapshot.addressLine2,
+    city: snapshot.city,
+    stateProvince: snapshot.stateProvince,
+    postalCode: snapshot.postalCode,
+    contactName: snapshot.contactName,
+    contactEmail: snapshot.contactEmail,
+    contactPhone: snapshot.contactPhone,
+    equipmentTypes: [...snapshot.equipmentTypes],
+    identitySource: snapshot.identitySource,
+    capturedAt: snapshot.capturedAt,
+  };
+}
+
 export function validateTemplateDefinition(def: CarrierPacketTemplateDefinition): void {
   if (def.schemaVersion !== 1) throw new Error('unsupported template schemaVersion');
   if (!bounded(def.name.trim(), CARRIER_PACKET_NAME_MAX)) throw new Error('template name required');
@@ -1416,7 +1460,9 @@ export function fromRemoteCarrierTemplateRow(
   if (createdAt === null || updatedAt === null) return null;
   let definition: CarrierPacketTemplateDefinition;
   try {
-    definition = row.definition as unknown as CarrierPacketTemplateDefinition;
+    definition = rematerializeTemplateDefinition(
+      row.definition as unknown as CarrierPacketTemplateDefinition,
+    );
     validateTemplateDefinition(definition);
   } catch {
     return null;
@@ -1497,7 +1543,9 @@ export function fromRemoteCarrierPacketRow(
   if (!isRec(row.template_snapshot) || Array.isArray(row.template_snapshot)) return null;
   let templateSnapshot: CarrierPacketTemplateDefinition;
   try {
-    templateSnapshot = row.template_snapshot as unknown as CarrierPacketTemplateDefinition;
+    templateSnapshot = rematerializeTemplateDefinition(
+      row.template_snapshot as unknown as CarrierPacketTemplateDefinition,
+    );
     validateTemplateDefinition(templateSnapshot);
   } catch {
     return null;
@@ -1506,7 +1554,9 @@ export function fromRemoteCarrierPacketRow(
   if (row.profile_snapshot !== null && row.profile_snapshot !== undefined) {
     if (!isRec(row.profile_snapshot) || Array.isArray(row.profile_snapshot)) return null;
     try {
-      profileSnapshot = row.profile_snapshot as unknown as CarrierProfileSnapshot;
+      profileSnapshot = rematerializeProfileSnapshot(
+        row.profile_snapshot as unknown as CarrierProfileSnapshot,
+      );
       validateCarrierProfileSnapshot(profileSnapshot);
     } catch {
       return null;
