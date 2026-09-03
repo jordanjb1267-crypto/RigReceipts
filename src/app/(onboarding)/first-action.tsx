@@ -7,13 +7,17 @@ import { Button, Card, OnboardingShell, Pill } from '@/components';
 import { isFeatureEnabled } from '@/config/flags';
 import {
   analyzeRateCheck,
+  createFirstLoadSaver,
   EQUIPMENT_TYPES,
   EquipmentType,
   estimateAllMileTargets,
   QUICK_ESTIMATE_PROFILE,
+  rateCheckLoadDraft,
   RateCheckResult,
+  rateConLoadDraft,
 } from '@/domain';
 import { parseRateCon, RATE_CON_FIXTURES } from '@/ocr';
+import { useLoadsStore } from '@/store/loads';
 import { useOnboardingStore } from '@/store/onboarding';
 import { useRateCardStore } from '@/store/rateCard';
 import { colors, palette, radii, spacing, type } from '@/theme';
@@ -141,6 +145,8 @@ function RateCheckBranch() {
       <ProfitResult
         result={result}
         offer={offerN}
+        loadedMiles={loadedN}
+        deadheadMiles={deadheadN}
         breakEven={targets.breakEvenAllMileRpm}
         target={targets.targetAllMileRpm}
         trip={trip.originCity.trim() ? trip : null}
@@ -362,9 +368,32 @@ function RateCheckLoading({ onDone }: { onDone: () => void }) {
   );
 }
 
+/**
+ * Idempotent onboarding first-load saver bound to the live stores/router. The
+ * saver is created once per mounted screen so a double tap, repeated callback
+ * or slow navigation can never persist a second load.
+ */
+function useFirstLoadSaver() {
+  const router = useRouter();
+  const addLoad = useLoadsStore((s) => s.addLoad);
+  const completeFirstAction = useOnboardingStore((s) => s.completeFirstAction);
+  // Lazy initializer: built exactly once for the mounted screen.
+  const [saveFirstLoad] = useState(() =>
+    createFirstLoadSaver({
+      addLoad,
+      completeFirstAction,
+      trackSaved: (props) => track('first_load_saved', props),
+      navigateToReveal: () => router.push('/(onboarding)/reveal'),
+    }),
+  );
+  return saveFirstLoad;
+}
+
 function ProfitResult({
   result,
   offer,
+  loadedMiles,
+  deadheadMiles,
   breakEven,
   target,
   trip,
@@ -372,13 +401,16 @@ function ProfitResult({
 }: {
   result: RateCheckResult;
   offer: number;
+  /** Raw validated inputs — the result only carries their sum. */
+  loadedMiles: number;
+  deadheadMiles: number;
   breakEven: number;
   target: number;
   trip: TripDetails | null;
   onAdjust: () => void;
 }) {
   const router = useRouter();
-  const completeFirstAction = useOnboardingStore((s) => s.completeFirstAction);
+  const saveFirstLoad = useFirstLoadSaver();
   const setCardSource = useRateCardStore((s) => s.setSource);
   const verdict = VERDICT_COPY[result.verdict];
   const fill = VERDICT_FILL[verdict.tone];
@@ -394,9 +426,24 @@ function ProfitResult({
   ];
 
   const save = () => {
-    completeFirstAction();
-    track('first_load_saved', { verdict: result.verdict });
-    router.push('/(onboarding)/reveal');
+    // Persists one `evaluated` load from the exact inputs, then completes the
+    // onboarding action, emits analytics and navigates — in that order.
+    saveFirstLoad(
+      rateCheckLoadDraft({
+        offer,
+        loadedMiles,
+        deadheadMiles,
+        trip: trip
+          ? {
+              originCity: trip.originCity,
+              originState: trip.originState,
+              destinationCity: trip.destinationCity,
+              destinationState: trip.destinationState,
+            }
+          : null,
+      }),
+      { verdict: result.verdict, source: 'rate_check' },
+    );
   };
 
   const createRateCard = () => {
@@ -478,8 +525,7 @@ function ProfitResult({
 // ---------------------------------------------------------------------------
 
 function RateConBranch() {
-  const router = useRouter();
-  const completeFirstAction = useOnboardingStore((s) => s.completeFirstAction);
+  const saveFirstLoad = useFirstLoadSaver();
   const [scanned, setScanned] = useState<ReturnType<typeof parseRateCon> | null>(null);
 
   const useSample = () => {
@@ -490,9 +536,10 @@ function RateConBranch() {
   };
 
   const analyze = () => {
-    completeFirstAction();
-    track('first_load_saved', { source: 'rate_con' });
-    router.push('/(onboarding)/reveal');
+    if (!scanned) return;
+    // The user-reviewed rate confirmation is the evidence for `booked`; only
+    // reviewed, document-derived values are persisted.
+    saveFirstLoad(rateConLoadDraft(scanned), { source: 'rate_con' });
   };
 
   if (!scanned) {

@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button, MetricTile } from '@/components';
 import {
   buildCsv,
+  captureSyncLabel,
   CsvColumn,
   expensesInRange,
   monthRange,
@@ -25,7 +26,7 @@ const CAPTURE_CSV_COLUMNS: CsvColumn<Capture>[] = [
   { header: 'Vendor', value: (c) => c.vendor },
   { header: 'Amount (USD)', value: (c) => c.totalUsd },
   { header: 'Gallons', value: (c) => c.gallons },
-  { header: 'Synced', value: (c) => (c.status === 'synced' ? 'yes' : 'pending') },
+  { header: 'Synced', value: (c) => captureSyncLabel(c.status) },
 ];
 
 /**

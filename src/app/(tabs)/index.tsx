@@ -1,5 +1,5 @@
-import { useRouter } from 'expo-router';
-import { useMemo } from 'react';
+import { Href, useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useMemo } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -27,9 +27,13 @@ import {
   summarizeSegments,
   unclassifiedMiles,
 } from '@/domain';
+import { refreshRoadWalletReadinessForSession } from '@/data/roadWallet';
 import { useBoard } from '@/data/useBoard';
+import { useRoadWalletSummary } from '@/data/useRoadWalletSummary';
+import type { RoadWalletSummary } from '@/domain';
 import type { BoardData } from '@/mock/board';
 import { useActivationStore } from '@/store/activation';
+import { useAuthStore } from '@/store/auth';
 import { useCapturesStore } from '@/store/captures';
 import { useMileageStore } from '@/store/mileage';
 import { Role, useOnboardingStore } from '@/store/onboarding';
@@ -70,6 +74,19 @@ export default function DashboardScreen() {
   const dismiss = useActivationStore((s) => s.dismiss);
   const { data, isPending, isError, refetch } = useBoard();
   const captures = useCapturesStore((s) => s.captures);
+  const userId = useAuthStore((s) => s.userId);
+  const roadWalletEnabled = isFeatureEnabled('road_wallet_enabled');
+
+  // Road Wallet "ready" counts are only truthful after a current-process
+  // physical check; kick it off (non-blocking, no polling) whenever the Board
+  // is focused. Until it completes the widget shows "Checking…".
+  useFocusEffect(
+    useCallback(() => {
+      if (roadWalletEnabled) {
+        void refreshRoadWalletReadinessForSession(userId).catch(() => {});
+      }
+    }, [roadWalletEnabled, userId]),
+  );
 
   // "Finish setting up" checklist (design handoff §Road Board). The first two
   // rows derive from onboarding and are never toggled by hand.
@@ -132,6 +149,17 @@ export default function DashboardScreen() {
 
         {isFeatureEnabled('live_mileage_core_enabled') && (
           <LiveMileageWidget onOpen={(p) => router.push(p)} />
+        )}
+
+        {roadWalletEnabled && (
+          <RoadWalletWidget
+            onOpen={() => router.push('/road-wallet')}
+            onQuickPresent={
+              isFeatureEnabled('quick_present_enabled')
+                ? () => router.push('/quick-present')
+                : undefined
+            }
+          />
         )}
 
         {isPending ? (
@@ -214,7 +242,12 @@ function ErrorState({ onRetry }: { onRetry: () => void }) {
 // Board
 // ---------------------------------------------------------------------------
 
-type TabPath = '/scan' | '/loads' | '/miles' | '/reports' | '/rate-board';
+/**
+ * Routes the Board may push. Derived from Expo Router's `Href` (the typed route
+ * union when typed routes are generated) so new destinations such as
+ * `/road-wallet` never need casts.
+ */
+type TabPath = Extract<Href, string>;
 
 function Board({
   data,
@@ -544,6 +577,79 @@ function LiveMileageWidget({ onOpen }: { onOpen: (path: string) => void }) {
           <MetricTile label="Empty" value={miText(today.businessEmpty)} />
         </View>
       )}
+    </WidgetCard>
+  );
+}
+
+/**
+ * Road Wallet widget (Pass 1B §20 / Pass 2) — REAL summary from the Road
+ * Wallet store, never from `@/mock/board`. "Ready" counts only versions
+ * verified READY in this process. Quick Present appears only when
+ * `quick_present_enabled` is on.
+ */
+function RoadWalletWidget({
+  onOpen,
+  onQuickPresent,
+}: {
+  onOpen: () => void;
+  onQuickPresent?: () => void;
+}) {
+  const summary: RoadWalletSummary = useRoadWalletSummary();
+  const attention = summary.expired + summary.expiringSoon;
+  const tone: Tone =
+    summary.expired > 0
+      ? 'rust'
+      : summary.expiringSoon > 0
+        ? 'amber'
+        : summary.totalActive > 0
+          ? 'green'
+          : 'neutral';
+  const label =
+    summary.totalActive === 0
+      ? 'Empty'
+      : summary.expired > 0
+        ? `${summary.expired} expired`
+        : summary.expiringSoon > 0
+          ? `${summary.expiringSoon} expiring`
+          : 'Up to date';
+
+  return (
+    <WidgetCard
+      label="Road Wallet"
+      headerRight={<Pill label={label} tone={tone} />}
+      onPress={onOpen}
+    >
+      <Text style={styles.bigNum}>
+        {summary.readyOffline}
+        <Text style={styles.widgetNote}> of {summary.totalActive} ready offline</Text>
+      </Text>
+      <Text style={styles.widgetNote}>
+        {summary.totalActive === 0
+          ? 'Add registrations, insurance, permits and credentials.'
+          : summary.needsFileCheck > 0
+            ? `Checking… ${summary.needsFileCheck} ${summary.needsFileCheck === 1 ? 'file' : 'files'} · ${summary.backedUp} backed up`
+            : attention > 0
+              ? `${attention} ${attention === 1 ? 'document needs' : 'documents need'} attention · ${summary.backedUp} backed up`
+              : `${summary.backedUp} backed up`}
+      </Text>
+      <View style={styles.fiRow}>
+        <View style={styles.fiChip}>
+          <Text style={styles.fiChipText}>Open Wallet</Text>
+        </View>
+        {onQuickPresent && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Quick Present"
+            onPress={(e) => {
+              e.stopPropagation?.();
+              onQuickPresent();
+            }}
+            style={styles.fiChip}
+          >
+            <Text style={styles.fiChipText}>Quick Present</Text>
+          </Pressable>
+        )}
+      </View>
     </WidgetCard>
   );
 }
