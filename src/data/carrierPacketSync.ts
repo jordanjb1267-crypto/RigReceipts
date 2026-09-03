@@ -4,6 +4,7 @@ import {
   authorizeCarrierTemplateCloudWrite,
   CarrierPacket,
   CarrierPacketItem,
+  CarrierPacketStatus,
   CarrierReadyReturnProof,
   CarrierRecoveryResult,
   carrierPacketItemsExactlyMatch,
@@ -45,6 +46,35 @@ export const CARRIER_CLOUD_CAPABILITY = 'cloudDocumentBackup' as const;
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
 
+const isUniqueViolation = (error: unknown): boolean => {
+  if (!isRecord(error)) return false;
+  if (error.code === '23505') return true;
+  if (error.status === 409 || error.code === '409') return true;
+  return typeof error.message === 'string' && /duplicate key|unique constraint/i.test(error.message);
+};
+
+const assertExactlyOneAffected = (data: unknown, op: string): void => {
+  if (!Array.isArray(data) || data.length !== 1 || !isRecord(data[0]) || typeof data[0].id !== 'string') {
+    throw new CarrierPacketRemoteConflictError('malformed_result', op);
+  }
+};
+
+export type CarrierPacketRemoteConflictReason =
+  | 'duplicate_insert'
+  | 'expected_status_miss'
+  | 'malformed_result'
+  | 'invalid_insert_status';
+
+/** Narrow remote-write conflict — not a network outage, not silent success. */
+export class CarrierPacketRemoteConflictError extends Error {
+  readonly reason: CarrierPacketRemoteConflictReason;
+  constructor(reason: CarrierPacketRemoteConflictReason, detail?: string) {
+    super(`carrier packet remote conflict: ${reason}${detail ? ` (${detail})` : ''}`);
+    this.name = 'CarrierPacketRemoteConflictError';
+    this.reason = reason;
+  }
+}
+
 export interface CarrierRemote {
   fetchProfiles(userId: string): Promise<unknown[]>;
   fetchTemplates(userId: string): Promise<unknown[]>;
@@ -52,7 +82,8 @@ export interface CarrierRemote {
   fetchItems(userId: string): Promise<unknown[]>;
   upsertProfile(row: Record<string, unknown>): Promise<void>;
   upsertTemplate(row: Record<string, unknown>): Promise<void>;
-  upsertPacket(row: Record<string, unknown>): Promise<void>;
+  insertPacketDraft(row: Record<string, unknown>): Promise<void>;
+  updatePacket(row: Record<string, unknown>, expectedCurrentStatus: CarrierPacketStatus): Promise<void>;
   upsertItem(row: Record<string, unknown>): Promise<void>;
   deleteItem(itemId: string): Promise<void>;
 }
@@ -88,9 +119,43 @@ export const supabaseCarrierRemote: CarrierRemote = {
     const { error } = await table('carrier_packet_templates').upsert(row, { onConflict: 'id' });
     if (error) throw error;
   },
-  async upsertPacket(row) {
-    const { error } = await table('carrier_packets').upsert(row, { onConflict: 'id' });
+  async insertPacketDraft(row) {
+    if (row.status !== 'DRAFT') {
+      throw new CarrierPacketRemoteConflictError(
+        'invalid_insert_status',
+        `refused insert of status ${String(row.status)}`,
+      );
+    }
+    const { data, error } = await table('carrier_packets').insert(row).select('id,status');
+    if (error) {
+      if (isUniqueViolation(error)) {
+        throw new CarrierPacketRemoteConflictError(
+          'duplicate_insert',
+          typeof row.id === 'string' ? row.id : undefined,
+        );
+      }
+      throw error;
+    }
+    assertExactlyOneAffected(data, 'insertPacketDraft');
+  },
+  async updatePacket(row, expectedCurrentStatus) {
+    if (typeof row.id !== 'string' || typeof row.owner_id !== 'string') {
+      throw new CarrierPacketRemoteConflictError('malformed_result', 'update row missing id/owner_id');
+    }
+    const { data, error } = await table('carrier_packets')
+      .update(row)
+      .eq('id', row.id)
+      .eq('owner_id', row.owner_id)
+      .eq('status', expectedCurrentStatus)
+      .select('id,status');
     if (error) throw error;
+    if (!Array.isArray(data) || data.length === 0) {
+      throw new CarrierPacketRemoteConflictError(
+        'expected_status_miss',
+        `${row.id} expected ${expectedCurrentStatus}`,
+      );
+    }
+    assertExactlyOneAffected(data, 'updatePacket');
   },
   async upsertItem(row) {
     const { error } = await table('carrier_packet_items').upsert(row, { onConflict: 'id' });
@@ -437,13 +502,31 @@ const liveWriteUserId = (
   return assertRemoteEffectAuthorized(CARRIER_CLOUD_CAPABILITY, contentOwnerId, ctx);
 };
 
-const upsertPacketNow = async (
+const insertDraftPacketNow = async (
   projected: CarrierPacket,
   deps: CarrierSyncDeps,
 ): Promise<void> => {
+  if (projected.status !== 'DRAFT') {
+    throw new CarrierPacketRemoteConflictError(
+      'invalid_insert_status',
+      `insertDraftPacketNow refused ${projected.status}`,
+    );
+  }
   const userId = liveWriteUserId(authorizeCarrierPacketCloudWrite, projected.accountOwnerId, deps);
-  await deps.remote.upsertPacket(
+  await deps.remote.insertPacketDraft(
     toRemoteCarrierPacketRow(projected, userId) as unknown as Record<string, unknown>,
+  );
+};
+
+const updatePacketNow = async (
+  projected: CarrierPacket,
+  expectedCurrentStatus: CarrierPacketStatus,
+  deps: CarrierSyncDeps,
+): Promise<void> => {
+  const userId = liveWriteUserId(authorizeCarrierPacketCloudWrite, projected.accountOwnerId, deps);
+  await deps.remote.updatePacket(
+    toRemoteCarrierPacketRow(projected, userId) as unknown as Record<string, unknown>,
+    expectedCurrentStatus,
   );
 };
 
@@ -574,8 +657,8 @@ export async function syncPendingCarrierPackets(
             result.integrityConflicts++;
             continue;
           }
-          await upsertPacketNow(draftCloudProjection(existing), deps);
-          await upsertPacketNow(draftCloudProjection(packet), deps);
+          await updatePacketNow(draftCloudProjection(existing), 'READY', deps);
+          await updatePacketNow(draftCloudProjection(packet), 'DRAFT', deps);
           await reconcileDraftMembership(packet, membership, remoteItemRows, result, deps);
           useCarrierPacketsStore.getState().clearReadyReturnProof(packet.id);
           useCarrierPacketsStore.getState().setPacketCloudStatus(packet.id, 'synced');
@@ -592,7 +675,7 @@ export async function syncPendingCarrierPackets(
             proof.readyItemsEvidence,
           );
           if (remoteIsBase) {
-            await upsertPacketNow(draftCloudProjection(packet), deps);
+            await updatePacketNow(draftCloudProjection(packet), 'DRAFT', deps);
             await reconcileDraftMembership(packet, membership, remoteItemRows, result, deps);
             useCarrierPacketsStore.getState().clearReadyReturnProof(packet.id);
             useCarrierPacketsStore.getState().setPacketCloudStatus(packet.id, 'synced');
@@ -612,8 +695,15 @@ export async function syncPendingCarrierPackets(
           continue;
         }
 
-        if (!existing || existing.status === 'DRAFT') {
-          await upsertPacketNow(draftCloudProjection(packet), deps);
+        if (!existing) {
+          await insertDraftPacketNow(draftCloudProjection(packet), deps);
+          await reconcileDraftMembership(packet, membership, remoteItemRows, result, deps);
+          useCarrierPacketsStore.getState().setPacketCloudStatus(packet.id, 'synced');
+          result.packetsSynced++;
+          continue;
+        }
+        if (existing.status === 'DRAFT') {
+          await updatePacketNow(draftCloudProjection(packet), 'DRAFT', deps);
           await reconcileDraftMembership(packet, membership, remoteItemRows, result, deps);
           useCarrierPacketsStore.getState().setPacketCloudStatus(packet.id, 'synced');
           result.packetsSynced++;
@@ -637,9 +727,13 @@ export async function syncPendingCarrierPackets(
           result.integrityConflicts++;
           continue;
         }
-        await upsertPacketNow(draftCloudProjection(packet), deps);
+        if (!existing) {
+          await insertDraftPacketNow(draftCloudProjection(packet), deps);
+        } else {
+          await updatePacketNow(draftCloudProjection(packet), 'DRAFT', deps);
+        }
         await reconcileDraftMembership(packet, membership, remoteItemRows, result, deps);
-        await upsertPacketNow(readyCloudProjection(packet), deps);
+        await updatePacketNow(readyCloudProjection(packet), 'DRAFT', deps);
         useCarrierPacketsStore.getState().setPacketCloudStatus(packet.id, 'synced');
         result.packetsSynced++;
         continue;
@@ -667,15 +761,22 @@ export async function syncPendingCarrierPackets(
             result.integrityConflicts++;
             continue;
           }
-          await upsertPacketNow(sharedCloudProjection(packet), deps);
+          await updatePacketNow(sharedCloudProjection(packet), 'READY', deps);
           useCarrierPacketsStore.getState().setPacketCloudStatus(packet.id, 'synced');
           result.packetsSynced++;
           continue;
         }
-        await upsertPacketNow(draftCloudProjection(packet), deps);
+        if (!existing) {
+          await insertDraftPacketNow(draftCloudProjection(packet), deps);
+        } else if (existing.status === 'DRAFT') {
+          await updatePacketNow(draftCloudProjection(packet), 'DRAFT', deps);
+        } else {
+          result.integrityConflicts++;
+          continue;
+        }
         await reconcileDraftMembership(packet, membership, remoteItemRows, result, deps);
-        await upsertPacketNow(readyCloudProjection(packet), deps);
-        await upsertPacketNow(sharedCloudProjection(packet), deps);
+        await updatePacketNow(readyCloudProjection(packet), 'DRAFT', deps);
+        await updatePacketNow(sharedCloudProjection(packet), 'READY', deps);
         useCarrierPacketsStore.getState().setPacketCloudStatus(packet.id, 'synced');
         result.packetsSynced++;
         continue;
@@ -696,7 +797,7 @@ export async function syncPendingCarrierPackets(
           sharedSnapshotMatchesSupersededTransition(existing, packet) &&
           carrierPacketItemsExactlyMatch(existingItems, membership)
         ) {
-          await upsertPacketNow(supersededCloudProjection(packet), deps);
+          await updatePacketNow(supersededCloudProjection(packet), 'SHARED', deps);
           useCarrierPacketsStore.getState().setPacketCloudStatus(packet.id, 'synced');
           result.packetsSynced++;
           continue;
@@ -713,17 +814,24 @@ export async function syncPendingCarrierPackets(
             result.integrityConflicts++;
             continue;
           }
-          await upsertPacketNow(sharedCloudProjection(packet), deps);
-          await upsertPacketNow(supersededCloudProjection(packet), deps);
+          await updatePacketNow(sharedCloudProjection(packet), 'READY', deps);
+          await updatePacketNow(supersededCloudProjection(packet), 'SHARED', deps);
           useCarrierPacketsStore.getState().setPacketCloudStatus(packet.id, 'synced');
           result.packetsSynced++;
           continue;
         }
-        await upsertPacketNow(draftCloudProjection(packet), deps);
+        if (!existing) {
+          await insertDraftPacketNow(draftCloudProjection(packet), deps);
+        } else if (existing.status === 'DRAFT') {
+          await updatePacketNow(draftCloudProjection(packet), 'DRAFT', deps);
+        } else {
+          result.integrityConflicts++;
+          continue;
+        }
         await reconcileDraftMembership(packet, membership, remoteItemRows, result, deps);
-        await upsertPacketNow(readyCloudProjection(packet), deps);
-        await upsertPacketNow(sharedCloudProjection(packet), deps);
-        await upsertPacketNow(supersededCloudProjection(packet), deps);
+        await updatePacketNow(readyCloudProjection(packet), 'DRAFT', deps);
+        await updatePacketNow(sharedCloudProjection(packet), 'READY', deps);
+        await updatePacketNow(supersededCloudProjection(packet), 'SHARED', deps);
         useCarrierPacketsStore.getState().setPacketCloudStatus(packet.id, 'synced');
         result.packetsSynced++;
         continue;
@@ -731,6 +839,8 @@ export async function syncPendingCarrierPackets(
     } catch (err) {
       if (err instanceof CloudSyncDeniedError) {
         useCarrierPacketsStore.getState().reconcileCloudStatuses(deps.ctx());
+      } else if (err instanceof CarrierPacketRemoteConflictError) {
+        result.integrityConflicts++;
       }
     }
   }

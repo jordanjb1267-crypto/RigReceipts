@@ -13,17 +13,29 @@ import { useCarrierProfileStore } from '@/store/carrierProfile';
 import { useRoadWalletStore } from '@/store/roadWallet';
 import { useSubscriptionStore } from '@/store/subscription';
 
-import { CarrierRemote, recoverCarrierPacketsFromCloud, syncPendingCarrierPackets } from '../carrierPacketSync';
+import type { CarrierPacketStatus } from '@/domain';
+import {
+  CarrierPacketRemoteConflictError,
+  CarrierRemote,
+  recoverCarrierPacketsFromCloud,
+  syncPendingCarrierPackets,
+} from '../carrierPacketSync';
 
 class FakeCarrierRemote implements CarrierRemote {
   profiles: Record<string, unknown>[] = [];
   packets: Record<string, unknown>[] = [];
   items: Record<string, unknown>[] = [];
   upserts: { table: string; row: Record<string, unknown> }[] = [];
+  packetWrites: {
+    op: 'insert' | 'update';
+    row: Record<string, unknown>;
+    expectedCurrentStatus?: CarrierPacketStatus;
+  }[] = [];
   deletes: string[] = [];
   failItemOnce = false;
   failPacketUpsertWhen: ((row: Record<string, unknown>) => boolean) | null = null;
   onFetchPackets: (() => void) | null = null;
+  hidePacketsOnFetch = false;
 
   async fetchProfiles() {
     return this.profiles;
@@ -33,6 +45,7 @@ class FakeCarrierRemote implements CarrierRemote {
   }
   async fetchPackets() {
     this.onFetchPackets?.();
+    if (this.hidePacketsOnFetch) return [];
     return this.packets;
   }
   async fetchItems() {
@@ -50,9 +63,29 @@ class FakeCarrierRemote implements CarrierRemote {
   async upsertTemplate(row: Record<string, unknown>) {
     this.upserts.push({ table: 'carrier_packet_templates', row });
   }
-  async upsertPacket(row: Record<string, unknown>) {
+  async insertPacketDraft(row: Record<string, unknown>) {
+    if (row.status !== 'DRAFT') {
+      throw new CarrierPacketRemoteConflictError('invalid_insert_status', String(row.status));
+    }
+    if (this.packets.some((p) => p.id === row.id)) {
+      throw new CarrierPacketRemoteConflictError('duplicate_insert', String(row.id));
+    }
     if (this.failPacketUpsertWhen?.(row)) throw new Error('packet upsert crashed');
     this.upserts.push({ table: 'carrier_packets', row });
+    this.packetWrites.push({ op: 'insert', row });
+    this.packets = [...this.packets, row];
+  }
+  async updatePacket(row: Record<string, unknown>, expectedCurrentStatus: CarrierPacketStatus) {
+    const current = this.packets.find((p) => p.id === row.id);
+    if (!current || current.status !== expectedCurrentStatus) {
+      throw new CarrierPacketRemoteConflictError(
+        'expected_status_miss',
+        `${String(row.id)} expected ${expectedCurrentStatus}`,
+      );
+    }
+    if (this.failPacketUpsertWhen?.(row)) throw new Error('packet upsert crashed');
+    this.upserts.push({ table: 'carrier_packets', row });
+    this.packetWrites.push({ op: 'update', row, expectedCurrentStatus });
     this.packets = this.packets.filter((p) => p.id !== row.id);
     this.packets.push(row);
   }
@@ -1163,5 +1196,205 @@ describe('IR-R1 — atomic recovery and return-to-draft proof', () => {
     const out = await syncPendingCarrierPackets(deps());
     expect(out.integrityConflicts).toBeGreaterThan(0);
     expect(remote.packets[0]?.status).toBe('SHARED');
+  });
+});
+
+describe('IR-R4 — packet INSERT vs UPDATE write shape', () => {
+  const draftPacket = (packetId: string, over: Record<string, unknown> = {}) => ({
+    id: packetId,
+    accountOwnerId: 'user-a' as const,
+    status: 'DRAFT' as const,
+    name: 'Pack',
+    templateSourceKind: 'BUILTIN' as const,
+    templateSourceId: null,
+    templateCode: 'STANDARD_BROKER_PACKET' as const,
+    templateSnapshot: STANDARD_BROKER_PACKET,
+    carrierProfileId: null,
+    profileSnapshot: null,
+    recipientLabel: null,
+    shareMethod: null,
+    readyAt: null,
+    sharedAt: null,
+    supersedesPacketId: null,
+    cloudStatus: 'pending_sync' as const,
+    createdAt: 1,
+    updatedAt: 2,
+    ...over,
+  });
+
+  it('new local DRAFT inserts DRAFT and never upserts', async () => {
+    const packetId = id(80);
+    useCarrierPacketsStore.getState().addPacket(draftPacket(packetId), []);
+    const out = await syncPendingCarrierPackets(deps());
+    expect(out.packetsSynced).toBe(1);
+    expect(remote.packetWrites).toEqual([
+      expect.objectContaining({ op: 'insert', row: expect.objectContaining({ status: 'DRAFT', id: packetId }) }),
+    ]);
+    expect(useCarrierPacketsStore.getState().packets[0]?.cloudStatus).toBe('synced');
+  });
+
+  it('new local READY inserts DRAFT then updates DRAFT→READY', async () => {
+    const packetId = id(81);
+    useCarrierPacketsStore.getState().addPacket(
+      draftPacket(packetId, { status: 'READY', readyAt: 1, name: 'Ready' }),
+      [],
+    );
+    const out = await syncPendingCarrierPackets(deps());
+    expect(out.packetsSynced).toBe(1);
+    expect(remote.packetWrites.map((w) => [w.op, w.row.status, w.expectedCurrentStatus])).toEqual([
+      ['insert', 'DRAFT', undefined],
+      ['update', 'READY', 'DRAFT'],
+    ]);
+    expect(remote.packets[0]?.status).toBe('READY');
+    expect(useCarrierPacketsStore.getState().packets[0]?.cloudStatus).toBe('synced');
+  });
+
+  it('existing DRAFT → READY updates with expected DRAFT, never inserts', async () => {
+    const packetId = id(82);
+    const draft = draftPacket(packetId);
+    remote.packets = [toRemoteCarrierPacketRow(draft, 'user-a') as unknown as Record<string, unknown>];
+    useCarrierPacketsStore.getState().addPacket(
+      draftPacket(packetId, { status: 'READY', readyAt: 9, recipientLabel: 'Broker' }),
+      [],
+    );
+    const out = await syncPendingCarrierPackets(deps());
+    expect(out.packetsSynced).toBe(1);
+    expect(remote.packetWrites.every((w) => w.op === 'update')).toBe(true);
+    expect(remote.packetWrites.map((w) => [w.row.status, w.expectedCurrentStatus])).toEqual([
+      ['DRAFT', 'DRAFT'],
+      ['READY', 'DRAFT'],
+    ]);
+    expect(remote.packets[0]?.status).toBe('READY');
+  });
+
+  it('existing READY → SHARED updates expected READY', async () => {
+    const packetId = id(83);
+    const ready = draftPacket(packetId, {
+      status: 'READY',
+      readyAt: 1,
+      recipientLabel: 'Broker',
+    });
+    remote.packets = [toRemoteCarrierPacketRow(ready, 'user-a') as unknown as Record<string, unknown>];
+    useCarrierPacketsStore.getState().addPacket(
+      draftPacket(packetId, {
+        status: 'SHARED',
+        readyAt: 1,
+        sharedAt: 2,
+        shareMethod: 'OTHER',
+        recipientLabel: 'Broker',
+      }),
+      [],
+    );
+    const out = await syncPendingCarrierPackets(deps());
+    expect(out.integrityConflicts).toBe(0);
+    expect(out.packetsSynced).toBe(1);
+    expect(remote.packetWrites).toEqual([
+      expect.objectContaining({
+        op: 'update',
+        expectedCurrentStatus: 'READY',
+        row: expect.objectContaining({ status: 'SHARED' }),
+      }),
+    ]);
+  });
+
+  it('existing SHARED → SUPERSEDED updates expected SHARED', async () => {
+    const packetId = id(84);
+    const shared = draftPacket(packetId, {
+      status: 'SHARED',
+      readyAt: 1,
+      sharedAt: 2,
+      shareMethod: 'OTHER',
+      recipientLabel: 'Broker',
+    });
+    remote.packets = [toRemoteCarrierPacketRow(shared, 'user-a') as unknown as Record<string, unknown>];
+    useCarrierPacketsStore.getState().addPacket({ ...shared, status: 'SUPERSEDED', cloudStatus: 'pending_sync' }, []);
+    const out = await syncPendingCarrierPackets(deps());
+    expect(out.packetsSynced).toBe(1);
+    expect(remote.packetWrites).toEqual([
+      expect.objectContaining({
+        op: 'update',
+        expectedCurrentStatus: 'SHARED',
+        row: expect.objectContaining({ status: 'SUPERSEDED' }),
+      }),
+    ]);
+  });
+
+  it('explicit READY return stages UPDATE READY→base DRAFT then UPDATE DRAFT edits', async () => {
+    const packetId = id(85);
+    const ready = draftPacket(packetId, { status: 'READY', readyAt: 1, name: 'Pack' });
+    const proof = createCarrierReadyReturnProof({ packet: ready, items: [], now: 9 });
+    useCarrierPacketsStore.getState().addPacket(ready, []);
+    useCarrierPacketsStore.getState().upsertReadyReturnProof(proof);
+    useCarrierPacketsStore.getState().transitionPacket(packetId, 'DRAFT', {
+      readyAt: null,
+      updatedAt: 20,
+      cloudStatus: 'pending_sync',
+    });
+    useCarrierPacketsStore.getState().updateDraftPacket(packetId, { name: 'Edited', updatedAt: 21 }, []);
+    remote.packets = [toRemoteCarrierPacketRow(ready, 'user-a') as unknown as Record<string, unknown>];
+    const out = await syncPendingCarrierPackets(deps());
+    expect(out.packetsSynced).toBe(1);
+    expect(remote.packetWrites.map((w) => [w.op, w.row.status, w.row.name, w.expectedCurrentStatus])).toEqual([
+      ['update', 'DRAFT', 'Pack', 'READY'],
+      ['update', 'DRAFT', 'Edited', 'DRAFT'],
+    ]);
+    expect(useCarrierPacketsStore.getState().readyReturnProofFor(packetId, 'user-a')).toBeNull();
+    expect(useCarrierPacketsStore.getState().packets[0]?.cloudStatus).toBe('synced');
+  });
+
+  it('expected-status miss does not mark local synced', async () => {
+    const packetId = id(86);
+    const draft = draftPacket(packetId, { name: 'Still draft' });
+    remote.packets = [toRemoteCarrierPacketRow(draft, 'user-a') as unknown as Record<string, unknown>];
+    useCarrierPacketsStore.getState().addPacket(draft, []);
+    remote.updatePacket = async () => {
+      throw new CarrierPacketRemoteConflictError('expected_status_miss', packetId);
+    };
+    const out = await syncPendingCarrierPackets(deps());
+    expect(out.packetsSynced).toBe(0);
+    expect(out.integrityConflicts).toBeGreaterThan(0);
+    expect(useCarrierPacketsStore.getState().packets[0]?.cloudStatus).toBe('pending_sync');
+    expect(remote.packets[0]?.status).toBe('DRAFT');
+    expect(remote.packets[0]?.name).toBe('Still draft');
+  });
+
+  it('duplicate create race after absent read does not overwrite the existing row', async () => {
+    const packetId = id(87);
+    const existing = draftPacket(packetId, { name: 'Authoritative remote' });
+    remote.packets = [toRemoteCarrierPacketRow(existing, 'user-a') as unknown as Record<string, unknown>];
+    remote.hidePacketsOnFetch = true;
+    useCarrierPacketsStore.getState().addPacket(draftPacket(packetId, { name: 'Local stale create' }), []);
+    const out = await syncPendingCarrierPackets(deps());
+    expect(out.packetsSynced).toBe(0);
+    expect(out.integrityConflicts).toBeGreaterThan(0);
+    expect(useCarrierPacketsStore.getState().packets[0]?.cloudStatus).toBe('pending_sync');
+    expect(remote.packets[0]?.name).toBe('Authoritative remote');
+    expect(remote.packetWrites).toHaveLength(0);
+  });
+
+  it('crash before READY update leaves remote DRAFT and does not increment packetsSynced', async () => {
+    const packetId = id(88);
+    useCarrierPacketsStore.getState().addPacket(
+      draftPacket(packetId, { status: 'READY', readyAt: 1 }),
+      [],
+    );
+    remote.failPacketUpsertWhen = (row) => row.status === 'READY';
+    const out = await syncPendingCarrierPackets(deps());
+    expect(out.packetsSynced).toBe(0);
+    expect(useCarrierPacketsStore.getState().packets[0]?.cloudStatus).toBe('pending_sync');
+    expect(remote.packets[0]?.status).toBe('DRAFT');
+    expect(remote.packetWrites.map((w) => [w.op, w.row.status])).toEqual([['insert', 'DRAFT']]);
+  });
+
+  it('Fake INSERT rejects READY and duplicate id instead of updating', async () => {
+    await expect(remote.insertPacketDraft({ id: 'x', status: 'READY' })).rejects.toMatchObject({
+      reason: 'invalid_insert_status',
+    });
+    await remote.insertPacketDraft({ id: 'dup', status: 'DRAFT' });
+    await expect(remote.insertPacketDraft({ id: 'dup', status: 'DRAFT', name: 'other' })).rejects.toMatchObject({
+      reason: 'duplicate_insert',
+    });
+    expect(remote.packets).toHaveLength(1);
+    expect(remote.packets[0]?.name).toBeUndefined();
   });
 });
