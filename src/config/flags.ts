@@ -21,6 +21,15 @@ export const FEATURE_FLAGS = [
   'mileage_geofence_suggestions_enabled',
   'odometer_reconciliation_enabled',
   'revised_onboarding_enabled',
+  // Refinement Pass 0 — Road Wallet / Quick Present / Carrier Packets. All ship
+  // OFF; none may be turned on in production by this candidate.
+  'road_wallet_enabled',
+  'quick_present_enabled',
+  'document_expiry_alerts_enabled',
+  'carrier_profile_enabled',
+  'carrier_packet_builder_enabled',
+  'carrier_packet_history_enabled',
+  'multi_unit_documents_enabled',
 ] as const;
 
 export type FeatureFlag = (typeof FEATURE_FLAGS)[number];
@@ -62,6 +71,13 @@ export const DEFAULT_FLAGS: Record<FeatureFlag, FlagConfig> = {
   mileage_geofence_suggestions_enabled: { state: 'off' },
   odometer_reconciliation_enabled: { state: 'off' },
   revised_onboarding_enabled: { state: 'off' },
+  road_wallet_enabled: { state: 'off' },
+  quick_present_enabled: { state: 'off' },
+  document_expiry_alerts_enabled: { state: 'off' },
+  carrier_profile_enabled: { state: 'off' },
+  carrier_packet_builder_enabled: { state: 'off' },
+  carrier_packet_history_enabled: { state: 'off' },
+  multi_unit_documents_enabled: { state: 'off' },
 };
 
 // Static env access (Expo inlines EXPO_PUBLIC_* at build time; dynamic keys are
@@ -82,6 +98,13 @@ const ENV_OVERRIDES: Record<FeatureFlag, string | undefined> = {
     process.env.EXPO_PUBLIC_FF_MILEAGE_GEOFENCE_SUGGESTIONS_ENABLED,
   odometer_reconciliation_enabled: process.env.EXPO_PUBLIC_FF_ODOMETER_RECONCILIATION_ENABLED,
   revised_onboarding_enabled: process.env.EXPO_PUBLIC_FF_REVISED_ONBOARDING_ENABLED,
+  road_wallet_enabled: process.env.EXPO_PUBLIC_FF_ROAD_WALLET_ENABLED,
+  quick_present_enabled: process.env.EXPO_PUBLIC_FF_QUICK_PRESENT_ENABLED,
+  document_expiry_alerts_enabled: process.env.EXPO_PUBLIC_FF_DOCUMENT_EXPIRY_ALERTS_ENABLED,
+  carrier_profile_enabled: process.env.EXPO_PUBLIC_FF_CARRIER_PROFILE_ENABLED,
+  carrier_packet_builder_enabled: process.env.EXPO_PUBLIC_FF_CARRIER_PACKET_BUILDER_ENABLED,
+  carrier_packet_history_enabled: process.env.EXPO_PUBLIC_FF_CARRIER_PACKET_HISTORY_ENABLED,
+  multi_unit_documents_enabled: process.env.EXPO_PUBLIC_FF_MULTI_UNIT_DOCUMENTS_ENABLED,
 };
 
 function envOverride(flag: FeatureFlag): FlagState | null {
