@@ -425,6 +425,8 @@ export function returnCarrierPacketToDraft(
   }
   useCarrierPacketsStore.getState().transitionPacket(packet.id, 'DRAFT', {
     readyAt: null,
+    sharedAt: null,
+    shareMethod: null,
     updatedAt: deps.now(),
     cloudStatus: cloudAfter(ctx, true),
   });

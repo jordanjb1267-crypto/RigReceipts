@@ -32,6 +32,7 @@ export const CARRIER_PACKET_TEMPLATE_SCHEMA_VERSION = 1 as const;
 export const CARRIER_PACKET_MAX_REQUIREMENTS = 30;
 export const CARRIER_PROFILE_NAME_MAX = 120;
 export const CARRIER_PACKET_NAME_MAX = 80;
+export const CARRIER_PACKET_RECIPIENT_MAX = 120;
 export const STANDARD_BROKER_PACKET_CODE = 'STANDARD_BROKER_PACKET' as const;
 
 export const CARRIER_IDENTITY_SOURCES = ['USER_ENTERED'] as const;
@@ -78,6 +79,39 @@ const bounded = (v: unknown, max: number): v is string =>
   typeof v === 'string' && v.length > 0 && v.length <= max;
 const optionalBounded = (v: unknown, max: number): v is string | null | undefined =>
   v === null || v === undefined || (typeof v === 'string' && v.length <= max);
+
+/**
+ * Optional remote scalar (Pass 3.2 / Road Wallet H0B): accept a non-empty
+ * string or null/absent. A number, boolean or object is malformed — do not
+ * coerce it to null and accept the row.
+ */
+const optStrStrict = (v: unknown): string | null | undefined => {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'string') return v.length > 0 ? v : null;
+  return undefined;
+};
+
+const optShareMethod = (v: unknown): CarrierShareMethod | null | undefined => {
+  if (v === null || v === undefined) return null;
+  if (isEnum(CARRIER_SHARE_METHODS, v)) return v;
+  return undefined;
+};
+
+const reqIsoMs = (v: unknown): number | null => {
+  if (typeof v !== 'string') return null;
+  const ms = Date.parse(v);
+  return Number.isFinite(ms) ? ms : null;
+};
+
+/** null/absent → null; valid ISO string → ms; anything else → undefined (reject). */
+const optIsoMsStrict = (v: unknown): number | null | undefined => {
+  if (v === null || v === undefined) return null;
+  if (typeof v !== 'string') return undefined;
+  const ms = Date.parse(v);
+  return Number.isFinite(ms) ? ms : undefined;
+};
+
+const isFiniteTs = (v: number): boolean => typeof v === 'number' && Number.isFinite(v);
 
 export interface CarrierProfile {
   id: string;
@@ -268,19 +302,33 @@ export const STANDARD_BROKER_PACKET: CarrierPacketTemplateDefinition = {
   ],
 };
 
-export function validateCarrierProfile(profile: CarrierProfile): void {
-  if (!isOpaqueId(profile.id)) throw new Error('carrier profile id is not an opaque id');
-  if (profile.accountOwnerId !== null && typeof profile.accountOwnerId !== 'string') {
-    throw new Error('invalid account owner');
-  }
-  if (!bounded(profile.legalName.trim(), CARRIER_PROFILE_NAME_MAX)) {
+type CarrierIdentityFields = Pick<
+  CarrierProfileSnapshot,
+  | 'legalName'
+  | 'dbaName'
+  | 'usdotNumber'
+  | 'mcNumber'
+  | 'addressLine1'
+  | 'addressLine2'
+  | 'city'
+  | 'stateProvince'
+  | 'postalCode'
+  | 'contactName'
+  | 'contactEmail'
+  | 'contactPhone'
+  | 'equipmentTypes'
+  | 'identitySource'
+>;
+
+const validateCarrierIdentityFields = (row: CarrierIdentityFields): void => {
+  if (!bounded(row.legalName.trim(), CARRIER_PROFILE_NAME_MAX)) {
     throw new Error('legalName is required');
   }
-  if (profile.identitySource !== 'USER_ENTERED') throw new Error('identitySource must be USER_ENTERED');
-  if (!Array.isArray(profile.equipmentTypes) || profile.equipmentTypes.length > 20) {
+  if (row.identitySource !== 'USER_ENTERED') throw new Error('identitySource must be USER_ENTERED');
+  if (!Array.isArray(row.equipmentTypes) || row.equipmentTypes.length > 20) {
     throw new Error('equipmentTypes out of bounds');
   }
-  for (const eq of profile.equipmentTypes) {
+  for (const eq of row.equipmentTypes) {
     if (!bounded(eq, 40)) throw new Error('equipment type out of bounds');
   }
   for (const [key, max] of [
@@ -296,10 +344,26 @@ export function validateCarrierProfile(profile: CarrierProfile): void {
     ['contactEmail', 80],
     ['contactPhone', 40],
   ] as const) {
-    if (!optionalBounded(profile[key], max)) throw new Error(`${key} out of bounds`);
+    if (!optionalBounded(row[key], max)) throw new Error(`${key} out of bounds`);
   }
-  if ('ein' in (profile as object) || 'ssn' in (profile as object) || 'bankAccount' in (profile as object)) {
+  if ('ein' in (row as object) || 'ssn' in (row as object) || 'bankAccount' in (row as object)) {
     throw new Error('forbidden financial scalar');
+  }
+};
+
+export function validateCarrierProfileSnapshot(snapshot: CarrierProfileSnapshot): void {
+  validateCarrierIdentityFields(snapshot);
+  if (!isFiniteTs(snapshot.capturedAt)) throw new Error('capturedAt must be a finite timestamp');
+}
+
+export function validateCarrierProfile(profile: CarrierProfile): void {
+  if (!isOpaqueId(profile.id)) throw new Error('carrier profile id is not an opaque id');
+  if (profile.accountOwnerId !== null && typeof profile.accountOwnerId !== 'string') {
+    throw new Error('invalid account owner');
+  }
+  validateCarrierIdentityFields(profile);
+  if (!isFiniteTs(profile.createdAt) || !isFiniteTs(profile.updatedAt)) {
+    throw new Error('profile timestamps must be finite');
   }
 }
 
@@ -370,6 +434,29 @@ export function validateCarrierPacketTemplate(template: CarrierPacketTemplate): 
   validateTemplateDefinition(template.definition);
 }
 
+export function assertCarrierPacketStatusShape(packet: CarrierPacket): void {
+  const { status, readyAt, sharedAt, shareMethod } = packet;
+  if (status === 'DRAFT') {
+    if (readyAt !== null || sharedAt !== null || shareMethod !== null) {
+      throw new Error('DRAFT status-shape violation');
+    }
+    return;
+  }
+  if (status === 'READY') {
+    if (readyAt === null || sharedAt !== null || shareMethod !== null) {
+      throw new Error('READY status-shape violation');
+    }
+    return;
+  }
+  if (status === 'SHARED' || status === 'SUPERSEDED') {
+    if (readyAt === null || sharedAt === null || shareMethod === null) {
+      throw new Error(`${status} status-shape violation`);
+    }
+    return;
+  }
+  throw new Error('unknown packet status');
+}
+
 export function validateCarrierPacket(packet: CarrierPacket): void {
   if (!isOpaqueId(packet.id)) throw new Error('packet id is not an opaque id');
   if (packet.accountOwnerId !== null && typeof packet.accountOwnerId !== 'string') {
@@ -390,6 +477,15 @@ export function validateCarrierPacket(packet: CarrierPacket): void {
     }
   }
   validateTemplateDefinition(packet.templateSnapshot);
+  if (packet.carrierProfileId !== null && !isOpaqueId(packet.carrierProfileId)) {
+    throw new Error('carrierProfileId is not an opaque id');
+  }
+  if (packet.profileSnapshot !== null) {
+    validateCarrierProfileSnapshot(packet.profileSnapshot);
+  }
+  if (!optionalBounded(packet.recipientLabel, CARRIER_PACKET_RECIPIENT_MAX)) {
+    throw new Error('recipientLabel out of bounds');
+  }
   if (packet.shareMethod !== null && !isEnum(CARRIER_SHARE_METHODS, packet.shareMethod)) {
     throw new Error('unknown shareMethod');
   }
@@ -399,6 +495,16 @@ export function validateCarrierPacket(packet: CarrierPacket): void {
   if (packet.supersedesPacketId === packet.id) {
     throw new Error('packet cannot supersede itself');
   }
+  if (!isFiniteTs(packet.createdAt) || !isFiniteTs(packet.updatedAt)) {
+    throw new Error('packet timestamps must be finite');
+  }
+  if (packet.readyAt !== null && !isFiniteTs(packet.readyAt)) {
+    throw new Error('readyAt must be a finite timestamp');
+  }
+  if (packet.sharedAt !== null && !isFiniteTs(packet.sharedAt)) {
+    throw new Error('sharedAt must be a finite timestamp');
+  }
+  assertCarrierPacketStatusShape(packet);
 }
 
 export function validateCarrierPacketItem(item: CarrierPacketItem): void {
@@ -410,11 +516,103 @@ export function validateCarrierPacketItem(item: CarrierPacketItem): void {
     throw new Error('invalid account owner');
   }
   if (!bounded(item.requirementKey, 40)) throw new Error('requirement key required');
+  if (!bounded(item.requirementLabel, 80)) throw new Error('requirement label required');
+  if (typeof item.required !== 'boolean') throw new Error('required flag missing');
   if (!Number.isSafeInteger(item.position) || item.position < 0) {
     throw new Error('position must be a safe integer ≥ 0');
   }
   if (!isEnum(DOCUMENT_KINDS, item.documentKindSnapshot)) throw new Error('unknown documentKind');
   if (!isEnum(SENSITIVITIES, item.sensitivitySnapshot)) throw new Error('unknown sensitivity');
+  if (!isFiniteTs(item.createdAt)) throw new Error('item createdAt must be a finite timestamp');
+}
+
+const itemIntegrityMismatch = (
+  requirementKey: string,
+  message: string,
+): CarrierReviewFinding => ({
+  code: 'INTEGRITY_MISMATCH',
+  severity: 'BLOCKER',
+  requirementKey,
+  message,
+});
+
+/**
+ * Template-requirement ↔ packet-item integrity (Pass 3.2).
+ * A W-9 requirement pointing at INSURANCE is never a valid packet item.
+ * Live document-kind / exact-version ownership is checked when those records
+ * are supplied (review + recovery after Road Wallet resolution).
+ */
+export function validatePacketItemAgainstTemplate(
+  packet: CarrierPacket,
+  item: CarrierPacketItem,
+  live?: {
+    document?: OperationalDocument | null;
+    version?: DocumentVersion | null;
+  },
+): CarrierReviewFinding | null {
+  const requirement = packet.templateSnapshot.documentRequirements.find(
+    (req) => req.key === item.requirementKey,
+  );
+  if (!requirement) {
+    return itemIntegrityMismatch(
+      item.requirementKey,
+      `Unknown requirement key ${item.requirementKey}.`,
+    );
+  }
+  if (
+    item.requirementLabel !== requirement.label ||
+    item.required !== requirement.required ||
+    item.position !== requirement.position ||
+    item.documentKindSnapshot !== requirement.documentKind
+  ) {
+    return itemIntegrityMismatch(
+      item.requirementKey,
+      `Packet item ${requirement.label} does not match the template snapshot.`,
+    );
+  }
+  const document = live?.document;
+  if (document) {
+    if (document.documentKind !== requirement.documentKind) {
+      return itemIntegrityMismatch(
+        item.requirementKey,
+        `Live document kind for ${requirement.label} does not match the template requirement.`,
+      );
+    }
+    if (document.accountOwnerId !== packet.accountOwnerId) {
+      return itemIntegrityMismatch(
+        item.requirementKey,
+        `Live document owner for ${requirement.label} does not match the packet.`,
+      );
+    }
+    if (document.id !== item.operationalDocumentId) {
+      return itemIntegrityMismatch(
+        item.requirementKey,
+        `Live document id for ${requirement.label} does not match the packet item.`,
+      );
+    }
+  }
+  const version = live?.version;
+  if (version) {
+    if (version.operationalDocumentId !== item.operationalDocumentId) {
+      return itemIntegrityMismatch(
+        item.requirementKey,
+        `Exact version for ${requirement.label} does not belong to the selected document.`,
+      );
+    }
+    if (version.accountOwnerId !== packet.accountOwnerId) {
+      return itemIntegrityMismatch(
+        item.requirementKey,
+        `Exact version owner for ${requirement.label} does not match the packet.`,
+      );
+    }
+    if (document && version.operationalDocumentId !== document.id) {
+      return itemIntegrityMismatch(
+        item.requirementKey,
+        `Exact version for ${requirement.label} no longer matches the wallet record.`,
+      );
+    }
+  }
+  return null;
 }
 
 export function assertPacketMutable(packet: CarrierPacket): void {
@@ -436,6 +634,108 @@ export function canTransitionPacket(
   if (from === 'READY' && to === 'SHARED') return true;
   if (from === 'SHARED' && to === 'SUPERSEDED') return true;
   return false;
+}
+
+/**
+ * Lifecycle-specific cloud projections (Pass 3.2).
+ * A SHARED/SUPERSEDED local packet must not be staged by flipping `status`
+ * alone — DRAFT/READY rows would otherwise carry share-time metadata.
+ */
+export function draftCloudProjection(packet: CarrierPacket): CarrierPacket {
+  return {
+    ...packet,
+    status: 'DRAFT',
+    readyAt: null,
+    sharedAt: null,
+    shareMethod: null,
+  };
+}
+
+export function readyCloudProjection(packet: CarrierPacket): CarrierPacket {
+  return {
+    ...packet,
+    status: 'READY',
+    readyAt: packet.readyAt,
+    sharedAt: null,
+    shareMethod: null,
+  };
+}
+
+export function sharedCloudProjection(packet: CarrierPacket): CarrierPacket {
+  return {
+    ...packet,
+    status: 'SHARED',
+    readyAt: packet.readyAt,
+    sharedAt: packet.sharedAt,
+    shareMethod: packet.shareMethod,
+  };
+}
+
+export function supersededCloudProjection(packet: CarrierPacket): CarrierPacket {
+  return {
+    ...packet,
+    status: 'SUPERSEDED',
+    readyAt: packet.readyAt,
+    sharedAt: packet.sharedAt,
+    shareMethod: packet.shareMethod,
+  };
+}
+
+/** Reviewed snapshot fields that READY → SHARED / SUPERSEDED must preserve. */
+export function reviewedCarrierPacketSnapshot(packet: CarrierPacket) {
+  return {
+    id: packet.id,
+    accountOwnerId: packet.accountOwnerId,
+    createdAt: packet.createdAt,
+    name: packet.name,
+    templateSourceKind: packet.templateSourceKind,
+    templateSourceId: packet.templateSourceId,
+    templateCode: packet.templateCode,
+    templateSnapshot: packet.templateSnapshot,
+    carrierProfileId: packet.carrierProfileId,
+    profileSnapshot: packet.profileSnapshot,
+    readyAt: packet.readyAt,
+    supersedesPacketId: packet.supersedesPacketId,
+  };
+}
+
+/**
+ * Remote READY must match the local SHARED/SUPERSEDED reviewed snapshot
+ * before a share-time promotion is written. Status, sharedAt, shareMethod,
+ * recipientLabel, and updatedAt are the only legitimate Mark Shared deltas.
+ */
+export function readySnapshotMatchesSharedTransition(
+  remoteReady: CarrierPacket,
+  localShared: CarrierPacket,
+): boolean {
+  if (remoteReady.status !== 'READY') return false;
+  if (localShared.status !== 'SHARED' && localShared.status !== 'SUPERSEDED') return false;
+  return (
+    JSON.stringify(reviewedCarrierPacketSnapshot(remoteReady)) ===
+    JSON.stringify(reviewedCarrierPacketSnapshot(localShared))
+  );
+}
+
+export function carrierPacketItemsExactlyMatch(
+  a: readonly CarrierPacketItem[],
+  b: readonly CarrierPacketItem[],
+): boolean {
+  const key = (item: CarrierPacketItem) =>
+    JSON.stringify({
+      id: item.id,
+      requirementKey: item.requirementKey,
+      requirementLabel: item.requirementLabel,
+      required: item.required,
+      position: item.position,
+      operationalDocumentId: item.operationalDocumentId,
+      documentVersionId: item.documentVersionId,
+      documentKindSnapshot: item.documentKindSnapshot,
+      sensitivitySnapshot: item.sensitivitySnapshot,
+      expiresAtSnapshot: item.expiresAtSnapshot,
+      titleSnapshot: item.titleSnapshot,
+      createdAt: item.createdAt,
+    });
+  return a.map(key).sort().join('|') === b.map(key).sort().join('|');
 }
 
 export function freezePacketItem(input: {
@@ -539,6 +839,14 @@ export function reviewCarrierPacket(input: {
     }
     const doc = input.documents.find((d) => d.id === item.operationalDocumentId);
     const version = input.versions.find((v) => v.id === item.documentVersionId);
+    const templateMismatch = validatePacketItemAgainstTemplate(input.packet, item, {
+      document: doc,
+      version,
+    });
+    if (templateMismatch) {
+      findings.push(templateMismatch);
+      continue;
+    }
     if (
       !doc ||
       !version ||
@@ -626,6 +934,17 @@ export function reviewCarrierPacket(input: {
           message: `${req.label} is not available on this device and has no backup to restore.`,
         });
       }
+    }
+  }
+
+  for (const item of input.items) {
+    if (!def.documentRequirements.some((req) => req.key === item.requirementKey)) {
+      findings.push(
+        itemIntegrityMismatch(
+          item.requirementKey,
+          `Unknown requirement key ${item.requirementKey}.`,
+        ),
+      );
     }
   }
 
@@ -889,26 +1208,63 @@ export function fromRemoteCarrierPacketRow(
   if (!isEnum(CARRIER_PACKET_STATUSES, row.status)) return null;
   if (typeof row.name !== 'string') return null;
   if (!isEnum(CARRIER_TEMPLATE_SOURCE_KINDS, row.template_source_kind)) return null;
-  const createdAt = Date.parse(String(row.created_at));
-  const updatedAt = Date.parse(String(row.updated_at));
-  if (!Number.isFinite(createdAt) || !Number.isFinite(updatedAt)) return null;
+  const createdAt = reqIsoMs(row.created_at);
+  const updatedAt = reqIsoMs(row.updated_at);
+  if (createdAt === null || updatedAt === null) return null;
+  const templateSourceId = optStrStrict(row.template_source_id);
+  const templateCode = optStrStrict(row.template_code);
+  const carrierProfileId = optStrStrict(row.carrier_profile_id);
+  const supersedesPacketId = optStrStrict(row.supersedes_packet_id);
+  const recipientLabel = optStrStrict(row.recipient_label);
+  const shareMethod = optShareMethod(row.share_method);
+  const readyAt = optIsoMsStrict(row.ready_at);
+  const sharedAt = optIsoMsStrict(row.shared_at);
+  if (
+    templateSourceId === undefined ||
+    templateCode === undefined ||
+    carrierProfileId === undefined ||
+    supersedesPacketId === undefined ||
+    recipientLabel === undefined ||
+    shareMethod === undefined ||
+    readyAt === undefined ||
+    sharedAt === undefined
+  ) {
+    return null;
+  }
+  if (!isRec(row.template_snapshot) || Array.isArray(row.template_snapshot)) return null;
+  let templateSnapshot: CarrierPacketTemplateDefinition;
+  try {
+    templateSnapshot = row.template_snapshot as unknown as CarrierPacketTemplateDefinition;
+    validateTemplateDefinition(templateSnapshot);
+  } catch {
+    return null;
+  }
+  let profileSnapshot: CarrierProfileSnapshot | null = null;
+  if (row.profile_snapshot !== null && row.profile_snapshot !== undefined) {
+    if (!isRec(row.profile_snapshot) || Array.isArray(row.profile_snapshot)) return null;
+    try {
+      profileSnapshot = row.profile_snapshot as unknown as CarrierProfileSnapshot;
+      validateCarrierProfileSnapshot(profileSnapshot);
+    } catch {
+      return null;
+    }
+  }
   const packet: CarrierPacket = {
     id: row.id,
     accountOwnerId: sessionUserId,
     status: row.status,
     name: row.name,
     templateSourceKind: row.template_source_kind,
-    templateSourceId: typeof row.template_source_id === 'string' ? row.template_source_id : null,
-    templateCode: typeof row.template_code === 'string' ? row.template_code : null,
-    templateSnapshot: row.template_snapshot as CarrierPacketTemplateDefinition,
-    carrierProfileId: typeof row.carrier_profile_id === 'string' ? row.carrier_profile_id : null,
-    profileSnapshot: (row.profile_snapshot as CarrierProfileSnapshot | null) ?? null,
-    recipientLabel: typeof row.recipient_label === 'string' ? row.recipient_label : null,
-    shareMethod: isEnum(CARRIER_SHARE_METHODS, row.share_method) ? row.share_method : null,
-    readyAt: row.ready_at ? Date.parse(String(row.ready_at)) : null,
-    sharedAt: row.shared_at ? Date.parse(String(row.shared_at)) : null,
-    supersedesPacketId:
-      typeof row.supersedes_packet_id === 'string' ? row.supersedes_packet_id : null,
+    templateSourceId,
+    templateCode,
+    templateSnapshot,
+    carrierProfileId,
+    profileSnapshot,
+    recipientLabel,
+    shareMethod,
+    readyAt,
+    sharedAt,
+    supersedesPacketId,
     cloudStatus: 'synced',
     createdAt,
     updatedAt,
@@ -949,22 +1305,39 @@ export function fromRemoteCarrierPacketItemRow(
   if (row.owner_id !== sessionUserId || parent.accountOwnerId !== sessionUserId) return null;
   if (row.carrier_packet_id !== parent.id) return null;
   if (typeof row.id !== 'string' || !isOpaqueId(row.id)) return null;
-  const createdAt = Date.parse(String(row.created_at));
-  if (!Number.isFinite(createdAt)) return null;
+  if (typeof row.requirement_key !== 'string') return null;
+  if (typeof row.requirement_label !== 'string') return null;
+  if (typeof row.required !== 'boolean') return null;
+  if (typeof row.position !== 'number' || !Number.isSafeInteger(row.position) || row.position < 0) {
+    return null;
+  }
+  if (typeof row.operational_document_id !== 'string' || !isOpaqueId(row.operational_document_id)) {
+    return null;
+  }
+  if (typeof row.document_version_id !== 'string' || !isOpaqueId(row.document_version_id)) {
+    return null;
+  }
+  if (!isEnum(DOCUMENT_KINDS, row.document_kind_snapshot)) return null;
+  if (!isEnum(SENSITIVITIES, row.sensitivity_snapshot)) return null;
+  const expiresAtSnapshot = optStrStrict(row.expires_at_snapshot);
+  const titleSnapshot = optStrStrict(row.title_snapshot);
+  if (expiresAtSnapshot === undefined || titleSnapshot === undefined) return null;
+  const createdAt = reqIsoMs(row.created_at);
+  if (createdAt === null) return null;
   const item: CarrierPacketItem = {
     id: row.id,
     accountOwnerId: sessionUserId,
     carrierPacketId: parent.id,
-    requirementKey: String(row.requirement_key ?? ''),
-    requirementLabel: String(row.requirement_label ?? ''),
-    required: row.required === true,
-    position: typeof row.position === 'number' ? row.position : -1,
-    operationalDocumentId: String(row.operational_document_id ?? ''),
-    documentVersionId: String(row.document_version_id ?? ''),
-    documentKindSnapshot: row.document_kind_snapshot as DocumentKind,
-    sensitivitySnapshot: row.sensitivity_snapshot as Sensitivity,
-    expiresAtSnapshot: typeof row.expires_at_snapshot === 'string' ? row.expires_at_snapshot : null,
-    titleSnapshot: typeof row.title_snapshot === 'string' ? row.title_snapshot : null,
+    requirementKey: row.requirement_key,
+    requirementLabel: row.requirement_label,
+    required: row.required,
+    position: row.position,
+    operationalDocumentId: row.operational_document_id,
+    documentVersionId: row.document_version_id,
+    documentKindSnapshot: row.document_kind_snapshot,
+    sensitivitySnapshot: row.sensitivity_snapshot,
+    expiresAtSnapshot,
+    titleSnapshot,
     createdAt,
   };
   try {
@@ -972,6 +1345,7 @@ export function fromRemoteCarrierPacketItemRow(
   } catch {
     return null;
   }
+  if (validatePacketItemAgainstTemplate(parent, item)) return null;
   return item;
 }
 

@@ -18,6 +18,7 @@ const hardening = normalize(read('20260902000014_road_wallet_integrity_hardening
 const sets = normalize(read('20260902000015_quick_present_sets.sql'));
 const carrier = normalize(read('20260902000016_carrier_packets.sql'));
 const carrierHarden = normalize(read('20260902000017_carrier_packet_integrity_hardening.sql'));
+const carrierSnapshot = normalize(read('20260902000018_carrier_packet_snapshot_integrity.sql'));
 const deletion = normalize(read('20260719000008_account_deletion.sql'));
 
 /** Policies declared for a table across the given SQL: [name, command]. */
@@ -241,6 +242,51 @@ describe('Pass 3.1 — carrier packet integrity hardening (00017)', () => {
     expect(carrierHarden).toMatch(/carrier_packets_no_self_supersede/);
     expect(carrierHarden).toMatch(/supersedes_packet_id is null or supersedes_packet_id <> id/);
     expect(carrierHarden).toMatch(/ready packet snapshot is immutable/);
+  });
+});
+
+describe('Pass 3.2 — carrier packet snapshot integrity (00018)', () => {
+  it('does not rewrite 00016 or 00017', () => {
+    expect(carrier).not.toMatch(/ready to shared may change only share metadata/);
+    expect(carrier).not.toMatch(/carrier_packets_status_shape/);
+    expect(carrierHarden).toMatch(/if new.status = 'draft' or new.status = 'shared' then/);
+    expect(carrierHarden).not.toMatch(/ready to shared may change only share metadata/);
+    expect(carrierHarden).not.toMatch(/carrier_packets_status_shape/);
+    expect(carrierSnapshot).toMatch(/alter table carrier_packets add constraint carrier_packets_status_shape/);
+    expect(carrierSnapshot).toMatch(/create or replace function carrier_packets_guard_immutable\(\)/);
+    expect(read('20260902000016_carrier_packets.sql')).not.toMatch(
+      /ready to shared may change only share metadata/,
+    );
+    expect(read('20260902000017_carrier_packet_integrity_hardening.sql')).not.toMatch(
+      /ready to shared may change only share metadata/,
+    );
+  });
+
+  it('freezes the reviewed snapshot on READY → SHARED and requires share metadata', () => {
+    expect(carrierSnapshot).toMatch(/ready to shared may change only share metadata/);
+    expect(carrierSnapshot).toMatch(/ready to shared requires shared_at/);
+    expect(carrierSnapshot).toMatch(/ready to shared requires a valid share_method/);
+    expect(carrierSnapshot).toMatch(/new.template_snapshot is distinct from old.template_snapshot/);
+    expect(carrierSnapshot).toMatch(/new.profile_snapshot is distinct from old.profile_snapshot/);
+    expect(carrierSnapshot).toMatch(/new.ready_at is distinct from old.ready_at/);
+    expect(carrierSnapshot).toMatch(/new.supersedes_packet_id is distinct from old.supersedes_packet_id/);
+    expect(carrierSnapshot).toMatch(/new.name is distinct from old.name/);
+    expect(carrierSnapshot).not.toMatch(/security definer/);
+  });
+
+  it('declares lifecycle status-shape for DRAFT / READY / SHARED / SUPERSEDED', () => {
+    expect(carrierSnapshot).toMatch(/carrier_packets_status_shape/);
+    expect(carrierSnapshot).toMatch(/draft status-shape violation/);
+    expect(carrierSnapshot).toMatch(/ready status-shape violation/);
+    expect(carrierSnapshot).toMatch(/shared status-shape violation/);
+    expect(carrierSnapshot).toMatch(/status = 'draft' and ready_at is null and shared_at is null and share_method is null/);
+    expect(carrierSnapshot).toMatch(
+      /status = 'ready' and ready_at is not null and shared_at is null and share_method is null/,
+    );
+    expect(carrierSnapshot).toMatch(
+      /status in \('shared', 'superseded'\) and ready_at is not null and shared_at is not null and share_method is not null/,
+    );
+    expect(carrierSnapshot).toMatch(/before insert or update on carrier_packets/);
   });
 });
 

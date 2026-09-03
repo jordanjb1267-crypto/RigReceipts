@@ -1,4 +1,9 @@
-import { CloudSyncContext, newOpaqueId, STANDARD_BROKER_PACKET } from '@/domain';
+import {
+  CloudSyncContext,
+  newOpaqueId,
+  readySnapshotMatchesSharedTransition,
+  STANDARD_BROKER_PACKET,
+} from '@/domain';
 import { useAuthStore } from '@/store/auth';
 import { useCarrierPacketsStore } from '@/store/carrierPackets';
 import { useCarrierProfileStore } from '@/store/carrierProfile';
@@ -198,6 +203,32 @@ describe('status + share + mark shared', () => {
     expect(useCarrierPacketsStore.getState().packets.find((p) => p.id === shared.id)?.status).toBe(
       'SHARED',
     );
+  });
+
+  it('markCarrierPacketShared emits only the READY→SHARED share-time delta', async () => {
+    const packet = await seedReady();
+    const ready = markCarrierPacketReady(packet.id, packetDeps());
+    const shared = markCarrierPacketShared(
+      {
+        packetId: ready.id,
+        confirmed: true,
+        recipientLabel: 'Broker Co',
+        shareMethod: 'OS_SHARE_SHEET',
+      },
+      packetDeps(),
+    );
+    expect(readySnapshotMatchesSharedTransition(ready, shared)).toBe(true);
+    expect(shared.status).toBe('SHARED');
+    expect(shared.sharedAt).not.toBeNull();
+    expect(shared.shareMethod).toBe('OS_SHARE_SHEET');
+    expect(shared.recipientLabel).toBe('Broker Co');
+    expect(shared.name).toBe(ready.name);
+    expect(shared.templateSnapshot).toEqual(ready.templateSnapshot);
+    expect(shared.profileSnapshot).toEqual(ready.profileSnapshot);
+    expect(shared.readyAt).toBe(ready.readyAt);
+    expect(shared.createdAt).toBe(ready.createdAt);
+    expect(shared.supersedesPacketId).toBe(ready.supersedesPacketId);
+    expect(shared.id).toBe(ready.id);
   });
 
   it('item share requires READY and does not mark SHARED; Driver is denied; financial needs FINANCIAL ack', async () => {

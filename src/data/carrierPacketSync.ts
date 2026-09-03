@@ -4,6 +4,8 @@ import {
   authorizeCarrierTemplateCloudWrite,
   CarrierPacket,
   CarrierRecoveryResult,
+  carrierPacketItemsExactlyMatch,
+  draftCloudProjection,
   emptyCarrierRecoveryResult,
   fromRemoteCarrierPacketItemRow,
   fromRemoteCarrierPacketRow,
@@ -14,10 +16,15 @@ import {
   historicalPacketSnapshotsMatch,
   itemsForPacket,
   mergeRecoveredCarrierRecord,
+  readyCloudProjection,
+  readySnapshotMatchesSharedTransition,
+  sharedCloudProjection,
+  supersededCloudProjection,
   toRemoteCarrierPacketItemRow,
   toRemoteCarrierPacketRow,
   toRemoteCarrierProfileRow,
   toRemoteCarrierTemplateRow,
+  validatePacketItemAgainstTemplate,
 } from '@/domain';
 import { getSupabaseClient } from '@/lib/supabase';
 import { useCarrierProfileStore } from '@/store/carrierProfile';
@@ -234,6 +241,18 @@ export async function recoverCarrierPacketsFromCloud(
         result.integrityConflicts++;
         continue;
       }
+      const wallet = useRoadWalletStore.getState();
+      const document = wallet.documents.find((d) => d.id === item.operationalDocumentId);
+      const version = wallet.versions.find((v) => v.id === item.documentVersionId);
+      if (
+        validatePacketItemAgainstTemplate(parent, item, {
+          document,
+          version,
+        })
+      ) {
+        result.integrityConflicts++;
+        continue;
+      }
       mapped.push(item);
     }
     const local = useCarrierPacketsStore.getState().packets.find((p) => p.id === parent.id);
@@ -296,13 +315,12 @@ const liveWriteUserId = (
 };
 
 const upsertPacketNow = async (
-  packet: CarrierPacket,
-  status: CarrierPacket['status'],
+  projected: CarrierPacket,
   deps: CarrierSyncDeps,
 ): Promise<void> => {
-  const userId = liveWriteUserId(authorizeCarrierPacketCloudWrite, packet.accountOwnerId, deps);
+  const userId = liveWriteUserId(authorizeCarrierPacketCloudWrite, projected.accountOwnerId, deps);
   await deps.remote.upsertPacket(
-    toRemoteCarrierPacketRow({ ...packet, status }, userId) as unknown as Record<string, unknown>,
+    toRemoteCarrierPacketRow(projected, userId) as unknown as Record<string, unknown>,
   );
 };
 
@@ -425,7 +443,7 @@ export async function syncPendingCarrierPackets(
             result.integrityConflicts++;
             continue;
           }
-          await upsertPacketNow(packet, 'DRAFT', deps);
+          await upsertPacketNow(draftCloudProjection(packet), deps);
           await reconcileDraftMembership(packet, membership, remoteItemRows, result, deps);
           useCarrierPacketsStore.getState().setPacketCloudStatus(packet.id, 'synced');
           result.packetsSynced++;
@@ -449,9 +467,9 @@ export async function syncPendingCarrierPackets(
           result.integrityConflicts++;
           continue;
         }
-        await upsertPacketNow(packet, 'DRAFT', deps);
+        await upsertPacketNow(draftCloudProjection(packet), deps);
         await reconcileDraftMembership(packet, membership, remoteItemRows, result, deps);
-        await upsertPacketNow(packet, 'READY', deps);
+        await upsertPacketNow(readyCloudProjection(packet), deps);
         useCarrierPacketsStore.getState().setPacketCloudStatus(packet.id, 'synced');
         result.packetsSynced++;
         continue;
@@ -472,19 +490,22 @@ export async function syncPendingCarrierPackets(
           continue;
         }
         if (existing?.status === 'READY') {
-          if (!historicalItemsMatch(existingItems, membership)) {
+          if (
+            !readySnapshotMatchesSharedTransition(existing, packet) ||
+            !carrierPacketItemsExactlyMatch(existingItems, membership)
+          ) {
             result.integrityConflicts++;
             continue;
           }
-          await upsertPacketNow(packet, 'SHARED', deps);
+          await upsertPacketNow(sharedCloudProjection(packet), deps);
           useCarrierPacketsStore.getState().setPacketCloudStatus(packet.id, 'synced');
           result.packetsSynced++;
           continue;
         }
-        await upsertPacketNow(packet, 'DRAFT', deps);
+        await upsertPacketNow(draftCloudProjection(packet), deps);
         await reconcileDraftMembership(packet, membership, remoteItemRows, result, deps);
-        await upsertPacketNow(packet, 'READY', deps);
-        await upsertPacketNow(packet, 'SHARED', deps);
+        await upsertPacketNow(readyCloudProjection(packet), deps);
+        await upsertPacketNow(sharedCloudProjection(packet), deps);
         useCarrierPacketsStore.getState().setPacketCloudStatus(packet.id, 'synced');
         result.packetsSynced++;
         continue;
@@ -505,7 +526,7 @@ export async function syncPendingCarrierPackets(
           historicalEvidenceMatchesIgnoringStatus(existing, packet) &&
           historicalItemsMatch(existingItems, membership)
         ) {
-          await upsertPacketNow(packet, 'SUPERSEDED', deps);
+          await upsertPacketNow(supersededCloudProjection(packet), deps);
           useCarrierPacketsStore.getState().setPacketCloudStatus(packet.id, 'synced');
           result.packetsSynced++;
           continue;
@@ -514,15 +535,25 @@ export async function syncPendingCarrierPackets(
           result.integrityConflicts++;
           continue;
         }
-        if (existing && existing.status !== 'DRAFT' && existing.status !== 'READY') {
-          result.integrityConflicts++;
+        if (existing?.status === 'READY') {
+          if (
+            !readySnapshotMatchesSharedTransition(existing, packet) ||
+            !carrierPacketItemsExactlyMatch(existingItems, membership)
+          ) {
+            result.integrityConflicts++;
+            continue;
+          }
+          await upsertPacketNow(sharedCloudProjection(packet), deps);
+          await upsertPacketNow(supersededCloudProjection(packet), deps);
+          useCarrierPacketsStore.getState().setPacketCloudStatus(packet.id, 'synced');
+          result.packetsSynced++;
           continue;
         }
-        await upsertPacketNow(packet, 'DRAFT', deps);
+        await upsertPacketNow(draftCloudProjection(packet), deps);
         await reconcileDraftMembership(packet, membership, remoteItemRows, result, deps);
-        await upsertPacketNow(packet, 'READY', deps);
-        await upsertPacketNow(packet, 'SHARED', deps);
-        await upsertPacketNow(packet, 'SUPERSEDED', deps);
+        await upsertPacketNow(readyCloudProjection(packet), deps);
+        await upsertPacketNow(sharedCloudProjection(packet), deps);
+        await upsertPacketNow(supersededCloudProjection(packet), deps);
         useCarrierPacketsStore.getState().setPacketCloudStatus(packet.id, 'synced');
         result.packetsSynced++;
         continue;

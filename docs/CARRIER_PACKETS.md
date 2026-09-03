@@ -166,10 +166,14 @@ writes:
 Presentation-set failure does not block carrier writes. Carrier failure does
 not block Road Wallet or presentation-set writes.
 
-SHARED first sync stages parent as READY, upserts exact items, then
-READY → SHARED. Retry of an exact remote SHARED snapshot is idempotent.
-Mismatch is an integrity conflict (never overwrite). SHARED → SUPERSEDED is
-only the narrow status/`updated_at` transition.
+SHARED first sync stages truthful lifecycle projections — DRAFT (no
+ready/shared metadata), then items, then READY (`readyAt` only), then
+SHARED (`readyAt` + `sharedAt` + `shareMethod`). A crash after DRAFT or
+READY recovers that truthful remote row. Retry of an exact remote SHARED
+snapshot is idempotent. Remote READY may promote to SHARED only when
+`readySnapshotMatchesSharedTransition` and exact items match. Mismatch is
+an integrity conflict (never overwrite). SHARED → SUPERSEDED is only the
+narrow status/`updated_at` transition.
 
 ## Migration
 
@@ -219,7 +223,26 @@ titles. No Carrier Packet analytics in Pass 3.
 
 `CLEAN_BOOTSTRAP` and `TWO_USER_RLS` remain evidence gaps.
 
-## Not in Pass 3 / 3.1
+## Pass 3.2 — snapshot integrity
+
+- Additive migration `20260902000018_carrier_packet_snapshot_integrity.sql`
+  only. 00016 and 00017 are not rewritten.
+- READY → SHARED may change only `status`, `shared_at`, `share_method`,
+  `recipient_label`, and `updated_at`. The reviewed snapshot stays frozen.
+  READY → DRAFT remains allowed.
+- Lifecycle status-shape: DRAFT has no ready/shared metadata; READY has
+  `ready_at` only; SHARED/SUPERSEDED have ready + shared + share method.
+  Recipient label may exist before SHARED. Malformed remote rows are
+  integrity conflicts — never silently repaired.
+- Packet items must match `templateSnapshot` requirement key, label,
+  required flag, position, and document kind. Live Road Wallet kind and
+  exact-version ownership are re-checked at review and recovery.
+- Remote packet/item mapping is defensive: optional scalars are string or
+  null; invalid timestamps reject the row.
+
+`CLEAN_BOOTSTRAP` and `TWO_USER_RLS` remain evidence gaps.
+
+## Not in Pass 3 / 3.1 / 3.2
 
 FMCSA / DAT / EIA / Parse / ImportYeti / TruckDown / TruckQuote / NWS.
 Email, portal submit, signatures, contract acceptance, freight booking.

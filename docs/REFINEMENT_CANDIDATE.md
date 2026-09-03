@@ -907,9 +907,23 @@ additive `20260902000017`. Production flags remain OFF.
 - Per-effect live authorization after every await.
 - Packet-context share requires zero live blockers and a late pre-share re-proof.
 
+## Pass 3.2 — Carrier Packet snapshot integrity
+
+Authorized pre-Pass-4 hardening only. Migrations `20260902000016` and
+`20260902000017` are unchanged; additive `20260902000018`. Production flags
+remain OFF.
+
+- READY → SHARED preserves the reviewed snapshot; only share-time metadata
+  may change.
+- DB + domain lifecycle status-shape for DRAFT / READY / SHARED / SUPERSEDED.
+- Truthful cloud projections (DRAFT / READY / SHARED / SUPERSEDED).
+- Remote READY → SHARED / SUPERSEDED comparator.
+- Template-requirement ↔ packet-item integrity, including live document kind.
+- Defensive remote packet/item scalar and timestamp mapping.
+
 ## Evidence gaps (open)
 
-- Clean Supabase bootstrap of all migrations (00011–00016) and two-user RLS
+- Clean Supabase bootstrap of all migrations (00011–00018) and two-user RLS
   verification cannot run on the implementation VM (no Docker / psql /
   Supabase runtime). Migrations are statically parsed only. The candidate is
   not eligible for owner acceptance/merge until these are validated

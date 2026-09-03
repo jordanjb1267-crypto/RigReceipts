@@ -19,8 +19,16 @@ import {
   STANDARD_BROKER_PACKET,
   validateCarrierPacket,
   validateCarrierProfile,
+  validatePacketItemAgainstTemplate,
   validateTemplateDefinition,
   writeSafeFromCarrierRecovery,
+  fromRemoteCarrierPacketItemRow,
+  fromRemoteCarrierPacketRow,
+  readySnapshotMatchesSharedTransition,
+  draftCloudProjection,
+  readyCloudProjection,
+  sharedCloudProjection,
+  toRemoteCarrierPacketRow,
 } from '../carrierPackets';
 import { DocumentVersion, OperationalDocument } from '../operationalDocuments';
 
@@ -256,5 +264,241 @@ describe('review + transitions', () => {
     for (const phrase of CARRIER_PACKET_FORBIDDEN_COPY) {
       expect(MARK_SHARED_ATTESTATION_COPY.toLowerCase()).not.toContain(phrase.toLowerCase());
     }
+  });
+});
+
+describe('Pass 3.2 — snapshot integrity', () => {
+  const packet = {
+    id: id(2),
+    accountOwnerId: 'user-a' as string | null,
+    status: 'DRAFT' as const,
+    name: 'Pack',
+    templateSourceKind: 'BUILTIN' as const,
+    templateSourceId: null,
+    templateCode: 'STANDARD_BROKER_PACKET' as const,
+    templateSnapshot: STANDARD_BROKER_PACKET,
+    carrierProfileId: profile.id,
+    profileSnapshot: snapshotCarrierProfile(profile, 1),
+    recipientLabel: null,
+    shareMethod: null,
+    readyAt: null,
+    sharedAt: null,
+    supersedesPacketId: null,
+    cloudStatus: 'local_only' as const,
+    createdAt: 1,
+    updatedAt: 1,
+  };
+
+  it('enforces DRAFT / READY / SHARED / SUPERSEDED lifecycle timestamp shapes', () => {
+    expect(() => validateCarrierPacket(packet)).not.toThrow();
+    expect(() =>
+      validateCarrierPacket({ ...packet, status: 'DRAFT', readyAt: 1 }),
+    ).toThrow(/DRAFT status-shape/);
+    expect(() =>
+      validateCarrierPacket({
+        ...packet,
+        status: 'READY',
+        readyAt: 1,
+        sharedAt: 2,
+      }),
+    ).toThrow(/READY status-shape/);
+    expect(() =>
+      validateCarrierPacket({
+        ...packet,
+        status: 'READY',
+        readyAt: 1,
+        shareMethod: 'OTHER',
+      }),
+    ).toThrow(/READY status-shape/);
+    expect(() =>
+      validateCarrierPacket({
+        ...packet,
+        status: 'SHARED',
+        readyAt: 1,
+        sharedAt: 2,
+        shareMethod: null,
+      }),
+    ).toThrow(/SHARED status-shape/);
+    expect(() =>
+      validateCarrierPacket({
+        ...packet,
+        status: 'SUPERSEDED',
+        readyAt: 1,
+        sharedAt: 2,
+        shareMethod: 'OTHER',
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateCarrierPacket({
+        ...packet,
+        status: 'DRAFT',
+        recipientLabel: 'Broker before share',
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateCarrierPacket({
+        ...packet,
+        recipientLabel: 'x'.repeat(121),
+      }),
+    ).toThrow(/recipientLabel/);
+    expect(() =>
+      validateCarrierPacket({
+        ...packet,
+        createdAt: Number.NaN,
+      }),
+    ).toThrow(/finite/);
+  });
+
+  it('rejects a W-9 requirement pointing at INSURANCE or a mutated template field', () => {
+    const w9 = doc();
+    const insurance = doc({ id: id(11), documentKind: 'CERTIFICATE_OF_INSURANCE', title: 'COI' });
+    const vW9 = version(w9.id);
+    const vIns = version(insurance.id, { id: id(22) });
+    const w9Req = STANDARD_BROKER_PACKET.documentRequirements[0]!;
+    const valid = freezePacketItem({
+      id: id(30),
+      packet,
+      requirement: w9Req,
+      document: w9,
+      version: vW9,
+      now: 1,
+    });
+    expect(validatePacketItemAgainstTemplate(packet, valid, { document: w9, version: vW9 })).toBeNull();
+
+    expect(
+      validatePacketItemAgainstTemplate(packet, { ...valid, documentKindSnapshot: 'CERTIFICATE_OF_INSURANCE' })
+        ?.code,
+    ).toBe('INTEGRITY_MISMATCH');
+    expect(
+      validatePacketItemAgainstTemplate(packet, valid, { document: insurance, version: vIns })?.code,
+    ).toBe('INTEGRITY_MISMATCH');
+    expect(
+      validatePacketItemAgainstTemplate(packet, { ...valid, requirementLabel: 'Wrong' })?.code,
+    ).toBe('INTEGRITY_MISMATCH');
+    expect(validatePacketItemAgainstTemplate(packet, { ...valid, required: false })?.code).toBe(
+      'INTEGRITY_MISMATCH',
+    );
+    expect(validatePacketItemAgainstTemplate(packet, { ...valid, position: 9 })?.code).toBe(
+      'INTEGRITY_MISMATCH',
+    );
+    expect(
+      validatePacketItemAgainstTemplate(packet, { ...valid, requirementKey: 'not-a-key' })?.code,
+    ).toBe('INTEGRITY_MISMATCH');
+
+    const review = reviewCarrierPacket({
+      packet,
+      items: [{ ...valid, documentKindSnapshot: 'CERTIFICATE_OF_INSURANCE' }],
+      profile,
+      documents: [w9],
+      versions: [vW9],
+      now: new Date('2026-09-03'),
+    });
+    expect(review.blockers.some((f) => f.code === 'INTEGRITY_MISMATCH')).toBe(true);
+  });
+
+  it('rejects malformed remote packet scalars/timestamps and does not coerce them', () => {
+    const shared = {
+      ...packet,
+      status: 'SHARED' as const,
+      readyAt: 1,
+      sharedAt: 2,
+      shareMethod: 'OTHER' as const,
+    };
+    const good = toRemoteCarrierPacketRow(shared, 'user-a');
+    expect(fromRemoteCarrierPacketRow(good, 'user-a')?.id).toBe(shared.id);
+    expect(fromRemoteCarrierPacketRow({ ...good, recipient_label: 12 }, 'user-a')).toBeNull();
+    expect(fromRemoteCarrierPacketRow({ ...good, template_source_id: { id: 'x' } }, 'user-a')).toBeNull();
+    expect(fromRemoteCarrierPacketRow({ ...good, ready_at: 1 }, 'user-a')).toBeNull();
+    expect(fromRemoteCarrierPacketRow({ ...good, shared_at: 'not-a-date' }, 'user-a')).toBeNull();
+    expect(fromRemoteCarrierPacketRow({ ...good, profile_snapshot: [] }, 'user-a')).toBeNull();
+    expect(
+      fromRemoteCarrierPacketRow({ ...good, status: 'DRAFT', ready_at: good.ready_at }, 'user-a'),
+    ).toBeNull();
+  });
+
+  it('rejects malformed remote items against the parent template snapshot', () => {
+    const itemId = id(40);
+    const docId = id(41);
+    const verId = id(42);
+    const row = {
+      id: itemId,
+      owner_id: 'user-a',
+      carrier_packet_id: packet.id,
+      requirement_key: 'w9',
+      requirement_label: 'W-9',
+      required: true,
+      position: 0,
+      operational_document_id: docId,
+      document_version_id: verId,
+      document_kind_snapshot: 'W9',
+      sensitivity_snapshot: 'FINANCIAL_SENSITIVE',
+      expires_at_snapshot: null,
+      title_snapshot: 'W-9',
+      created_at: new Date(1).toISOString(),
+    };
+    expect(fromRemoteCarrierPacketItemRow(row, 'user-a', packet)?.id).toBe(itemId);
+    expect(fromRemoteCarrierPacketItemRow({ ...row, required: 'true' }, 'user-a', packet)).toBeNull();
+    expect(fromRemoteCarrierPacketItemRow({ ...row, position: '0' }, 'user-a', packet)).toBeNull();
+    expect(
+      fromRemoteCarrierPacketItemRow({ ...row, requirement_key: 'unknown' }, 'user-a', packet),
+    ).toBeNull();
+    expect(
+      fromRemoteCarrierPacketItemRow({ ...row, requirement_label: 'Wrong' }, 'user-a', packet),
+    ).toBeNull();
+    expect(
+      fromRemoteCarrierPacketItemRow(
+        { ...row, document_kind_snapshot: 'CERTIFICATE_OF_INSURANCE' },
+        'user-a',
+        packet,
+      ),
+    ).toBeNull();
+  });
+
+  it('READY→SHARED comparator allows only mark-shared deltas', () => {
+    const ready = { ...packet, status: 'READY' as const, readyAt: 5 };
+    const shared = {
+      ...ready,
+      status: 'SHARED' as const,
+      sharedAt: 9,
+      shareMethod: 'OS_SHARE_SHEET' as const,
+      recipientLabel: 'Broker Co',
+      updatedAt: 9,
+    };
+    expect(readySnapshotMatchesSharedTransition(ready, shared)).toBe(true);
+    expect(readySnapshotMatchesSharedTransition({ ...ready, name: 'Other' }, shared)).toBe(false);
+    expect(readySnapshotMatchesSharedTransition({ ...ready, readyAt: 6 }, shared)).toBe(false);
+    expect(
+      readySnapshotMatchesSharedTransition(
+        { ...ready, profileSnapshot: snapshotCarrierProfile({ ...profile, legalName: 'Other' }, 1) },
+        shared,
+      ),
+    ).toBe(false);
+    expect(
+      readySnapshotMatchesSharedTransition(
+        {
+          ...ready,
+          templateSnapshot: {
+            ...STANDARD_BROKER_PACKET,
+            name: 'Mutated',
+          },
+        },
+        shared,
+      ),
+    ).toBe(false);
+    const draftProj = draftCloudProjection(shared);
+    expect(draftProj.status).toBe('DRAFT');
+    expect(draftProj.readyAt).toBeNull();
+    expect(draftProj.sharedAt).toBeNull();
+    expect(draftProj.shareMethod).toBeNull();
+    expect(draftProj.templateSnapshot).toBe(shared.templateSnapshot);
+    const readyProj = readyCloudProjection(shared);
+    expect(readyProj.status).toBe('READY');
+    expect(readyProj.readyAt).toBe(5);
+    expect(readyProj.sharedAt).toBeNull();
+    expect(readyProj.shareMethod).toBeNull();
+    const sharedProj = sharedCloudProjection(shared);
+    expect(sharedProj.status).toBe('SHARED');
+    expect(sharedProj.sharedAt).toBe(9);
+    expect(sharedProj.shareMethod).toBe('OS_SHARE_SHEET');
   });
 });

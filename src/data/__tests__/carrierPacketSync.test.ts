@@ -18,6 +18,7 @@ class FakeCarrierRemote implements CarrierRemote {
   upserts: { table: string; row: Record<string, unknown> }[] = [];
   deletes: string[] = [];
   failItemOnce = false;
+  failPacketUpsertWhen: ((row: Record<string, unknown>) => boolean) | null = null;
   onFetchPackets: (() => void) | null = null;
 
   async fetchProfiles() {
@@ -46,6 +47,7 @@ class FakeCarrierRemote implements CarrierRemote {
     this.upserts.push({ table: 'carrier_packet_templates', row });
   }
   async upsertPacket(row: Record<string, unknown>) {
+    if (this.failPacketUpsertWhen?.(row)) throw new Error('packet upsert crashed');
     this.upserts.push({ table: 'carrier_packets', row });
     this.packets = this.packets.filter((p) => p.id !== row.id);
     this.packets.push(row);
@@ -140,6 +142,19 @@ describe('carrier packet cloud writes', () => {
     expect(statuses).toContain('READY');
     expect(statuses[statuses.length - 1]).toBe('SHARED');
     expect(statuses.indexOf('DRAFT')).toBeLessThan(statuses.indexOf('READY'));
+    const packetRows = remote.upserts.filter((u) => u.table === 'carrier_packets').map((u) => u.row);
+    const draftRow = packetRows.find((row) => row.status === 'DRAFT')!;
+    const readyRow = packetRows.find((row) => row.status === 'READY')!;
+    const sharedRow = packetRows.find((row) => row.status === 'SHARED')!;
+    expect(draftRow.ready_at).toBeNull();
+    expect(draftRow.shared_at).toBeNull();
+    expect(draftRow.share_method).toBeNull();
+    expect(readyRow.ready_at).toBeTruthy();
+    expect(readyRow.shared_at).toBeNull();
+    expect(readyRow.share_method).toBeNull();
+    expect(sharedRow.ready_at).toBeTruthy();
+    expect(sharedRow.shared_at).toBeTruthy();
+    expect(sharedRow.share_method).toBe('OTHER');
     expect(useCarrierPacketsStore.getState().packets[0]?.cloudStatus).toBe('synced');
 
     useCarrierPacketsStore.getState().setPacketCloudStatus(packetId, 'pending_sync');
@@ -402,5 +417,139 @@ describe('carrier packet cloud writes', () => {
     useCarrierPacketsStore.getState().setPacketCloudStatus(packetId, 'pending_sync');
     const lost = await syncPendingCarrierPackets(deps());
     expect(lost.packetsSynced).toBe(0);
+  });
+
+  it('crash after DRAFT or READY stage recovers a truthful remote lifecycle row', async () => {
+    const packetId = id(18);
+    const shared = {
+      id: packetId,
+      accountOwnerId: 'user-a' as const,
+      status: 'SHARED' as const,
+      name: 'Pack',
+      templateSourceKind: 'BUILTIN' as const,
+      templateSourceId: null,
+      templateCode: 'STANDARD_BROKER_PACKET' as const,
+      templateSnapshot: STANDARD_BROKER_PACKET,
+      carrierProfileId: null,
+      profileSnapshot: null,
+      recipientLabel: 'Broker',
+      shareMethod: 'OTHER' as const,
+      readyAt: 1,
+      sharedAt: 2,
+      supersedesPacketId: null,
+      cloudStatus: 'pending_sync' as const,
+      createdAt: 1,
+      updatedAt: 2,
+    };
+    useCarrierPacketsStore.getState().addPacket(shared, []);
+    remote.failPacketUpsertWhen = (row) => row.status === 'READY';
+    await syncPendingCarrierPackets(deps());
+    expect(remote.packets[0]?.status).toBe('DRAFT');
+    expect(remote.packets[0]?.ready_at).toBeNull();
+    expect(remote.packets[0]?.shared_at).toBeNull();
+    expect(remote.packets[0]?.share_method).toBeNull();
+    useCarrierPacketsStore.getState().clear();
+    remote.failPacketUpsertWhen = null;
+    const draftRecovered = await recoverCarrierPacketsFromCloud(deps());
+    expect(draftRecovered.packetsRecovered).toBe(1);
+    expect(useCarrierPacketsStore.getState().packets[0]?.status).toBe('DRAFT');
+    expect(useCarrierPacketsStore.getState().packets[0]?.readyAt).toBeNull();
+    expect(useCarrierPacketsStore.getState().packets[0]?.sharedAt).toBeNull();
+
+    useCarrierPacketsStore.getState().clear();
+    useCarrierPacketsStore.getState().addPacket(shared, []);
+    remote.packets = [];
+    remote.upserts = [];
+    remote.failPacketUpsertWhen = (row) => row.status === 'SHARED';
+    await syncPendingCarrierPackets(deps());
+    expect(remote.packets[0]?.status).toBe('READY');
+    expect(remote.packets[0]?.ready_at).toBeTruthy();
+    expect(remote.packets[0]?.shared_at).toBeNull();
+    expect(remote.packets[0]?.share_method).toBeNull();
+    useCarrierPacketsStore.getState().clear();
+    remote.failPacketUpsertWhen = null;
+    const readyRecovered = await recoverCarrierPacketsFromCloud(deps());
+    expect(readyRecovered.packetsRecovered).toBe(1);
+    expect(useCarrierPacketsStore.getState().packets[0]?.status).toBe('READY');
+    expect(useCarrierPacketsStore.getState().packets[0]?.readyAt).toBe(1);
+    expect(useCarrierPacketsStore.getState().packets[0]?.sharedAt).toBeNull();
+    expect(useCarrierPacketsStore.getState().packets[0]?.shareMethod).toBeNull();
+  });
+
+  it('remote READY exact reviewed snapshot promotes to SHARED; mismatch is an integrity conflict', async () => {
+    const packetId = id(19);
+    const local = {
+      id: packetId,
+      accountOwnerId: 'user-a' as const,
+      status: 'SHARED' as const,
+      name: 'Pack',
+      templateSourceKind: 'BUILTIN' as const,
+      templateSourceId: null,
+      templateCode: 'STANDARD_BROKER_PACKET' as const,
+      templateSnapshot: STANDARD_BROKER_PACKET,
+      carrierProfileId: null,
+      profileSnapshot: null,
+      recipientLabel: 'Broker Co',
+      shareMethod: 'OTHER' as const,
+      readyAt: 1,
+      sharedAt: 2,
+      supersedesPacketId: null,
+      cloudStatus: 'pending_sync' as const,
+      createdAt: 1,
+      updatedAt: 2,
+    };
+    const readyRemote = {
+      ...local,
+      status: 'READY' as const,
+      sharedAt: null,
+      shareMethod: null,
+      recipientLabel: null,
+    };
+    useCarrierPacketsStore.getState().addPacket(local, []);
+    remote.packets.push(toRemoteCarrierPacketRow(readyRemote, 'user-a') as unknown as Record<string, unknown>);
+    const matched = await syncPendingCarrierPackets(deps());
+    expect(matched.integrityConflicts).toBe(0);
+    expect(matched.packetsSynced).toBe(1);
+    expect(remote.packets[0]?.status).toBe('SHARED');
+    expect(remote.packets[0]?.shared_at).toBeTruthy();
+    expect(remote.packets[0]?.share_method).toBe('OTHER');
+
+    for (const mutate of [
+      { name: 'Other' },
+      { readyAt: 99 },
+      { templateSnapshot: { ...STANDARD_BROKER_PACKET, name: 'Mutated' } },
+      {
+        profileSnapshot: {
+          legalName: 'Other LLC',
+          dbaName: null,
+          usdotNumber: null,
+          mcNumber: null,
+          addressLine1: null,
+          addressLine2: null,
+          city: null,
+          stateProvince: null,
+          postalCode: null,
+          contactName: null,
+          contactEmail: null,
+          contactPhone: null,
+          equipmentTypes: [],
+          identitySource: 'USER_ENTERED' as const,
+          capturedAt: 1,
+        },
+      },
+    ]) {
+      useCarrierPacketsStore.getState().clear();
+      useCarrierPacketsStore.getState().addPacket(local, []);
+      remote.packets = [
+        toRemoteCarrierPacketRow(
+          { ...readyRemote, ...mutate },
+          'user-a',
+        ) as unknown as Record<string, unknown>,
+      ];
+      remote.upserts = [];
+      const conflicted = await syncPendingCarrierPackets(deps());
+      expect(conflicted.integrityConflicts).toBeGreaterThan(0);
+      expect(remote.packets[0]?.status).toBe('READY');
+    }
   });
 });
