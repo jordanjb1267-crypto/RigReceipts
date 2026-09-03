@@ -5,7 +5,7 @@
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const nodeFs = require('node:fs') as {
-  readFileSync(path: string, enc?: BufferEncoding): string | Buffer;
+  readFileSync(path: string, enc?: string): string | Uint8Array;
   readdirSync(path: string): string[];
 };
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -72,7 +72,7 @@ const read = (name: string) => nodeFs.readFileSync(`supabase/migrations/${name}`
 const sha256FileBytes = (name: string) =>
   nodeCrypto
     .createHash('sha256')
-    .update(nodeFs.readFileSync(`supabase/migrations/${name}`) as Buffer)
+    .update(nodeFs.readFileSync(`supabase/migrations/${name}`) as Uint8Array)
     .digest('hex');
 const stripComments = (sql: string) => sql.replace(/--.*$/gm, '');
 const normalize = (sql: string) => stripComments(sql).replace(/\s+/g, ' ').trim();
