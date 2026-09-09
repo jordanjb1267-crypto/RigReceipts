@@ -43,6 +43,7 @@ describe('buildLoadEconomicsPacket', () => {
       ],
       segments: [],
       targets: null,
+      nowMs: Date.parse('2026-09-09T00:00:00.000Z'),
     });
 
     expect(packet.grossRate).toBe(2000);
@@ -72,6 +73,7 @@ describe('buildLoadEconomicsPacket', () => {
       receivables: [],
       segments: [],
       targets: null,
+      nowMs: Date.parse('2026-09-09T00:00:00.000Z'),
     });
     expect(packet.allMileRpm).toBeNull();
     expect(packet.estimatedContribution).toBeNull();
@@ -109,6 +111,7 @@ describe('buildLoadEconomicsPacket', () => {
         },
       ],
       targets: null,
+      nowMs: Date.parse('2026-09-09T00:00:00.000Z'),
     });
     expect(packet.plannedMiles.loadedMiles).toBe(500);
     expect(packet.actualLiveMileage?.loadedMiles).toBe(40);

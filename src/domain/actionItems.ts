@@ -107,7 +107,12 @@ export interface DeriveActionItemsInput {
   roadWallet?: ActionRoadWalletSnapshot | null;
   /** Pass only when Carrier Packet builder is enabled for this session. */
   packets?: readonly ActionPacketSnapshot[] | null;
-  nowMs?: number;
+  /**
+   * Explicit temporal reference for age-derived urgency only.
+   * Required so the live product path cannot silently fall back to epoch 0.
+   * Does not mutate receivable status or any financial record.
+   */
+  nowMs: number;
 }
 
 const URGENCY_RANK: Record<ActionUrgency, number> = { now: 0, soon: 1, later: 2 };
@@ -157,7 +162,10 @@ export function sortActionItems(items: readonly ActionItem[]): ActionItem[] {
 }
 
 export function deriveActionItems(input: DeriveActionItemsInput): ActionItem[] {
-  const nowMs = input.nowMs ?? 0;
+  if (!Number.isFinite(input.nowMs)) {
+    throw new Error('deriveActionItems requires a finite nowMs temporal reference');
+  }
+  const nowMs = input.nowMs;
   const items: ActionItem[] = [];
 
   for (const load of input.loads) {

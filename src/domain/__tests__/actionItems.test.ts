@@ -12,6 +12,9 @@ const load = {
   bolRequired: true,
 };
 
+/** Injected clock — live product path must supply a real nowMs. */
+const NOW_MS = Date.parse('2026-09-09T00:00:00.000Z');
+
 const segment = (over: Partial<MileageSegment> = {}): MileageSegment => ({
   id: 'seg_1',
   sessionId: 's1',
@@ -42,6 +45,7 @@ describe('deriveActionItems', () => {
       captures: [],
       receivables: [],
       segments: [],
+      nowMs: NOW_MS,
     });
     const missing = items.filter((i) => i.kind === 'missing_document');
     expect(missing.map((i) => i.id)).toEqual([
@@ -65,6 +69,7 @@ describe('deriveActionItems', () => {
       captures: [],
       receivables: [],
       segments: [],
+      nowMs: NOW_MS,
     });
     expect(items.some((i) => i.kind === 'missing_document')).toBe(false);
   });
@@ -80,6 +85,7 @@ describe('deriveActionItems', () => {
       captures: [],
       receivables: [],
       segments: [],
+      nowMs: NOW_MS,
     });
     expect(items.map((i) => i.kind)).toEqual(['closeout_incomplete']);
     expect(items[0]?.reason).toContain('Not broker payment proof');
@@ -106,7 +112,7 @@ describe('deriveActionItems', () => {
         },
       ],
       segments: [segment()],
-      nowMs: Date.parse('2026-09-09'),
+      nowMs: NOW_MS,
     });
     expect(items.some((i) => i.kind === 'unclassified_mileage' && i.urgency === 'now')).toBe(true);
     expect(items.some((i) => i.kind === 'receivable_attention' && i.urgency === 'now')).toBe(true);
@@ -119,6 +125,7 @@ describe('deriveActionItems', () => {
       captures: [],
       receivables: [],
       segments: [],
+      nowMs: NOW_MS,
     });
     expect(none).toEqual([]);
 
@@ -128,6 +135,7 @@ describe('deriveActionItems', () => {
       captures: [],
       receivables: [],
       segments: [],
+      nowMs: NOW_MS,
       roadWallet: { expired: 1, expiringSoon: 0 },
       packets: [
         { id: 'pkt_ready', name: 'Standard broker', status: 'READY' },
@@ -139,5 +147,139 @@ describe('deriveActionItems', () => {
       'attestation, not delivery',
     );
     expect(withExtras.some((i) => i.sourceObjectId === 'pkt_shared')).toBe(false);
+  });
+
+  it('rejects a missing or non-finite clock', () => {
+    expect(() =>
+      deriveActionItems({
+        loads: [],
+        docs: [],
+        captures: [],
+        receivables: [],
+        segments: [],
+        nowMs: Number.NaN,
+      }),
+    ).toThrow(/nowMs/);
+  });
+});
+
+describe('age-derived receivable urgency (RR-PR15-002)', () => {
+  const pending = {
+    id: 'rcv_pending',
+    loadId: 'load_1',
+    type: 'detention' as const,
+    status: 'pending' as const,
+    amountExpected: 150,
+    amountReceived: 0,
+  };
+
+  const quietLoad = {
+    ...load,
+    status: 'in_transit' as const,
+  };
+
+  const docsPresent = [
+    { loadId: 'load_1', docType: 'rate_confirmation' as const, status: 'captured' as const },
+    { loadId: 'load_1', docType: 'pod' as const, status: 'captured' as const },
+    { loadId: 'load_1', docType: 'bol' as const, status: 'captured' as const },
+  ];
+
+  it('A: pending due >30 days before now escalates to now without mutating status', () => {
+    const receivable = { ...pending, dateDue: '2026-07-01' };
+    const items = deriveActionItems({
+      loads: [quietLoad],
+      docs: docsPresent,
+      captures: [],
+      receivables: [receivable],
+      segments: [],
+      nowMs: NOW_MS,
+    });
+    const attention = items.find((i) => i.kind === 'receivable_attention');
+    expect(attention?.urgency).toBe('now');
+    expect(attention?.reason).toContain('overdue');
+    expect(receivable.status).toBe('pending');
+  });
+
+  it('B: pending due <30 days before now stays soon', () => {
+    const receivable = { ...pending, id: 'rcv_recent', dateDue: '2026-09-01' };
+    const items = deriveActionItems({
+      loads: [quietLoad],
+      docs: docsPresent,
+      captures: [],
+      receivables: [receivable],
+      segments: [],
+      nowMs: NOW_MS,
+    });
+    const attention = items.find((i) => i.kind === 'receivable_attention');
+    expect(attention?.urgency).toBe('soon');
+    expect(attention?.reason).toContain('pending');
+    expect(receivable.status).toBe('pending');
+  });
+
+  it('C: terminal receivable is absent regardless of age', () => {
+    const items = deriveActionItems({
+      loads: [quietLoad],
+      docs: docsPresent,
+      captures: [],
+      receivables: [
+        {
+          ...pending,
+          id: 'rcv_paid',
+          status: 'paid',
+          amountReceived: 150,
+          dateDue: '2020-01-01',
+        },
+        {
+          ...pending,
+          id: 'rcv_written',
+          status: 'written_off',
+          dateDue: '2020-01-01',
+        },
+      ],
+      segments: [],
+      nowMs: NOW_MS,
+    });
+    expect(items.filter((i) => i.kind === 'receivable_attention')).toEqual([]);
+  });
+
+  it('D: disputed is not aged into overdue but still surfaces as now attention', () => {
+    const receivable = {
+      ...pending,
+      id: 'rcv_disputed',
+      status: 'disputed' as const,
+      dateDue: '2020-01-01',
+    };
+    const items = deriveActionItems({
+      loads: [quietLoad],
+      docs: docsPresent,
+      captures: [],
+      receivables: [receivable],
+      segments: [],
+      nowMs: NOW_MS,
+    });
+    const attention = items.find((i) => i.kind === 'receivable_attention');
+    expect(attention?.urgency).toBe('now');
+    expect(attention?.reason).toContain('disputed');
+    expect(attention?.reason).not.toContain('is overdue');
+    expect(receivable.status).toBe('disputed');
+  });
+
+  it('explicit overdue status still escalates to now', () => {
+    const receivable = {
+      ...pending,
+      id: 'rcv_flagged',
+      status: 'overdue' as const,
+      dateDue: '2026-09-08',
+    };
+    const items = deriveActionItems({
+      loads: [quietLoad],
+      docs: docsPresent,
+      captures: [],
+      receivables: [receivable],
+      segments: [],
+      nowMs: NOW_MS,
+    });
+    expect(items.find((i) => i.kind === 'receivable_attention')?.urgency).toBe('now');
+    expect(receivable.status).toBe('overdue');
   });
 });

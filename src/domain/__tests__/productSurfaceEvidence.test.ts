@@ -31,6 +31,7 @@ describe('principal product surface view models', () => {
       receivables: [],
       segments: [],
       targets: null,
+      nowMs: Date.parse('2026-09-09T00:00:00.000Z'),
     });
 
     expect({
@@ -79,8 +80,10 @@ describe('principal product surface view models', () => {
       captures: [],
       receivables: [],
       segments: [],
+      nowMs: Date.parse('2026-09-09T00:00:00.000Z'),
     });
     const grouped = groupLoadsForList([load], items);
+    expect(grouped.saved).toHaveLength(0);
     expect(grouped.needsAction).toHaveLength(1);
     expect(grouped.active).toHaveLength(0);
     expect(grouped.closed).toHaveLength(0);

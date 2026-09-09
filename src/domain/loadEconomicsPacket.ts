@@ -96,6 +96,8 @@ export interface LoadEconomicsPacketInput {
   targets: AllMileTargets | null;
   variableCostPerMile?: number;
   actionItems?: readonly ActionItem[];
+  /** Required when actions are derived internally. Age urgency only; not stored. */
+  nowMs: number;
 }
 
 export function plannedMilesFromLoad(load: {
@@ -141,6 +143,7 @@ export function buildLoadEconomicsPacket(input: LoadEconomicsPacketInput): LoadE
       captures: input.captures,
       receivables: input.receivables,
       segments: input.segments,
+      nowMs: input.nowMs,
     });
   const loadActions = actionItemsForLoad(actions, load.id);
   const documentsRemaining = missingRequiredDocTypes(

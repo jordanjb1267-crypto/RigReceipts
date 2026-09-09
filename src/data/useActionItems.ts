@@ -41,6 +41,7 @@ export function useActionItems() {
               status: p.status,
             }))
           : null,
+        nowMs: Date.now(),
       }),
     [
       loads,

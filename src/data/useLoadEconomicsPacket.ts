@@ -39,6 +39,7 @@ export function useLoadEconomicsPacket(loadId: string | undefined) {
       targets,
       variableCostPerMile: profile?.variableCostPerMile,
       actionItems: actionItemsForLoad(actionItems, load.id),
+      nowMs: Date.now(),
     });
   }, [rawLoad, docs, captures, receivables, segments, profile, actionItems]);
 }

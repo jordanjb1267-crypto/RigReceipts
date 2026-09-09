@@ -16,8 +16,9 @@ import { normalizeLoad, useLoadsStore } from '@/store/loads';
 import { colors, palette, spacing, type } from '@/theme';
 
 /**
- * Load packets. Grouping is derived presentation (Active / Needs Action /
- * Closed), not a new lifecycle.
+ * Load packets. Grouping is derived presentation
+ * (Saved / Needs Action / Active / Closed), not a new lifecycle.
+ * Evaluated offers stay Saved — they are not booked work.
  */
 export default function LoadsScreen() {
   const router = useRouter();
@@ -43,9 +44,9 @@ export default function LoadsScreen() {
         <Card label="No loads yet">
           <Text style={styles.emptyTitle}>Start a folder for your next run.</Text>
           <Text style={styles.emptyCopy}>
-            Each load keeps its number, broker, and route together. Missing POD, unfinished
-            economics, and money owed appear under Needs Action — derived from this device, not a
-            second workflow database.
+            Each load keeps its number, broker, and route together. Saved offers stay separate from
+            Active booked work. Missing POD, unfinished economics, and money owed appear under Needs
+            Action — derived from this device, not a second workflow database.
           </Text>
         </Card>
       )}
@@ -58,6 +59,31 @@ export default function LoadsScreen() {
         value="Add"
         onPress={() => router.push('/add-load')}
       />
+
+      {grouped.saved.length > 0 && (
+        <Section title="Saved" count={grouped.saved.length}>
+          {grouped.saved.map((l) => {
+            const next = actionItemsForLoad(actionItems, l.id)[0];
+            return (
+              <View key={l.id}>
+                <LoadCard
+                  load={l}
+                  onAdvance={() => setStatus(l.id, nextLoadStatus(l.status))}
+                  onOpen={() => router.push({ pathname: '/load-detail', params: { id: l.id } })}
+                  onRemove={() => removeLoad(l.id)}
+                />
+                {next && (
+                  <NextActionCard
+                    item={next}
+                    ctaLabel="Open"
+                    onPress={() => launchAction(next, router)}
+                  />
+                )}
+              </View>
+            );
+          })}
+        </Section>
+      )}
 
       {grouped.needsAction.length > 0 && (
         <Section title="Needs Action" count={grouped.needsAction.length}>
