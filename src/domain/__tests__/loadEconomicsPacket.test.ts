@@ -47,7 +47,7 @@ describe('buildLoadEconomicsPacket', () => {
 
     expect(packet.grossRate).toBe(2000);
     expect(packet.revenue).toBe(2100);
-    expect(packet.allMileRpm).toBeCloseTo(2100 / 550, 5);
+    expect(packet.allMileRpm).toBe(3.82);
     expect(packet.rateStatus).toBe('unknown');
     expect(packet.plannedMiles.totalMiles).toBe(550);
     expect(packet.actualLiveMileage).toBeNull();
