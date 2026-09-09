@@ -29,7 +29,34 @@ export const EXPORT_TABLES = [
   'rate_post_reports',
   'rate_board_blocks',
   'data_entitlements',
+  // Road Wallet (Pass 1B): metadata rows only. The JSON export never contains
+  // the binary image/PDF bytes, a portable archive of local files, or
+  // device-only documents that were never cloud-synced.
+  'operational_documents',
+  'document_versions',
+  // Quick Present (Pass 2): custom-set metadata only. Never binaries, never
+  // a PresentationSession, never a system-set code (Roadside/Shipper are
+  // product defaults, not stored rows).
+  'presentation_sets',
+  'presentation_set_items',
+  // Carrier packets (Pass 3): metadata and historical snapshots only.
+  // Never binaries, never a combined PDF/ZIP, never delivery proof.
+  'carrier_profiles',
+  'carrier_packet_templates',
+  'carrier_packets',
+  'carrier_packet_items',
 ] as const;
+
+/**
+ * What the account export is — and is not. Shown in the UI and documented so
+ * "export" is never mistaken for a full file backup.
+ */
+export const ACCOUNT_EXPORT_SCOPE = {
+  includes:
+    'Database records available in your signed-in cloud account: loads, receipts, miles, rate checks, posts, Road Wallet document metadata, saved Quick Present set metadata, Carrier Profile metadata, custom packet templates, and packet snapshot/history metadata.',
+  excludes:
+    'Not included: the actual Road Wallet image/PDF files, a portable archive of files stored on this device, device-only documents that were never backed up, a combined packet PDF/ZIP, delivery proof, or recipient acceptance.',
+} as const;
 
 export interface ExportBundle {
   format: 'rigreceipts.account_export';

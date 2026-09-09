@@ -4,7 +4,7 @@ import { Alert, Linking, Pressable, ScrollView, Share, StyleSheet, Text, View } 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button, Pill } from '@/components';
-import { deleteAccount, exportUserData } from '@/data/account';
+import { ACCOUNT_EXPORT_SCOPE, deleteAccount, exportUserData } from '@/data/account';
 import { useAuthStore } from '@/store/auth';
 import { colors, palette, radii, spacing, type } from '@/theme';
 
@@ -107,9 +107,9 @@ export default function AccountSettingsScreen() {
             <View style={styles.actionCard}>
               <Text style={styles.actionTitle}>Export my data</Text>
               <Text style={styles.actionCopy}>
-                Download a full copy of your loads, receipts, miles, rate checks, and posts as a
-                JSON file you can save or share.
+                Download a JSON copy of your account records. {ACCOUNT_EXPORT_SCOPE.includes}
               </Text>
+              <Text style={styles.actionCopy}>{ACCOUNT_EXPORT_SCOPE.excludes}</Text>
               <Button
                 label={busy === 'export' ? 'Preparing…' : 'Export My Data'}
                 variant="secondary"

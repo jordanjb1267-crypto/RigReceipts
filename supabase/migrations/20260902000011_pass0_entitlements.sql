@@ -1,0 +1,32 @@
+-- RigReceipts Refinement — Pass 0 (entitlement & capability control plane).
+--
+-- Adds the `basic_external_intelligence` data entitlement beside the existing
+-- community/licensed/high-volume kinds so the DB mirror of
+-- `src/domain/entitlements.ts` (DATA_ENTITLEMENTS) stays in step.
+--
+-- Additive only: no table renamed/dropped, no rows inserted, no policy changed.
+-- Software feature gates (Road Wallet, Quick Present, Carrier Packets) live in
+-- the client entitlement matrix and do not need schema.
+--
+-- `add value if not exists` is transaction-safe in Postgres 12+ as long as the
+-- new label is not used inside the same transaction (it is not).
+
+alter type data_entitlement_kind add value if not exists 'basic_external_intelligence';
+
+-- ===========================================================================
+-- DOWN (manual rollback)
+--   Postgres cannot drop a single enum label. To roll back, recreate the type
+--   without the label only after confirming no `data_entitlements.entitlement`
+--   row uses 'basic_external_intelligence':
+--     select count(*) from data_entitlements
+--       where entitlement = 'basic_external_intelligence';
+--   then:
+--     alter type data_entitlement_kind rename to data_entitlement_kind_old;
+--     create type data_entitlement_kind as enum (
+--       'basic_community_intelligence', 'licensed_market_intelligence',
+--       'high_volume_market_intelligence');
+--     alter table data_entitlements
+--       alter column entitlement type data_entitlement_kind
+--       using entitlement::text::data_entitlement_kind;
+--     drop type data_entitlement_kind_old;
+-- ===========================================================================

@@ -4,7 +4,14 @@ import { Alert, Share, StyleSheet, Text, View } from 'react-native';
 
 import { Card, Pill, RouteBand, Screen } from '@/components';
 import { isFeatureEnabled } from '@/config/flags';
-import { buildCsv, CsvColumn, monthRange, SCAN_TYPES, summarizeRange } from '@/domain';
+import {
+  buildCsv,
+  captureSyncLabel,
+  CsvColumn,
+  monthRange,
+  SCAN_TYPES,
+  summarizeRange,
+} from '@/domain';
 import { Capture, useCapturesStore } from '@/store/captures';
 import { colors, spacing, type } from '@/theme';
 
@@ -19,7 +26,7 @@ const CAPTURE_CSV_COLUMNS: CsvColumn<Capture>[] = [
   { header: 'Vendor', value: (c) => c.vendor },
   { header: 'Amount (USD)', value: (c) => c.totalUsd },
   { header: 'Gallons', value: (c) => c.gallons },
-  { header: 'Synced', value: (c) => (c.status === 'synced' ? 'yes' : 'pending') },
+  { header: 'Synced', value: (c) => captureSyncLabel(c.status) },
 ];
 
 /**
@@ -31,6 +38,7 @@ export default function ReportsScreen() {
   const boardEnabled = isFeatureEnabled('community_rate_board_enabled');
   const brokerCheckEnabled = isFeatureEnabled('broker_check_enabled');
   const roadGradeEnabled = isFeatureEnabled('road_grade_enabled');
+  const roadWalletEnabled = isFeatureEnabled('road_wallet_enabled');
   const captures = useCapturesStore((s) => s.captures);
 
   const month = useMemo(() => monthRange(new Date()), []);
@@ -148,6 +156,16 @@ export default function ReportsScreen() {
           subtitle="Your private log of how each broker pays — on time, in full, detention honored."
           value="Open"
           onPress={() => router.push('/broker-check')}
+        />
+      )}
+      {roadWalletEnabled && (
+        <RouteBand
+          marker="▤"
+          markerTone="green"
+          title="Road Wallet"
+          subtitle="Registrations, insurance, permits and credentials — organized for the road."
+          value="Open"
+          onPress={() => router.push('/road-wallet')}
         />
       )}
       <RouteBand

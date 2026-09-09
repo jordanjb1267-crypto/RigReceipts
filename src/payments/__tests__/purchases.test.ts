@@ -1,3 +1,5 @@
+import { DATA_ENTITLEMENTS } from '@/domain/entitlements';
+
 import {
   createSandboxAdapter,
   entitlementToTier,
@@ -53,6 +55,18 @@ describe('entitlementToTier', () => {
   it('only maps identifiers that exist in the tier map', () => {
     for (const [id, tier] of Object.entries(RC_ENTITLEMENT_TO_TIER)) {
       expect(entitlementToTier([id])).toBe(tier);
+    }
+  });
+
+  it('keeps plan tiers separate from data entitlements (Pass 0)', () => {
+    // RevenueCat sells subscription plans only; data entitlements are never
+    // provider plan identifiers and must not resolve to a tier.
+    expect(Object.keys(RC_ENTITLEMENT_TO_TIER).sort()).toEqual(
+      ['driver_pro', 'fleet_lite', 'lifetime', 'owner_operator'].sort(),
+    );
+    for (const entitlement of DATA_ENTITLEMENTS) {
+      expect(RC_ENTITLEMENT_TO_TIER[entitlement]).toBeUndefined();
+      expect(entitlementToTier([entitlement])).toBe('free');
     }
   });
 });

@@ -17,6 +17,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { initAnalytics } from '@/analytics/provider';
 import { initCaptureSync } from '@/data/captureSync';
+import { initDocumentSync } from '@/data/documentSync';
 import { initSentry } from '@/lib/sentry';
 import { useAuthStore } from '@/store/auth';
 import { useOnboardingStore } from '@/store/onboarding';
@@ -31,6 +32,11 @@ useAuthStore.getState().init();
 void initAnalytics();
 // Backfills the offline capture queue to Supabase whenever a user is signed in.
 initCaptureSync();
+// Road Wallet cloud cycle: recover the signed-in owner's already backed-up
+// documents (tier-independent data access) before any new backup writes
+// (cloudDocumentBackup). Reacts to hydration, auth and tier changes; never
+// depends on a screen being visited; never deletes local content.
+initDocumentSync();
 
 const queryClient = new QueryClient();
 
@@ -105,6 +111,16 @@ export default function RootLayout() {
           <Stack.Screen name="road-grade" options={{ presentation: 'modal' }} />
           <Stack.Screen name="live-mileage" options={{ presentation: 'modal' }} />
           <Stack.Screen name="mileage-review" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="road-wallet" />
+          <Stack.Screen name="add-road-document" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="document-detail" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="quick-present" />
+          <Stack.Screen name="presentation-set-edit" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="carrier-profile" />
+          <Stack.Screen name="carrier-packets" />
+          <Stack.Screen name="carrier-packet-detail" />
+          <Stack.Screen name="carrier-packet-review" />
+          <Stack.Screen name="carrier-packet-template-edit" options={{ presentation: 'modal' }} />
         </Stack>
       </SafeAreaProvider>
     </QueryClientProvider>

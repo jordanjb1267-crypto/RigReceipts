@@ -4,7 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { track } from '@/analytics';
-import { Button, Pill } from '@/components';
+import { Button, ObjectSummary, Pill, StatusSummary } from '@/components';
 import { isFeatureEnabled } from '@/config/flags';
 import {
   ACCOUNTING_LABELS,
@@ -12,6 +12,8 @@ import {
   ClassificationChoice,
   effectiveMiles,
   loadMileage,
+  loadStatusLabel,
+  loadStatusTone,
   NEXT_CHOICES,
   START_CHOICES,
   summarizeSegments,
@@ -139,7 +141,9 @@ export default function LiveMileageScreen() {
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + spacing.md }]}>
         <View style={styles.headerRow}>
-          <Text style={styles.kicker}>Mileage Ledger</Text>
+          <Text style={styles.kicker}>
+            {activeLoad ? `Active load ${activeLoad.loadNumber}` : 'Mileage Ledger'}
+          </Text>
           <Pressable
             accessibilityLabel="Close"
             onPress={() => router.back()}
@@ -148,7 +152,14 @@ export default function LiveMileageScreen() {
             <Text style={styles.closeText}>✕</Text>
           </Pressable>
         </View>
-        <Text style={styles.title}>Live Mileage</Text>
+        <Text style={styles.title}>
+          {active ? ACCOUNTING_LABELS[active.accountingCategory] : 'Live Mileage'}
+        </Text>
+        {activeLoad && (activeLoad.origin || activeLoad.destination) ? (
+          <Text style={styles.subtitle}>
+            {activeLoad.origin ?? '—'} → {activeLoad.destination ?? '—'}
+          </Text>
+        ) : null}
       </View>
 
       <ScrollView
@@ -192,6 +203,40 @@ export default function LiveMileageScreen() {
           </View>
         ) : (
           <>
+            {activeLoad && (
+              <ObjectSummary
+                kicker="Current load"
+                title={`Load ${activeLoad.loadNumber}`}
+                subtitle={
+                  activeLoad.origin || activeLoad.destination
+                    ? `${activeLoad.origin ?? '—'} → ${activeLoad.destination ?? '—'}`
+                    : null
+                }
+                statusLabel={loadStatusLabel(activeLoad.status)}
+                statusTone={loadStatusTone(activeLoad.status)}
+                metrics={
+                  activeLoadMiles
+                    ? [
+                        { label: 'Load total', value: mi(activeLoadMiles.totalMiles) },
+                        { label: 'Loaded', value: mi(activeLoadMiles.loadedMiles) },
+                        { label: 'Deadhead', value: mi(activeLoadMiles.deadheadMiles) },
+                      ]
+                    : undefined
+                }
+              >
+                <StatusSummary
+                  items={[
+                    {
+                      key: 'seg',
+                      label: ACCOUNTING_LABELS[active.accountingCategory],
+                      tone: toneFor(active.accountingCategory),
+                    },
+                    { key: 'rec', label: 'Recording', tone: 'rust' },
+                  ]}
+                />
+              </ObjectSummary>
+            )}
+
             <View style={[styles.card, styles.liveCard]}>
               <View style={styles.liveHead}>
                 <Pill
@@ -247,7 +292,18 @@ export default function LiveMileageScreen() {
               {active.accountingCategory === 'loaded' && (
                 <Button label="Mark Delivered" onPress={confirmDelivered} />
               )}
-              <Button label="Change Status" variant="secondary" onPress={() => setMenu('start')} />
+              {active.accountingCategory !== 'deadhead' &&
+                active.accountingCategory !== 'loaded' && (
+                  <Button label="Change Status" onPress={() => setMenu('start')} />
+                )}
+              {(active.accountingCategory === 'deadhead' ||
+                active.accountingCategory === 'loaded') && (
+                <Button
+                  label="Change Status"
+                  variant="secondary"
+                  onPress={() => setMenu('start')}
+                />
+              )}
               {activeLoad && (
                 <Button
                   label="View Load"
@@ -395,6 +451,7 @@ const styles = StyleSheet.create({
   },
   closeText: { color: colors.text, fontSize: 15 },
   title: { ...type.h1, color: colors.text, marginTop: spacing.sm },
+  subtitle: { ...type.body, color: colors.textMuted, marginTop: spacing.xs },
   body: { paddingHorizontal: spacing.xl, paddingTop: spacing.lg },
   card: {
     backgroundColor: colors.surface,
