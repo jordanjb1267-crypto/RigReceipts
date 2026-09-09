@@ -54,4 +54,13 @@ describe('presentDocTypesForLoad', () => {
   it('is empty for a load with nothing attached', () => {
     expect(presentDocTypesForLoad('L3', manual, captures)).toEqual([]);
   });
+
+  it('honors intendedDocType on an otherwise unrecognized scan', () => {
+    const present = presentDocTypesForLoad(
+      'L3',
+      [],
+      [{ loadId: 'L3', scanType: 'other', intendedDocType: 'rate_confirmation' }],
+    );
+    expect(present).toEqual(['rate_confirmation']);
+  });
 });

@@ -5,6 +5,7 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 import {
   CaptureSyncStatus,
   CloudSyncContext,
+  DocumentType,
   reconcileSyncStatus,
   ScanTypeSlug,
   SyncBinding,
@@ -46,6 +47,8 @@ export interface Capture {
   remoteScanId?: string | null;
   /** Load this scan is filed under, when attached (feeds the Paperwork grade). */
   loadId?: string | null;
+  /** Load paperwork type when the scan was launched from a requirement. */
+  intendedDocType?: DocumentType | null;
   createdAt: number;
 }
 
@@ -82,6 +85,7 @@ export const CAPTURES_PERSIST_VERSION = 1;
 type LegacyCapture = Omit<Capture, 'status' | 'accountOwnerId'> & {
   status?: string;
   accountOwnerId?: string | null;
+  intendedDocType?: DocumentType | null;
 };
 
 /**
@@ -102,6 +106,7 @@ export function normalizeLegacyCapture(raw: LegacyCapture): Capture {
     accountOwnerId,
     remoteScanId: raw.remoteScanId ?? null,
     loadId: raw.loadId ?? null,
+    intendedDocType: raw.intendedDocType ?? null,
   };
 }
 
@@ -132,6 +137,7 @@ export const useCapturesStore = create<CapturesState>()(
           status: binding.status,
           accountOwnerId: binding.accountOwnerId,
           loadId: null,
+          intendedDocType: draft.intendedDocType ?? null,
           createdAt: Date.now(),
         };
         set((s) => ({ captures: [capture, ...s.captures] }));

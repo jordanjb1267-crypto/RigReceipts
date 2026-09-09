@@ -1,4 +1,9 @@
-import { bucketForScanType, scanTypeToExpenseCategory, StorageBucket } from '@/domain';
+import {
+  bucketForStorageClass,
+  expenseCategoryForCapture,
+  storageClassForCapture,
+  StorageBucket,
+} from '@/domain';
 import { getSupabaseClient } from '@/lib/supabase';
 import { Capture, CAPTURE_CLOUD_CAPABILITY, NewCapture, useCapturesStore } from '@/store/captures';
 
@@ -49,8 +54,10 @@ export function normalizedExpenseDate(date: string | null): string | undefined {
 }
 
 /** Bucket a capture's image is written to (C2 — explicit scan-type classification). */
-export function storageBucketForCapture(capture: Pick<Capture, 'scanType'>): StorageBucket {
-  return bucketForScanType(capture.scanType);
+export function storageBucketForCapture(
+  capture: Pick<Capture, 'scanType' | 'intendedDocType'>,
+): StorageBucket {
+  return bucketForStorageClass(storageClassForCapture(capture));
 }
 
 interface UploadedImage {
@@ -107,7 +114,7 @@ export async function syncCapture(capture: Capture): Promise<string | null> {
 
   // Accounting classification is independent of storage classification: a
   // permit stored in `documents` still books its expense.
-  const category = scanTypeToExpenseCategory(capture.scanType);
+  const category = expenseCategoryForCapture(capture);
   if (category && capture.totalUsd !== null) {
     // Effect boundary #3 — re-checked immediately before the row write.
     const userId = assertRemoteEffectAuthorized(CAPTURE_CLOUD_CAPABILITY, capture.accountOwnerId);

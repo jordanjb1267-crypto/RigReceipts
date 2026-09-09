@@ -1,17 +1,27 @@
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
-import { useRouter } from 'expo-router';
-import { useRef, useState } from 'react';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button, Card, Pill, RouteBand, Screen } from '@/components';
 import { isFeatureEnabled } from '@/config/flags';
 import { createCapture } from '@/data/captureSync';
-import { CaptureSyncStatus, SCAN_TYPES, ScanTypeSlug } from '@/domain';
+import { attachConfirmedCaptureToLoad } from '@/data/loadScanAttach';
+import {
+  CaptureSyncStatus,
+  DOCUMENT_TYPES,
+  DocumentType,
+  documentTypeLabel,
+  SCAN_TYPES,
+  ScanTypeSlug,
+} from '@/domain';
 import { OcrEngineName, parseReceipt, recognizeDocument } from '@/ocr';
 import { useAuthStore } from '@/store/auth';
 import { useCapturesStore } from '@/store/captures';
+import { useLoadsStore } from '@/store/loads';
+import { ScanLaunchContext, useScanContextStore } from '@/store/scanContext';
 import { colors, palette, radii, spacing, type } from '@/theme';
 
 type Stage = 'picker' | 'camera' | 'processing' | 'review' | 'saved';
@@ -32,13 +42,53 @@ interface Draft {
  * review → save to the offline queue. OCR is never trusted silently: the review
  * sheet always requires a confirm before a record is created.
  */
+function parseScanType(value?: string): ScanTypeSlug | null {
+  return SCAN_TYPES.some((t) => t.slug === value) ? (value as ScanTypeSlug) : null;
+}
+
+function parseDocType(value?: string): DocumentType | null {
+  return (DOCUMENT_TYPES as readonly string[]).includes(value ?? '')
+    ? (value as DocumentType)
+    : null;
+}
+
 export default function ScanScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{
+    loadId?: string;
+    scanType?: string;
+    intendedDocType?: string;
+    sourceAction?: string;
+  }>();
   const [stage, setStage] = useState<Stage>('picker');
   const [scanType, setScanType] = useState<ScanTypeSlug>('receipt');
   const [draft, setDraft] = useState<Draft | null>(null);
   const [savedStatus, setSavedStatus] = useState<CaptureSyncStatus>('local_only');
+  const [bound, setBound] = useState<ScanLaunchContext | null>(null);
+  const [filedLoadId, setFiledLoadId] = useState<string | null>(null);
   const signedIn = useAuthStore((s) => s.status === 'signed_in');
+  const storeContext = useScanContextStore((s) => s.context);
+
+  useFocusEffect(
+    useCallback(() => {
+      const intended = parseDocType(params.intendedDocType);
+      const fromParams =
+        params.loadId && intended
+          ? {
+              loadId: params.loadId,
+              intendedDocType: intended,
+              scanType: parseScanType(params.scanType) ?? 'other',
+              sourceAction: params.sourceAction ?? 'missing_document',
+            }
+          : null;
+      const next = fromParams ?? storeContext;
+      if (next) {
+        setBound(next);
+        setScanType(next.scanType);
+        useScanContextStore.getState().setContext(next);
+      }
+    }, [params.intendedDocType, params.loadId, params.scanType, params.sourceAction, storeContext]),
+  );
 
   const runOcr = async (imageUri: string | null, forceStub: boolean) => {
     setStage('processing');
@@ -59,6 +109,9 @@ export default function ScanScreen() {
 
   const reset = () => {
     setDraft(null);
+    setBound(null);
+    setFiledLoadId(null);
+    useScanContextStore.getState().clear();
     setStage('picker');
   };
 
@@ -78,7 +131,12 @@ export default function ScanScreen() {
       {stage === 'picker' && (
         <Picker
           scanType={scanType}
+          bound={bound}
           onPick={setScanType}
+          onClearBound={() => {
+            setBound(null);
+            useScanContextStore.getState().clear();
+          }}
           onOpenCamera={() => setStage('camera')}
           onChoosePhoto={async () => {
             const res = await ImagePicker.launchImageLibraryAsync({ quality: 0.7 });
@@ -99,9 +157,11 @@ export default function ScanScreen() {
       {stage === 'review' && draft && (
         <ReviewSheet
           draft={draft}
+          bound={bound}
           onChange={setDraft}
-          onSaved={(status) => {
+          onSaved={(status, attachedLoadId) => {
             setSavedStatus(status);
+            setFiledLoadId(attachedLoadId);
             setStage('saved');
           }}
           onCancel={reset}
@@ -109,7 +169,13 @@ export default function ScanScreen() {
       )}
 
       {stage === 'saved' && (
-        <SavedConfirm onAnother={reset} signedIn={signedIn} status={savedStatus} />
+        <SavedConfirm
+          onAnother={reset}
+          signedIn={signedIn}
+          status={savedStatus}
+          filedLoadId={filedLoadId}
+          bound={bound}
+        />
       )}
     </Screen>
   );
@@ -119,22 +185,43 @@ export default function ScanScreen() {
 
 function Picker({
   scanType,
+  bound,
   onPick,
+  onClearBound,
   onOpenCamera,
   onChoosePhoto,
   onUseSample,
   onAddRoadDocument,
 }: {
   scanType: ScanTypeSlug;
+  bound: ScanLaunchContext | null;
   onPick: (t: ScanTypeSlug) => void;
+  onClearBound: () => void;
   onOpenCamera: () => void;
   onChoosePhoto: () => void;
   onUseSample: () => void;
   /** Road Wallet capture entry — a separate workflow, not a scan type (Pass 1B §22). */
   onAddRoadDocument: () => void;
 }) {
+  const loads = useLoadsStore((s) => s.loads);
+  const boundLoad = bound ? loads.find((l) => l.id === bound.loadId) : null;
   return (
     <>
+      {bound && (
+        <Card dark label="Load requirement" labelRight={bound.sourceAction.replace(/_/g, ' ')}>
+          <Text style={styles.boundTitle}>
+            Scan {documentTypeLabel(bound.intendedDocType)}
+            {boundLoad ? ` for Load ${boundLoad.loadNumber}` : ''}
+          </Text>
+          <Text style={styles.boundCopy}>
+            OCR is never trusted silently. Confirm the review sheet, then this capture files to the
+            load. Nothing is sent externally.
+          </Text>
+          <Pressable onPress={onClearBound} style={styles.sampleLink}>
+            <Text style={styles.sampleLinkText}>Scan without attaching →</Text>
+          </Pressable>
+        </Card>
+      )}
       <View style={styles.chips}>
         {SCAN_TYPES.map((t) => {
           const active = t.slug === scanType;
@@ -259,20 +346,23 @@ function CameraCapture({
 
 function ReviewSheet({
   draft,
+  bound,
   onChange,
   onSaved,
   onCancel,
 }: {
   draft: Draft;
+  bound: ScanLaunchContext | null;
   onChange: (d: Draft) => void;
-  onSaved: (status: CaptureSyncStatus) => void;
+  onSaved: (status: CaptureSyncStatus, attachedLoadId: string | null) => void;
   onCancel: () => void;
 }) {
   const isFuel = draft.scanType === 'fuel' || draft.gallons !== '';
 
   const save = () => {
     // Owner binding, initial sync state and any immediate upload are decided
-    // by the cloud-sync boundary, never by this screen.
+    // by the cloud-sync boundary, never by this screen. OCR is never trusted
+    // until this explicit confirm.
     const id = createCapture({
       scanType: draft.scanType,
       imageUri: draft.imageUri,
@@ -282,9 +372,13 @@ function ReviewSheet({
       totalUsd: draft.total ? Number(draft.total) : null,
       date: draft.date.trim() || null,
       gallons: draft.gallons ? Number(draft.gallons) : null,
+      intendedDocType: bound?.intendedDocType ?? null,
     });
+    if (bound) {
+      attachConfirmedCaptureToLoad(id, bound.loadId, bound.intendedDocType);
+    }
     const saved = useCapturesStore.getState().captures.find((c) => c.id === id);
-    onSaved(saved?.status ?? 'local_only');
+    onSaved(saved?.status ?? 'local_only', bound?.loadId ?? null);
   };
 
   return (
@@ -297,7 +391,15 @@ function ReviewSheet({
         <Text style={styles.reviewNote}>Check these before saving.</Text>
       </View>
 
-      <Card dark label="Document" labelRight={labelFor(draft.scanType)}>
+      <Card
+        dark
+        label="Document"
+        labelRight={
+          bound
+            ? `${labelFor(draft.scanType)} · ${documentTypeLabel(bound.intendedDocType)}`
+            : labelFor(draft.scanType)
+        }
+      >
         <Field
           label="Vendor"
           value={draft.vendor}
@@ -330,7 +432,7 @@ function ReviewSheet({
       </Card>
 
       <View style={styles.reviewActions}>
-        <Button label="Confirm & Save" onPress={save} />
+        <Button label={bound ? 'Confirm, save & file to load' : 'Confirm & Save'} onPress={save} />
         <Button label="Discard" variant="secondary" dark onPress={onCancel} />
       </View>
     </>
@@ -403,19 +505,42 @@ function SavedConfirm({
   onAnother,
   signedIn,
   status,
+  filedLoadId,
+  bound,
 }: {
   onAnother: () => void;
   signedIn: boolean;
   status: CaptureSyncStatus;
+  filedLoadId: string | null;
+  bound: ScanLaunchContext | null;
 }) {
+  const router = useRouter();
   const copy = savedCopy(status, signedIn);
+  const load = filedLoadId
+    ? useLoadsStore.getState().loads.find((l) => l.id === filedLoadId)
+    : null;
   return (
     <>
       <Card dark label="Saved" labelRight={copy.label}>
         <Text style={styles.savedTitle}>{copy.title}</Text>
         <Text style={styles.savedCopy}>{copy.body}</Text>
+        {filedLoadId && bound && (
+          <Text style={[styles.savedCopy, { marginTop: spacing.md }]}>
+            Filed to Load {load?.loadNumber ?? filedLoadId} as{' '}
+            {documentTypeLabel(bound.intendedDocType)}. Local paperwork only — not sent, delivered,
+            or accepted.
+          </Text>
+        )}
       </Card>
-      <View style={{ marginTop: spacing.lg }}>
+      <View style={{ marginTop: spacing.lg, gap: spacing.sm }}>
+        {filedLoadId && (
+          <Button
+            label="View Load"
+            variant="secondary"
+            dark
+            onPress={() => router.push({ pathname: '/load-detail', params: { id: filedLoadId } })}
+          />
+        )}
         <Button label="Scan Another" onPress={onAnother} />
       </View>
     </>
@@ -598,6 +723,15 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   savedCopy: {
+    ...type.body,
+    color: 'rgba(244, 241, 232, 0.7)',
+  },
+  boundTitle: {
+    ...type.h2,
+    color: colors.textOnDark,
+    marginBottom: spacing.sm,
+  },
+  boundCopy: {
     ...type.body,
     color: 'rgba(244, 241, 232, 0.7)',
   },
