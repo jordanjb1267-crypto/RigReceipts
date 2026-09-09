@@ -8,9 +8,11 @@ import { normalizeLoad, useLoadsStore } from '@/store/loads';
 import { useMileageStore } from '@/store/mileage';
 import { useReceivablesStore } from '@/store/receivables';
 
+import { useProductNowMs } from './productNow';
 import { useActionItems } from './useActionItems';
 
 export function useLoadEconomicsPacket(loadId: string | undefined) {
+  const nowMs = useProductNowMs();
   const rawLoad = useLoadsStore((s) => s.loads.find((l) => l.id === loadId));
   const docs = useLoadDocsStore((s) => s.docs);
   const captures = useCapturesStore((s) => s.captures);
@@ -39,7 +41,7 @@ export function useLoadEconomicsPacket(loadId: string | undefined) {
       targets,
       variableCostPerMile: profile?.variableCostPerMile,
       actionItems: actionItemsForLoad(actionItems, load.id),
-      nowMs: Date.now(),
+      nowMs,
     });
-  }, [rawLoad, docs, captures, receivables, segments, profile, actionItems]);
+  }, [rawLoad, docs, captures, receivables, segments, profile, actionItems, nowMs]);
 }

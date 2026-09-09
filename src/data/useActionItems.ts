@@ -10,10 +10,12 @@ import { normalizeLoad, useLoadsStore } from '@/store/loads';
 import { useMileageStore } from '@/store/mileage';
 import { useReceivablesStore } from '@/store/receivables';
 
+import { useProductNowMs } from './productNow';
 import { useRoadWalletSummary } from './useRoadWalletSummary';
 
 /** Derived Today / Needs Action items from current product stores. */
 export function useActionItems() {
+  const nowMs = useProductNowMs();
   const loads = useLoadsStore((s) => s.loads);
   const docs = useLoadDocsStore((s) => s.docs);
   const captures = useCapturesStore((s) => s.captures);
@@ -41,9 +43,10 @@ export function useActionItems() {
               status: p.status,
             }))
           : null,
-        nowMs: Date.now(),
+        nowMs,
       }),
     [
+      nowMs,
       loads,
       docs,
       captures,
