@@ -44,8 +44,30 @@ broker watchlist → Driver Pro; full FI + unlimited rate checks + lane history 
 Owner-Operator; card creation/sharing + board viewing + safety controls → free).
 Keeps existing `fleet_lite`. One subscription system. Adds the
 **provider-agnostic data-entitlement layer** (Section 44) so future licensed
-commercial data is gated separately — lifetime includes only
-`basic_community_intelligence`, never unlimited licensed data.
+commercial data is gated separately — lifetime includes only the basic
+entitlements (`basic_community_intelligence`, `basic_external_intelligence`),
+never unlimited licensed data.
+
+**Refinement Pass 0 (2026-09-02)** extends the same ladder — prices and free
+caps unchanged — with Road Wallet / Quick Present / Carrier Packet software
+gates and the `basic_external_intelligence` data entitlement (DB mirror:
+`supabase/migrations/20260902000011_pass0_entitlements.sql`). Feature flags
+`road_wallet_enabled`, `quick_present_enabled`, `document_expiry_alerts_enabled`,
+`carrier_profile_enabled`, `carrier_packet_builder_enabled`,
+`carrier_packet_history_enabled`, `multi_unit_documents_enabled` all default
+`off`.
+
+| Capability                                                                                                           | Free | Driver Pro | Owner-Operator | Fleet Lite | Lifetime |
+| -------------------------------------------------------------------------------------------------------------------- | ---- | ---------- | -------------- | ---------- | -------- |
+| `roadWalletBasic`, `quickPresent` (local/offline, no document-count gate)                                            | yes  | yes        | yes            | yes        | yes      |
+| `unlimitedRoadWallet`, `cloudDocumentBackup`, `documentExpiryAlerts`, `savedPresentationSets`, `documentShareExport` | no   | yes        | yes            | yes        | yes      |
+| `carrierProfile`, `carrierPacketBuilder`, `carrierPacketTemplates`, `carrierPacketHistory`                           | no   | no         | yes            | yes        | yes      |
+| `multiTruckDocumentWallet`, `fleetDocumentStatus`, `multiUnitPacketSupplements`                                      | no   | no         | no             | yes        | no       |
+| `basic_community_intelligence`, `basic_external_intelligence` (data)                                                 | yes  | yes        | yes            | yes        | yes      |
+| `licensed_market_intelligence`, `high_volume_market_intelligence` (data)                                             | no   | no         | no             | no         | no       |
+
+`basicDestinationOutlook` is defined at `free` for the frozen future contract
+only; no external-data feature is implemented in Passes 0–3.
 
 ### Analytics — `src/analytics/`
 

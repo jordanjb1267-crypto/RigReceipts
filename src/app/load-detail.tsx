@@ -3,17 +3,31 @@ import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Button, Pill } from '@/components';
+import {
+  Button,
+  EvidenceAction,
+  NextActionCard,
+  ObjectSummary,
+  PacketProgress,
+  Pill,
+  StatusSummary,
+} from '@/components';
+import { launchAction } from '@/data/launchAction';
+import { useLoadEconomicsPacket } from '@/data/useLoadEconomicsPacket';
 import {
   deriveLoadRate,
   DocumentType,
   documentTypeForScanType,
   documentTypeLabel,
   estimateAllMileTargets,
+  isCompletedLoad,
   isRecognizedDocScanType,
   loadMileage,
   loadRateStatusLabel,
   loadRateStatusTone,
+  loadStatusLabel,
+  loadStatusTone,
+  scanTypeForDocumentType,
   ReceivableType,
   receivableOutstanding,
   receivableStatusLabel,
@@ -37,7 +51,7 @@ const usd = (n: number) => `$${n.toLocaleString(undefined, { maximumFractionDigi
 const round1 = (n: number): number => Math.round(n * 10) / 10;
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
-/** Load detail: revenue + miles, documents, and receivables — the grade inputs. */
+/** Load Economics Packet: one load, current state, one next action, evidence. */
 export default function LoadDetailScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -45,6 +59,7 @@ export default function LoadDetailScreen() {
 
   const rawLoad = useLoadsStore((s) => s.loads.find((l) => l.id === id));
   const updateLoad = useLoadsStore((s) => s.updateLoad);
+  const setStatus = useLoadsStore((s) => s.setStatus);
   const profile = useCostProfileStore((s) => s.profile);
 
   const docs = useLoadDocsStore((s) => s.docs);
@@ -58,6 +73,7 @@ export default function LoadDetailScreen() {
   const captures = useCapturesStore((s) => s.captures);
   const assignCaptureToLoad = useCapturesStore((s) => s.assignCaptureToLoad);
   const segments = useMileageStore((s) => s.segments);
+  const packet = useLoadEconomicsPacket(typeof id === 'string' ? id : undefined);
 
   const load = rawLoad ? normalizeLoad(rawLoad) : null;
 
@@ -78,7 +94,7 @@ export default function LoadDetailScreen() {
       <View style={styles.root}>
         <View style={[styles.header, { paddingTop: insets.top + spacing.md }]}>
           <View style={styles.headerRow}>
-            <Text style={styles.kicker}>Load Packets</Text>
+            <Text style={styles.kicker}>Load Economics Packet</Text>
             <Pressable
               accessibilityLabel="Close"
               onPress={() => router.back()}
@@ -97,15 +113,24 @@ export default function LoadDetailScreen() {
     .filter((d) => d.loadId === load.id && d.status !== 'missing')
     .map((d) => d.docType);
 
+  const attachedScans = captures.filter((c) => c.loadId === load.id);
+  const availableScans = captures.filter((c) => !c.loadId && isRecognizedDocScanType(c.scanType));
+  const scannedTypes = new Set(
+    attachedScans.map((c) => c.intendedDocType ?? documentTypeForScanType(c.scanType)),
+  );
+
   const rate = deriveLoadRate(
     {
       grossRate: num(gross),
       fuelSurcharge: num(fsc),
       loadedMiles: num(loaded),
       deadheadMiles: num(deadhead),
-      completed: false,
+      completed: isCompletedLoad(load.status),
       bolRequired: load.bolRequired,
-      presentDocTypes: [],
+      presentDocTypes:
+        packet?.paperwork.requirements
+          .filter((r) => r.state === 'satisfied')
+          .map((r) => r.docType) ?? [],
     },
     targets,
     profile?.variableCostPerMile,
@@ -143,9 +168,6 @@ export default function LoadDetailScreen() {
     'scale_ticket',
     'lumper_receipt',
   ];
-  const attachedScans = captures.filter((c) => c.loadId === load.id);
-  const availableScans = captures.filter((c) => !c.loadId && isRecognizedDocScanType(c.scanType));
-  const scannedTypes = new Set(attachedScans.map((c) => documentTypeForScanType(c.scanType)));
   const loadReceivables = receivables.filter((r) => r.loadId === load.id);
 
   const addRcv = () => {
@@ -163,11 +185,39 @@ export default function LoadDetailScreen() {
     setRcvAmount('');
   };
 
+  const heroMetrics = [
+    packet?.grossRate != null ? { label: 'Gross', value: usd(packet.grossRate) } : null,
+    packet?.allMileRpm != null
+      ? { label: 'All-mile RPM', value: `$${packet.allMileRpm.toFixed(2)}` }
+      : null,
+    packet?.plannedMiles.loadedMiles != null
+      ? { label: 'Loaded mi', value: String(packet.plannedMiles.loadedMiles) }
+      : null,
+    packet?.plannedMiles.deadheadMiles != null
+      ? { label: 'Deadhead mi', value: String(packet.plannedMiles.deadheadMiles) }
+      : null,
+    packet?.plannedMiles.totalMiles != null
+      ? { label: 'Planned total', value: String(packet.plannedMiles.totalMiles) }
+      : null,
+    packet?.actualLiveMileage
+      ? { label: 'Live miles', value: String(packet.actualLiveMileage.totalMiles) }
+      : null,
+    packet?.estimatedContribution != null
+      ? { label: 'Est. contribution', value: usd(packet.estimatedContribution) }
+      : null,
+    packet?.outstandingReceivableUsd != null
+      ? { label: 'Owed', value: usd(packet.outstandingReceivableUsd) }
+      : null,
+  ].filter((m): m is { label: string; value: string } => m !== null);
+
+  const route =
+    load.origin || load.destination ? `${load.origin ?? '—'} → ${load.destination ?? '—'}` : null;
+
   return (
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + spacing.md }]}>
         <View style={styles.headerRow}>
-          <Text style={styles.kicker}>Load Packets</Text>
+          <Text style={styles.kicker}>Load Economics Packet</Text>
           <Pressable
             accessibilityLabel="Close"
             onPress={() => router.back()}
@@ -176,19 +226,90 @@ export default function LoadDetailScreen() {
             <Text style={styles.closeText}>✕</Text>
           </Pressable>
         </View>
-        <Text style={styles.title}>Load {load.loadNumber}</Text>
-        {(load.origin || load.destination) && (
-          <Text style={styles.subtitle}>
-            {load.origin ?? '—'} → {load.destination ?? '—'}
-          </Text>
-        )}
       </View>
 
       <ScrollView
         contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + spacing.xxl }]}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Revenue & miles */}
+        <ObjectSummary
+          kicker="Current load"
+          title={`Load ${load.loadNumber}`}
+          subtitle={route}
+          statusLabel={loadStatusLabel(load.status)}
+          statusTone={loadStatusTone(load.status)}
+          metrics={heroMetrics}
+        >
+          <StatusSummary
+            items={[
+              {
+                key: 'rate',
+                label: loadRateStatusLabel(packet?.rateStatus ?? rate.rateStatus),
+                tone: loadRateStatusTone(packet?.rateStatus ?? rate.rateStatus),
+              },
+              {
+                key: 'docs',
+                label:
+                  (packet?.documentsRemainingCount ?? 0) > 0
+                    ? `${packet?.documentsRemainingCount} docs left`
+                    : 'Required docs present',
+                tone: (packet?.documentsRemainingCount ?? 0) > 0 ? 'amber' : 'green',
+              },
+              {
+                key: 'local',
+                label: packet?.localComplete ? 'Local paperwork complete' : 'Local packet open',
+                tone: packet?.localComplete ? 'green' : 'neutral',
+              },
+            ]}
+          />
+          <Text style={styles.boundary}>
+            Local complete is not shared, delivered, or recipient-accepted. Paid miles are not
+            modeled. Live Mileage stays separate from planned miles.
+          </Text>
+        </ObjectSummary>
+
+        {packet && (
+          <View style={styles.card}>
+            <PacketProgress
+              label="Documents & actions remaining"
+              steps={[
+                ...packet.paperwork.requirements
+                  .filter((r) => r.required)
+                  .map((r) => ({
+                    key: r.docType,
+                    label: r.label,
+                    done: r.state === 'satisfied',
+                    required: true,
+                  })),
+                {
+                  key: 'economics',
+                  label: 'Gross rate and loaded miles',
+                  done: load.grossRate !== null && load.loadedMiles !== null,
+                  required: true,
+                },
+                {
+                  key: 'receivables',
+                  label:
+                    packet.outstandingReceivableUsd != null && packet.outstandingReceivableUsd > 0
+                      ? `Outstanding ${usd(packet.outstandingReceivableUsd)}`
+                      : 'No outstanding accessorials',
+                  done:
+                    packet.outstandingReceivableUsd === null ||
+                    packet.outstandingReceivableUsd === 0,
+                },
+              ]}
+            />
+          </View>
+        )}
+
+        {packet?.primaryAction && (
+          <NextActionCard
+            item={packet.primaryAction}
+            ctaLabel={packet.primaryAction.kind === 'missing_document' ? 'Scan now' : 'Open'}
+            onPress={() => launchAction(packet.primaryAction!, router)}
+          />
+        )}
+
         <View style={styles.card}>
           <View style={styles.cardHead}>
             <Text style={styles.cardTitle}>Revenue &amp; miles</Text>
@@ -218,7 +339,6 @@ export default function LoadDetailScreen() {
           <Button label="Save revenue" onPress={saveRevenue} />
         </View>
 
-        {/* Actual miles from Live Mileage */}
         {hasActual && (
           <View style={styles.card}>
             <View style={styles.cardHead}>
@@ -234,6 +354,9 @@ export default function LoadDetailScreen() {
                 : ''}{' '}
               · {actual.totalMiles} total
             </Text>
+            <Text style={styles.hint}>
+              Actual GPS / session miles are not planned miles and not paid miles.
+            </Text>
             {rate.allMileRpm !== null && actualAllMileRpm !== null && (
               <Text style={styles.hint}>
                 Estimated all-mile RPM {rate.allMileRpm.toFixed(2)} → actual{' '}
@@ -244,9 +367,12 @@ export default function LoadDetailScreen() {
           </View>
         )}
 
-        {/* Documents */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Documents</Text>
+          <Text style={styles.hint}>
+            Requirement (what this load needs) is separate from each captured artifact. Status here
+            is local paperwork — not delivery.
+          </Text>
           <View style={styles.bolRow}>
             <Text style={styles.bolLabel}>BOL required for this load</Text>
             <Switch
@@ -256,7 +382,7 @@ export default function LoadDetailScreen() {
             />
           </View>
           {docTypes.map((t) => {
-            const present = presentTypes.includes(t);
+            const present = presentTypes.includes(t) || scannedTypes.has(t);
             const isRequired = required.includes(t);
             return (
               <View key={t} style={styles.docRow}>
@@ -267,24 +393,55 @@ export default function LoadDetailScreen() {
                   </Text>
                   {isRequired && <Text style={styles.docReq}>Required for completed loads</Text>}
                 </View>
-                <Switch
-                  value={present || scannedTypes.has(t)}
-                  disabled={scannedTypes.has(t)}
-                  onValueChange={() => toggleDoc(t, present)}
-                  trackColor={{ true: palette.routeGreen, false: '#c9c5bc' }}
-                />
+                {!present && isRequired ? (
+                  <Pressable
+                    accessibilityLabel={`Scan ${documentTypeLabel(t)}`}
+                    onPress={() => {
+                      launchAction(
+                        {
+                          id: `missing_document:load:${load.id}:${t}`,
+                          sourceObjectType: 'load',
+                          sourceObjectId: load.id,
+                          kind: 'missing_document',
+                          urgency: 'now',
+                          title: `Scan ${documentTypeLabel(t)}`,
+                          context: route ?? `Load ${load.loadNumber}`,
+                          deepLink: {
+                            pathname: '/(tabs)/scan',
+                            params: {
+                              loadId: load.id,
+                              intendedDocType: t,
+                              scanType: scanTypeForDocumentType(t),
+                              sourceAction: 'missing_document',
+                            },
+                          },
+                          reason: `Required ${documentTypeLabel(t)} is not present.`,
+                        },
+                        router,
+                      );
+                    }}
+                  >
+                    <Text style={styles.attach}>Scan</Text>
+                  </Pressable>
+                ) : (
+                  <Switch
+                    value={present}
+                    disabled={scannedTypes.has(t)}
+                    onValueChange={() => toggleDoc(t, presentTypes.includes(t))}
+                    trackColor={{ true: palette.routeGreen, false: '#c9c5bc' }}
+                  />
+                )}
               </View>
             );
           })}
         </View>
 
-        {/* Attached scans */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Attached scans</Text>
           {attachedScans.length === 0 && availableScans.length === 0 ? (
             <Text style={styles.hint}>
-              Scans you capture on the Scan tab can be filed here — a BOL or POD then counts toward
-              this load&apos;s paperwork automatically.
+              Launch Scan from a missing document, or attach a scan already on this device. Confirm
+              before save. Nothing is sent externally.
             </Text>
           ) : (
             <>
@@ -292,7 +449,7 @@ export default function LoadDetailScreen() {
                 <View key={c.id} style={styles.docRow}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.docLabel}>
-                      {documentTypeLabel(documentTypeForScanType(c.scanType))}
+                      {documentTypeLabel(c.intendedDocType ?? documentTypeForScanType(c.scanType))}
                     </Text>
                     {c.vendor && <Text style={styles.docReq}>{c.vendor}</Text>}
                   </View>
@@ -310,7 +467,7 @@ export default function LoadDetailScreen() {
                 <View key={c.id} style={styles.docRow}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.docLabel}>
-                      {documentTypeLabel(documentTypeForScanType(c.scanType))}
+                      {documentTypeLabel(c.intendedDocType ?? documentTypeForScanType(c.scanType))}
                     </Text>
                     <Text style={styles.docReq}>
                       {c.vendor ?? c.date ?? new Date(c.createdAt).toISOString().slice(0, 10)}
@@ -329,7 +486,6 @@ export default function LoadDetailScreen() {
           )}
         </View>
 
-        {/* Receivables */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Money owed</Text>
           {loadReceivables.length === 0 ? (
@@ -379,6 +535,21 @@ export default function LoadDetailScreen() {
             <Button label="Add" variant="secondary" disabled={!num(rcvAmount)} onPress={addRcv} />
           </View>
         </View>
+
+        {load.status === 'delivered' && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Local closeout</Text>
+            <Text style={styles.hint}>
+              Marking paid is your confirmation that settlement reached you. It is not broker
+              acceptance, delivery proof, or a network event.
+            </Text>
+            <EvidenceAction
+              label="Mark load paid"
+              hint="Explicit confirmation only. Carrier Packet SHARED semantics are unchanged."
+              onPress={() => setStatus(load.id, 'paid')}
+            />
+          </View>
+        )}
       </ScrollView>
     </View>
   );
@@ -429,7 +600,6 @@ const styles = StyleSheet.create({
   },
   closeText: { color: colors.text, fontSize: 15 },
   title: { ...type.h1, color: colors.text, marginTop: spacing.sm },
-  subtitle: { ...type.body, color: colors.textMuted, marginTop: spacing.xs },
   body: { paddingHorizontal: spacing.xl, paddingTop: spacing.lg },
   card: {
     backgroundColor: colors.surface,
@@ -437,6 +607,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     borderWidth: 1,
     marginBottom: spacing.md,
+    marginTop: spacing.md,
     padding: spacing.lg,
   },
   cardHead: {
@@ -446,6 +617,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   cardTitle: { ...type.h2, color: colors.text, marginBottom: spacing.md },
+  boundary: { ...type.bodySmall, color: colors.textMuted, marginTop: spacing.md },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
   field: { flexBasis: '46%', flexGrow: 1, marginBottom: spacing.sm },
   fieldLabel: { ...type.labelTiny, color: colors.textMuted, marginBottom: 4 },

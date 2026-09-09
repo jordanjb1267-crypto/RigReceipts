@@ -87,6 +87,11 @@ export interface ManualLoadDoc {
 export interface AttachableCapture {
   loadId?: string | null;
   scanType: string;
+  /**
+   * When a scan is launched from a load requirement (e.g. rate confirmation),
+   * the intended paperwork type wins over `documentTypeForScanType`.
+   */
+  intendedDocType?: DocumentType | null;
 }
 
 /**
@@ -105,6 +110,10 @@ export function presentDocTypesForLoad(
   }
   for (const c of captures) {
     if (c.loadId !== loadId) continue;
+    if (c.intendedDocType) {
+      set.add(c.intendedDocType);
+      continue;
+    }
     const t = documentTypeForScanType(c.scanType);
     if (t !== 'other') set.add(t);
   }

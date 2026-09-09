@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { track } from '@/analytics';
 import { Button, Pill } from '@/components';
-import { TIER_INFO, Tier } from '@/domain';
+import { PAYWALL_TRIGGER_COPY, resolvePaywallTrigger, TIER_INFO, Tier } from '@/domain';
 import { createPurchasesAdapter, purchasesMode } from '@/payments/purchases';
 import { useSubscriptionStore } from '@/store/subscription';
 import { colors, fonts, radii, spacing, type } from '@/theme';
@@ -15,24 +15,6 @@ const MODE_NOTE: Record<ReturnType<typeof purchasesMode>, string> = {
     'Sandbox purchases — App Store / Google Play billing connects via RevenueCat before launch.',
   test_store: 'RevenueCat Test Store — purchases are simulated on this build, not charged.',
   live: 'Secure billing through RevenueCat, the App Store, and Google Play.',
-};
-
-type PaywallTrigger = 'rate_check_limit' | 'compare' | 'lane_history';
-
-/** Contextual copy per trigger (Section 46). Never leads with storage/limits. */
-const TRIGGER_COPY: Record<PaywallTrigger, { headline: string; body: string }> = {
-  rate_check_limit: {
-    headline: 'Keep checking loads with your real numbers.',
-    body: 'Upgrade to Owner-Operator for unlimited Rate Checks, personal break-even analysis, advanced lane comparisons, and Freight Intelligence alerts.',
-  },
-  compare: {
-    headline: 'See what this rate means for your truck.',
-    body: 'Compare community rates with your actual fuel, deadhead, fixed costs, and target profit.',
-  },
-  lane_history: {
-    headline: 'See how this lane has been moving.',
-    body: 'Unlock extended community history, verified rate trends, and personalized lane comparisons.',
-  },
 };
 
 /** Value hierarchy — four points, amber checks (design handoff §22). */
@@ -48,8 +30,8 @@ export default function PaywallModal() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const params = useLocalSearchParams<{ trigger?: string }>();
-  const trigger = (params.trigger as PaywallTrigger) ?? 'rate_check_limit';
-  const copy = TRIGGER_COPY[trigger] ?? TRIGGER_COPY.rate_check_limit;
+  const trigger = resolvePaywallTrigger(params.trigger);
+  const copy = PAYWALL_TRIGGER_COPY[trigger];
 
   const setTier = useSubscriptionStore((s) => s.setTier);
   const [purchasing, setPurchasing] = useState<Tier | null>(null);

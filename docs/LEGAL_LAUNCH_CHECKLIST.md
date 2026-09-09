@@ -135,6 +135,23 @@ governing-law text).
 - [ ] Sign all §2 DPAs; confirm cross-border transfer coverage.
 - [ ] Verify the store forms (§3, §4) match the shipped flag set before submitting.
 
+## 7. Road Wallet release gate (feature-flagged OFF; not yet released)
+
+Blockers before `road_wallet_enabled` may be turned on (see `docs/ROAD_WALLET.md`):
+
+- [ ] Privacy Policy describes operational-document storage, including
+      potentially personal/medical (CDL, medical, TWIC) and financial-sensitive
+      (W-9, factoring, banking, lease) documents, device-local storage, and
+      optional Driver Pro cloud backup.
+- [ ] App Store privacy label (§3) reviewed for user-content documents and
+      sensitive-info categories.
+- [ ] Google Play Data Safety (§4) reviewed for files & docs.
+- [ ] Retention / delete / export behaviour reviewed: archive vs delete,
+      metadata-only JSON export (no binary files), account-deletion cascade.
+- [ ] Real-device storage, camera/picker and share-sheet behaviour tested.
+- [ ] Clean Supabase bootstrap + two-user RLS validation of migrations
+      00011–00014 completed independently.
+
 ---
 
 _Pair with `docs/RELEASE_READINESS.md` (§2D) and `docs/LAUNCH_COMMANDS.md`. The

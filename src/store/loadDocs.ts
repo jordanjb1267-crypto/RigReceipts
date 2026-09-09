@@ -5,9 +5,12 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 import { DocumentStatus, DocumentType } from '@/domain';
 
 /**
- * Documents attached to a load (the load packet). Local, offline-first, keyed
- * by loadId + docType. A document is "present" for the Paperwork grade once its
- * status is anything but `missing`. Optionally links to a captured scan.
+ * Load paperwork *slot* (the load packet). Local, offline-first, keyed by
+ * loadId + docType. This is the current local status for a requirement type —
+ * not a versioned artifact and not a Road Wallet DocumentVersion.
+ * Multiple same-type captures attach as artifacts; this slot points at the
+ * current `scanId` after explicit confirmation. A document is "present" for the
+ * Paperwork grade once its status is anything but `missing`.
  */
 export interface LoadDocRecord {
   id: string;

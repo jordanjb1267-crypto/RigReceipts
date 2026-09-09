@@ -1,5 +1,5 @@
-import { useRouter } from 'expo-router';
-import { useMemo } from 'react';
+import { Href, useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useMemo } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -10,6 +10,7 @@ import {
   ChecklistItem,
   GradeBadge,
   MetricTile,
+  NextActionCard,
   Pill,
   RouteBand,
   SetupChecklist,
@@ -17,20 +18,29 @@ import {
   WidgetCard,
 } from '@/components';
 import { isFeatureEnabled } from '@/config/flags';
+import { launchAction } from '@/data/launchAction';
+import { useActionItems } from '@/data/useActionItems';
 import {
   ACCOUNTING_LABELS,
   activeSegment,
   effectiveMiles,
   last7dRange,
+  loadStatusLabel,
+  loadStatusTone,
   monthRange,
   summarizeRange,
   summarizeSegments,
   unclassifiedMiles,
 } from '@/domain';
+import { refreshRoadWalletReadinessForSession } from '@/data/roadWallet';
 import { useBoard } from '@/data/useBoard';
+import { useRoadWalletSummary } from '@/data/useRoadWalletSummary';
+import type { ActionItem, LoadStatus, RoadWalletSummary } from '@/domain';
 import type { BoardData } from '@/mock/board';
 import { useActivationStore } from '@/store/activation';
+import { useAuthStore } from '@/store/auth';
 import { useCapturesStore } from '@/store/captures';
+import { normalizeLoad, useLoadsStore } from '@/store/loads';
 import { useMileageStore } from '@/store/mileage';
 import { Role, useOnboardingStore } from '@/store/onboarding';
 import { colors, fonts, palette, radii, spacing, toneColors, Tone, type } from '@/theme';
@@ -70,6 +80,21 @@ export default function DashboardScreen() {
   const dismiss = useActivationStore((s) => s.dismiss);
   const { data, isPending, isError, refetch } = useBoard();
   const captures = useCapturesStore((s) => s.captures);
+  const userId = useAuthStore((s) => s.userId);
+  const roadWalletEnabled = isFeatureEnabled('road_wallet_enabled');
+  const actionItems = useActionItems();
+  const realLoads = useLoadsStore((s) => s.loads.map(normalizeLoad));
+
+  // Road Wallet "ready" counts are only truthful after a current-process
+  // physical check; kick it off (non-blocking, no polling) whenever the Board
+  // is focused. Until it completes the widget shows "Checking…".
+  useFocusEffect(
+    useCallback(() => {
+      if (roadWalletEnabled) {
+        void refreshRoadWalletReadinessForSession(userId).catch(() => {});
+      }
+    }, [roadWalletEnabled, userId]),
+  );
 
   // "Finish setting up" checklist (design handoff §Road Board). The first two
   // rows derive from onboarding and are never toggled by hand.
@@ -130,8 +155,31 @@ export default function DashboardScreen() {
 
         {!dismissed && <SetupChecklist items={checklist} onDismiss={dismiss} />}
 
+        <NeedsActionWidget items={actionItems} onOpen={(item) => launchAction(item, router)} />
+
+        {realLoads.length > 0 && (
+          <YourLoadsWidget
+            loads={realLoads}
+            onOpenLoad={(loadId) =>
+              router.push({ pathname: '/load-detail', params: { id: loadId } })
+            }
+            onOpenList={() => router.push('/loads')}
+          />
+        )}
+
         {isFeatureEnabled('live_mileage_core_enabled') && (
           <LiveMileageWidget onOpen={(p) => router.push(p)} />
+        )}
+
+        {roadWalletEnabled && (
+          <RoadWalletWidget
+            onOpen={() => router.push('/road-wallet')}
+            onQuickPresent={
+              isFeatureEnabled('quick_present_enabled')
+                ? () => router.push('/quick-present')
+                : undefined
+            }
+          />
         )}
 
         {isPending ? (
@@ -214,7 +262,12 @@ function ErrorState({ onRetry }: { onRetry: () => void }) {
 // Board
 // ---------------------------------------------------------------------------
 
-type TabPath = '/scan' | '/loads' | '/miles' | '/reports' | '/rate-board';
+/**
+ * Routes the Board may push. Derived from Expo Router's `Href` (the typed route
+ * union when typed routes are generated) so new destinations such as
+ * `/road-wallet` never need casts.
+ */
+type TabPath = Extract<Href, string>;
 
 function Board({
   data,
@@ -381,10 +434,10 @@ function PopulatedBoard({
         </WidgetCard>
       )}
 
-      {/* Loads in Motion */}
+      {/* Loads in Motion — mock board only; real loads render in Your Loads. */}
       <WidgetCard
         label="Loads in Motion"
-        headerRight={<Pill label={`${data.loads.activeCount} active`} tone="blue" />}
+        headerRight={<Pill label="Sample data" tone="neutral" />}
         onPress={() => onNavigate('/loads')}
       >
         {data.loads.items.map((load) => (
@@ -544,6 +597,166 @@ function LiveMileageWidget({ onOpen }: { onOpen: (path: string) => void }) {
           <MetricTile label="Empty" value={miText(today.businessEmpty)} />
         </View>
       )}
+    </WidgetCard>
+  );
+}
+
+/**
+ * Road Wallet widget (Pass 1B §20 / Pass 2) — REAL summary from the Road
+ * Wallet store, never from `@/mock/board`. "Ready" counts only versions
+ * verified READY in this process. Quick Present appears only when
+ * `quick_present_enabled` is on.
+ */
+function RoadWalletWidget({
+  onOpen,
+  onQuickPresent,
+}: {
+  onOpen: () => void;
+  onQuickPresent?: () => void;
+}) {
+  const summary: RoadWalletSummary = useRoadWalletSummary();
+  const attention = summary.expired + summary.expiringSoon;
+  const tone: Tone =
+    summary.expired > 0
+      ? 'rust'
+      : summary.expiringSoon > 0
+        ? 'amber'
+        : summary.totalActive > 0
+          ? 'green'
+          : 'neutral';
+  const label =
+    summary.totalActive === 0
+      ? 'Empty'
+      : summary.expired > 0
+        ? `${summary.expired} expired`
+        : summary.expiringSoon > 0
+          ? `${summary.expiringSoon} expiring`
+          : 'Up to date';
+
+  return (
+    <WidgetCard
+      label="Road Wallet"
+      headerRight={<Pill label={label} tone={tone} />}
+      onPress={onOpen}
+    >
+      <Text style={styles.bigNum}>
+        {summary.readyOffline}
+        <Text style={styles.widgetNote}> of {summary.totalActive} ready offline</Text>
+      </Text>
+      <Text style={styles.widgetNote}>
+        {summary.totalActive === 0
+          ? 'Add registrations, insurance, permits and credentials.'
+          : summary.needsFileCheck > 0
+            ? `Checking… ${summary.needsFileCheck} ${summary.needsFileCheck === 1 ? 'file' : 'files'} · ${summary.backedUp} backed up`
+            : attention > 0
+              ? `${attention} ${attention === 1 ? 'document needs' : 'documents need'} attention · ${summary.backedUp} backed up`
+              : `${summary.backedUp} backed up`}
+      </Text>
+      <View style={styles.fiRow}>
+        <View style={styles.fiChip}>
+          <Text style={styles.fiChipText}>Open Wallet</Text>
+        </View>
+        {onQuickPresent && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Quick Present"
+            onPress={(e) => {
+              e.stopPropagation?.();
+              onQuickPresent();
+            }}
+            style={styles.fiChip}
+          >
+            <Text style={styles.fiChipText}>Quick Present</Text>
+          </Pressable>
+        )}
+      </View>
+    </WidgetCard>
+  );
+}
+
+function NeedsActionWidget({
+  items,
+  onOpen,
+}: {
+  items: ActionItem[];
+  onOpen: (item: ActionItem) => void;
+}) {
+  const [first, ...rest] = items;
+  return (
+    <WidgetCard
+      label="Today / Needs Action"
+      headerRight={
+        <Pill
+          label={items.length === 0 ? 'Clear' : `${items.length} open`}
+          tone={items.length === 0 ? 'green' : 'amber'}
+        />
+      }
+    >
+      {items.length === 0 ? (
+        <Text style={styles.widgetNote}>
+          No derived actions from your loads, mileage, or receivables. This is product state — not a
+          second workflow queue.
+        </Text>
+      ) : (
+        <>
+          <NextActionCard item={first} onPress={() => onOpen(first)} />
+          {rest.slice(0, 4).map((item) => (
+            <RouteBand
+              key={item.id}
+              marker={item.urgency === 'now' ? '!' : '·'}
+              markerTone={item.urgency === 'now' ? 'rust' : 'amber'}
+              title={item.title}
+              subtitle={item.context}
+              value="Go"
+              onPress={() => onOpen(item)}
+            />
+          ))}
+        </>
+      )}
+    </WidgetCard>
+  );
+}
+
+function YourLoadsWidget({
+  loads,
+  onOpenLoad,
+  onOpenList,
+}: {
+  loads: {
+    id: string;
+    loadNumber: string;
+    origin: string | null;
+    destination: string | null;
+    status: LoadStatus;
+  }[];
+  onOpenLoad: (id: string) => void;
+  onOpenList: () => void;
+}) {
+  return (
+    <WidgetCard
+      label="Your Loads"
+      headerRight={<Pill label={`${loads.length} on device`} tone="blue" />}
+      onPress={onOpenList}
+    >
+      {loads.slice(0, 4).map((load) => (
+        <Pressable
+          key={load.id}
+          accessibilityRole="button"
+          accessibilityLabel={`Load ${load.loadNumber}`}
+          onPress={() => onOpenLoad(load.id)}
+          style={styles.loadRow}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={styles.loadNumber}>Load {load.loadNumber}</Text>
+            <Text style={styles.loadRoute}>
+              {load.origin || load.destination
+                ? `${load.origin ?? '—'} → ${load.destination ?? '—'}`
+                : 'Route not entered'}
+            </Text>
+          </View>
+          <Pill label={loadStatusLabel(load.status)} tone={loadStatusTone(load.status)} />
+        </Pressable>
+      ))}
     </WidgetCard>
   );
 }

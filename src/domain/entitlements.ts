@@ -50,6 +50,14 @@ export const FREE_LIMITS = {
  * Feature gates. Free-tier features (rate card creation, external sharing, board
  * viewing, eligible posting, reporting/blocking safety controls) are gated at
  * `free` so everyone has them — safety controls are never paid (Section 40).
+ *
+ * Road Wallet / Quick Present / Carrier Packet keys (Refinement Pass 0) follow
+ * the same ladder: the local, offline document wallet and Quick Present are free
+ * with no document-count gate; Driver Pro monetizes cloud document backup,
+ * expiry alerts, saved presentation sets, and share/export conveniences;
+ * Owner-Operator adds Carrier Profile + Carrier Packet Builder; Fleet Lite adds
+ * multi-truck document capabilities. Software capability gates are separate from
+ * data entitlements (`TIER_DATA_ENTITLEMENTS`).
  */
 export const FEATURE_MIN_TIER = {
   // existing
@@ -81,7 +89,30 @@ export const FEATURE_MIN_TIER = {
   laneHistory30Day: 'owner_operator',
   laneHistory90Day: 'owner_operator',
   communityRateVsCost: 'owner_operator',
+  // road wallet + quick present — free (local/offline, no document-count gate)
+  roadWalletBasic: 'free',
+  quickPresent: 'free',
+  // freight intelligence — free key defined for the frozen future contract only;
+  // no external-data feature is implemented in Passes 0–3.
+  basicDestinationOutlook: 'free',
+  // road wallet — Driver Pro
+  unlimitedRoadWallet: 'driver_pro',
+  cloudDocumentBackup: 'driver_pro',
+  documentExpiryAlerts: 'driver_pro',
+  savedPresentationSets: 'driver_pro',
+  documentShareExport: 'driver_pro',
+  // carrier packets — Owner-Operator (lifetime inherits via TIER_ORDER)
+  carrierProfile: 'owner_operator',
+  carrierPacketBuilder: 'owner_operator',
+  carrierPacketTemplates: 'owner_operator',
+  carrierPacketHistory: 'owner_operator',
+  // multi-unit documents — Fleet Lite only (lifetime does not inherit)
+  multiTruckDocumentWallet: 'fleet_lite',
+  fleetDocumentStatus: 'fleet_lite',
+  multiUnitPacketSupplements: 'fleet_lite',
 } as const satisfies Record<string, Tier>;
+
+export type Feature = keyof typeof FEATURE_MIN_TIER;
 
 /**
  * Linear order for feature gating. `lifetime` sits at the Owner-Operator level:
@@ -98,29 +129,40 @@ const TIER_ORDER: Record<Tier, number> = {
 
 export const tierAtLeast = (tier: Tier, min: Tier): boolean => TIER_ORDER[tier] >= TIER_ORDER[min];
 
-export const canUseFeature = (tier: Tier, feature: keyof typeof FEATURE_MIN_TIER): boolean =>
+export const canUseFeature = (tier: Tier, feature: Feature): boolean =>
   tierAtLeast(tier, FEATURE_MIN_TIER[feature]);
 
 /**
  * Provider-agnostic data-entitlement layer (Section 44). Prepared now so future
  * licensed commercial lane-rate data can be gated separately from the app
- * subscription — a lifetime purchase includes only `basic_community_intelligence`
- * and is never promised unlimited licensed third-party data.
+ * subscription — a lifetime purchase includes only the basic entitlements and is
+ * never promised unlimited licensed third-party data.
+ *
+ * `basic_external_intelligence` (Pass 0) names the baseline, non-licensed
+ * external signal layer (e.g. a future free destination outlook). It is a data
+ * entitlement, not a software feature, and is deliberately distinct from the
+ * licensed/high-volume market tiers.
  */
 export const DATA_ENTITLEMENTS = [
   'basic_community_intelligence',
+  'basic_external_intelligence',
   'licensed_market_intelligence',
   'high_volume_market_intelligence',
 ] as const;
 export type DataEntitlement = (typeof DATA_ENTITLEMENTS)[number];
 
+const BASIC_DATA_ENTITLEMENTS: readonly DataEntitlement[] = [
+  'basic_community_intelligence',
+  'basic_external_intelligence',
+];
+
 /** What each tier includes today. Licensed tiers are reserved for a future release. */
 export const TIER_DATA_ENTITLEMENTS: Record<Tier, readonly DataEntitlement[]> = {
-  free: ['basic_community_intelligence'],
-  driver_pro: ['basic_community_intelligence'],
-  owner_operator: ['basic_community_intelligence'],
-  fleet_lite: ['basic_community_intelligence'],
-  lifetime: ['basic_community_intelligence'],
+  free: BASIC_DATA_ENTITLEMENTS,
+  driver_pro: BASIC_DATA_ENTITLEMENTS,
+  owner_operator: BASIC_DATA_ENTITLEMENTS,
+  fleet_lite: BASIC_DATA_ENTITLEMENTS,
+  lifetime: BASIC_DATA_ENTITLEMENTS,
 };
 
 export const hasDataEntitlement = (tier: Tier, entitlement: DataEntitlement): boolean =>

@@ -10,7 +10,9 @@
  */
 
 import { ExpenseCategorySlug, expenseCategoryLabel } from './categories';
-import { ScanTypeSlug, scanTypeToExpenseCategory } from './scanTypes';
+import { DocumentType } from './documents';
+import { expenseCategoryForCapture } from './loadDocuments';
+import { ScanTypeSlug } from './scanTypes';
 
 /** Anything with an optional business date and a recorded-at fallback. */
 export interface Dated {
@@ -25,6 +27,7 @@ export interface ExpenseLike extends Dated {
   /** Parsed amount in USD, or null when OCR/entry left it blank. */
   totalUsd: number | null;
   gallons: number | null;
+  intendedDocType?: DocumentType | null;
 }
 
 export interface CategorySpend {
@@ -129,7 +132,7 @@ export function summarizeSpend(expenses: readonly ExpenseLike[]): SpendSummary {
   let fuelGallons = 0;
 
   for (const e of expenses) {
-    const category = scanTypeToExpenseCategory(e.scanType);
+    const category = expenseCategoryForCapture(e);
     if (category === null) {
       documentCount += 1;
       continue;
